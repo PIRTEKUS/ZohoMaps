@@ -23,6 +23,10 @@ fi
 echo "[3/4] Installing/updating requirements..."
 pip install -r requirements.txt
 
+# 3.5 Fix permissions
+echo "Fixing permissions for www-data..."
+sudo chown -R www-data:www-data /var/www/zohomap
+
 # 4. Restart the service
 echo "[4/4] Restarting ZohoMap service (may prompt for sudo password)..."
 sudo systemctl restart zohomap
