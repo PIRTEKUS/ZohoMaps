@@ -21,7 +21,14 @@
             <!-- Legend items will be injected here -->
         </div>
     </div>
-    <div id="map" class="map-container"></div>
+    <div style="position: relative; flex: 1; display: flex; flex-direction: column;">
+        <div id="search-area-container" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10;">
+            <button id="search-area-btn" class="btn-primary" style="box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 20px; padding: 0.5rem 1.5rem; display: none;">
+                Search in this area
+            </button>
+        </div>
+        <div id="map" class="map-container" style="height: 100%; width: 100%;"></div>
+    </div>
 </div>
 
 {% if show_console %}

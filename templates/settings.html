@@ -112,7 +112,11 @@
                                 <span class="mapping-type">Via {{ conf.location_type|title }}</span>
                             </div>
                         </div>
-                        <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')">
+                        <div style="display: flex; gap: 0.5rem;">
+                            <button class="btn-primary" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;" onclick="syncMapping('{{ conf.module_name }}')" id="sync-btn-{{ conf.module_name }}">
+                                Sync Data
+                            </button>
+                            <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')">
                             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
                                 <polyline points="3 6 5 6 21 6"></polyline>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -247,6 +251,29 @@ async function deleteMapping(moduleName) {
             console.error(e);
             alert('Error deleting mapping');
         }
+    }
+}
+
+async function syncMapping(moduleName) {
+    const btn = document.getElementById('sync-btn-' + moduleName);
+    const originalText = btn.textContent;
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+    
+    try {
+        const res = await fetch('/api/sync-module/' + moduleName, {method: 'POST'});
+        const data = await res.json();
+        if(res.ok) {
+            alert(`Successfully synced ${data.synced} records for ${moduleName}!`);
+        } else {
+            alert('Error syncing data: ' + (data.error || 'Unknown error'));
+        }
+    } catch(e) {
+        console.error(e);
+        alert('Error syncing data');
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }
 </script>

@@ -162,67 +162,98 @@ def geocode_address(address):
         log_debug(f"Error geocoding {address}: {e}")
     return None, None
 
+@app.route('/api/sync-module/<module_name>', methods=['POST'])
+def sync_module(module_name):
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    config = database.get_module_config(module_name)
+    if not config:
+        return jsonify({'error': 'Module not configured'}), 404
+        
+    log_debug(f"Starting sync for module: {module_name}...")
+    database.clear_module_records(module_name)
+    
+    fields = config['field_mappings']
+    fetch_fields = [f for f in fields.values() if f]
+    if 'Name' not in fetch_fields and 'Full_Name' not in fetch_fields:
+        fetch_fields.extend(['id'])
+        
+    # In a production app, we would paginate until no more data.
+    # For now, we fetch one large page (200 records).
+    data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields)
+    if 'data' not in data:
+        log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
+        return jsonify({'success': True, 'synced': 0})
+        
+    count = 0
+    for record in data['data']:
+        lat, lng = None, None
+        name = record.get('Name', record.get('Full_Name', f"{module_name} {record.get('id')}"))
+        
+        if config['location_type'] == 'coordinates':
+            lat_field = fields.get('latitude')
+            lng_field = fields.get('longitude')
+            if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+                try:
+                    lat = float(record[lat_field])
+                    lng = float(record[lng_field])
+                except ValueError:
+                    pass
+        else:
+            address_parts = []
+            for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+                val = record.get(fields.get(k))
+                if val:
+                    address_parts.append(str(val))
+            
+            full_address = ", ".join(address_parts)
+            if full_address:
+                lat, lng = geocode_address(full_address)
+        
+        if lat and lng:
+            database.save_module_record(
+                id=record.get('id'),
+                module_name=module_name,
+                name=name,
+                lat=lat,
+                lng=lng,
+                color=config['marker_color'],
+                record_data={k: record.get(k) for k in fetch_fields}
+            )
+            count += 1
+
+    log_debug(f"Sync complete! Saved {count} records for {module_name}.")
+    return jsonify({'success': True, 'synced': count})
+
 @app.route('/api/map-data')
 def get_map_data():
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    log_debug("Fetching map data from Zoho...")
-    configs = database.get_all_module_configs()
-    map_points = []
+    min_lat = float(request.args.get('min_lat', -90))
+    max_lat = float(request.args.get('max_lat', 90))
+    min_lng = float(request.args.get('min_lng', -180))
+    max_lng = float(request.args.get('max_lng', 180))
     
-    for config in configs:
-        module_name = config['module_name']
-        fields = config['field_mappings']
-        
-        # We need to fetch fields mapped for the address + a name field.
-        fetch_fields = [f for f in fields.values() if f]
-        if 'Name' not in fetch_fields and 'Full_Name' not in fetch_fields:
-            # Attempt to fetch basic identifiers
-            fetch_fields.extend(['id'])
-            
-        data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields)
-        if 'data' not in data:
-            log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
-            continue
-            
-        for record in data['data']:
-            lat, lng = None, None
-            name = record.get('Name', record.get('Full_Name', f"{module_name} {record.get('id')}"))
-            
-            if config['location_type'] == 'coordinates':
-                lat_field = fields.get('latitude')
-                lng_field = fields.get('longitude')
-                if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
-                    try:
-                        lat = float(record[lat_field])
-                        lng = float(record[lng_field])
-                    except ValueError:
-                        pass
-            else:
-                # Combine address fields
-                address_parts = []
-                for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
-                    val = record.get(fields.get(k))
-                    if val:
-                        address_parts.append(str(val))
-                
-                full_address = ", ".join(address_parts)
-                if full_address:
-                    lat, lng = geocode_address(full_address)
-            
-            if lat and lng:
-                map_points.append({
-                    'id': record.get('id'),
-                    'module': module_name,
-                    'name': name,
-                    'lat': lat,
-                    'lng': lng,
-                    'color': config['marker_color'],
-                    'record_data': {k: record.get(k) for k in fetch_fields}
-                })
+    log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng})")
+    
+    records = database.get_records_in_bounds(min_lat, max_lat, min_lng, max_lng)
+    
+    log_debug(f"Found {len(records)} records in bounds.")
+    
+    map_points = []
+    for r in records:
+        map_points.append({
+            'id': r['id'],
+            'module': r['module_name'],
+            'name': r['name'],
+            'lat': r['lat'],
+            'lng': r['lng'],
+            'color': r['color'],
+            'record_data': r['record_data']
+        })
 
-    log_debug(f"Finished loading {len(map_points)} records to map.")
     return jsonify(map_points)
 
 if __name__ == '__main__':

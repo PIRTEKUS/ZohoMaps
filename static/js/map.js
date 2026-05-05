@@ -2,28 +2,77 @@ let map;
 let markers = [];
 
 async function initMap() {
-    // Basic map centering on US. We can adjust bounds later
+    // Default fallback to US
+    let initialCenter = { lat: 39.8283, lng: -98.5795 };
+    let initialZoom = 4;
+
     map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 39.8283, lng: -98.5795 },
-        zoom: 4,
-        mapId: 'DEMO_MAP_ID', // Replace if you have a custom styling mapId
+        center: initialCenter,
+        zoom: initialZoom,
+        mapId: 'DEMO_MAP_ID',
         disableDefaultUI: true,
         zoomControl: true,
     });
 
-    await loadMapData();
+    // Setup Search Button
+    const searchBtn = document.getElementById('search-area-btn');
+    
+    // Show button when map is panned/zoomed
+    map.addListener('dragend', () => { searchBtn.style.display = 'block'; });
+    map.addListener('zoom_changed', () => { searchBtn.style.display = 'block'; });
+    
+    searchBtn.addEventListener('click', () => {
+        searchBtn.style.display = 'none';
+        loadMapData();
+    });
+
+    // Try HTML5 geolocation
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const pos = {
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                };
+                map.setCenter(pos);
+                map.setZoom(12);
+                // Load data for the device's local area once centered
+                google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+            },
+            () => {
+                // Geolocation failed or denied, load data for default view
+                google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+            }
+        );
+    } else {
+        // Browser doesn't support Geolocation
+        google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+    }
 }
 
 async function loadMapData() {
+    document.getElementById('legend-stats').innerHTML = `<span class="pulse-dot"></span> Loading area data...`;
+    
     try {
-        const res = await fetch('/api/map-data');
+        const bounds = map.getBounds();
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        
+        const params = new URLSearchParams({
+            min_lat: sw.lat(),
+            max_lat: ne.lat(),
+            min_lng: sw.lng(),
+            max_lng: ne.lng()
+        });
+
+        const res = await fetch('/api/map-data?' + params.toString());
         if (!res.ok) {
             if(res.status === 401) window.location.href = '/login';
             throw new Error('Failed to fetch data');
         }
         const data = await res.json();
         
-        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${data.length} records found</span>`;
+        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${data.length} records in area</span>`;
         
         plotData(data);
         updateLegend(data);
@@ -80,12 +129,8 @@ function plotData(data) {
     });
 
     if (data.length > 0) {
-        map.fitBounds(bounds);
-        // Don't zoom in too much if there's only 1 point
-        const listener = google.maps.event.addListener(map, "idle", function() { 
-            if (map.getZoom() > 16) map.setZoom(16); 
-            google.maps.event.removeListener(listener); 
-        });
+        // Do not auto-fit bounds because we want the user to maintain their viewport
+        // when searching an area.
     }
 }
 

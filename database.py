@@ -40,6 +40,20 @@ def init_db():
             value TEXT
         )
     ''')
+    
+    # Table for Cached Zoho Records
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS module_records (
+            id TEXT,
+            module_name TEXT,
+            name TEXT,
+            lat REAL,
+            lng REAL,
+            color TEXT,
+            record_data TEXT,
+            PRIMARY KEY (id, module_name)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -120,5 +134,51 @@ def set_cached_geocode(address, lat, lng):
         INSERT OR REPLACE INTO geocode_cache (address, lat, lng)
         VALUES (?, ?, ?)
     ''', (address, lat, lng))
+    conn.commit()
+    conn.close()
+
+def save_module_record(id, module_name, name, lat, lng, color, record_data):
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT INTO module_records (id, module_name, name, lat, lng, color, record_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id, module_name) DO UPDATE SET
+            name=excluded.name,
+            lat=excluded.lat,
+            lng=excluded.lng,
+            color=excluded.color,
+            record_data=excluded.record_data
+    ''', (str(id), module_name, name, lat, lng, color, json.dumps(record_data)))
+    conn.commit()
+    conn.close()
+
+def get_records_in_bounds(min_lat, max_lat, min_lng, max_lng):
+    conn = get_db_connection()
+    if min_lng > max_lng:
+        query = '''
+            SELECT * FROM module_records 
+            WHERE lat >= ? AND lat <= ? 
+            AND (lng >= ? OR lng <= ?)
+        '''
+        rows = conn.execute(query, (min_lat, max_lat, min_lng, max_lng)).fetchall()
+    else:
+        query = '''
+            SELECT * FROM module_records 
+            WHERE lat >= ? AND lat <= ? 
+            AND lng >= ? AND lng <= ?
+        '''
+        rows = conn.execute(query, (min_lat, max_lat, min_lng, max_lng)).fetchall()
+    conn.close()
+    
+    results = []
+    for row in rows:
+        r = dict(row)
+        r['record_data'] = json.loads(r['record_data'])
+        results.append(r)
+    return results
+
+def clear_module_records(module_name):
+    conn = get_db_connection()
+    conn.execute('DELETE FROM module_records WHERE module_name = ?', (module_name,))
     conn.commit()
     conn.close()
