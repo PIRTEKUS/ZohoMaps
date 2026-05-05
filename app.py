@@ -110,12 +110,18 @@ def geocode_address(address):
     if cached:
         return cached['lat'], cached['lng']
     
+    print(f"Geocoding new address (this may take a moment): {address}")
     url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address)}&key={GOOGLE_MAPS_API_KEY}"
-    resp = requests.get(url).json()
-    if resp['status'] == 'OK' and len(resp['results']) > 0:
-        loc = resp['results'][0]['geometry']['location']
-        database.set_cached_geocode(address, loc['lat'], loc['lng'])
-        return loc['lat'], loc['lng']
+    try:
+        resp = requests.get(url, timeout=5).json()
+        if resp.get('status') == 'OK' and len(resp.get('results', [])) > 0:
+            loc = resp['results'][0]['geometry']['location']
+            database.set_cached_geocode(address, loc['lat'], loc['lng'])
+            return loc['lat'], loc['lng']
+        else:
+            print(f"Geocode failed for {address}: {resp.get('status')}")
+    except Exception as e:
+        print(f"Error geocoding {address}: {e}")
     return None, None
 
 @app.route('/api/map-data')
@@ -131,13 +137,14 @@ def get_map_data():
         fields = config['field_mappings']
         
         # We need to fetch fields mapped for the address + a name field.
-        fetch_fields = list(fields.values())
+        fetch_fields = [f for f in fields.values() if f]
         if 'Name' not in fetch_fields and 'Full_Name' not in fetch_fields:
             # Attempt to fetch basic identifiers
             fetch_fields.extend(['id'])
             
         data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields)
         if 'data' not in data:
+            print(f"No data returned from Zoho API for module {module_name}. Response: {data}")
             continue
             
         for record in data['data']:
