@@ -8,6 +8,18 @@
     </div>
 
     <div class="settings-grid">
+        <!-- Global Settings -->
+        <div class="settings-card glass" style="grid-column: 1 / -1;">
+            <h2>Global Application Settings</h2>
+            <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
+                <label style="margin:0;">Show Debug Console on Map View</label>
+                <label class="switch">
+                    <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
+                    <span class="slider round"></span>
+                </label>
+            </div>
+        </div>
+
         <!-- Add New Config Form -->
         <div class="settings-card glass">
             <h2>Add New Mapping</h2>
@@ -122,6 +134,18 @@ let currentFields = [];
 document.addEventListener('DOMContentLoaded', () => {
     fetchModules();
     
+    document.getElementById('toggle-console').addEventListener('change', async (e) => {
+        try {
+            await fetch('/api/settings/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: 'show_console', value: e.target.checked ? 'true' : 'false'})
+            });
+        } catch (err) {
+            console.error('Failed to save setting', err);
+        }
+    });
+
     document.querySelectorAll('input[name="location_type"]').forEach(radio => {
         radio.addEventListener('change', (e) => {
             document.getElementById('address-fields').style.display = e.target.value === 'address' ? 'block' : 'none';

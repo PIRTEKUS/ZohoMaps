@@ -5,6 +5,7 @@ import zoho_api
 import requests
 import json
 import time
+import datetime
 
 config = ConfigParser()
 config.read('config.ini')
@@ -15,6 +16,27 @@ GOOGLE_MAPS_API_KEY = config['GOOGLE'].get('maps_api_key')
 
 # Initialize Database
 database.init_db()
+
+def log_debug(msg):
+    print(msg)
+    try:
+        with open('debug.log', 'a') as f:
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass
+
+@app.route('/api/logs')
+def get_logs():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        with open('debug.log', 'r') as f:
+            lines = f.readlines()
+            return jsonify({'logs': [line.strip() for line in lines[-50:]]})
+    except FileNotFoundError:
+        return jsonify({'logs': []})
+
 
 @app.before_request
 def check_token_refresh():
@@ -30,7 +52,8 @@ def check_token_refresh():
 def index():
     if 'access_token' not in session:
         return redirect(url_for('login'))
-    return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY)
+    show_console = database.get_global_setting('show_console', 'false') == 'true'
+    return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console)
 
 @app.route('/login')
 def login():
@@ -60,7 +83,8 @@ def settings():
     if 'access_token' not in session:
         return redirect(url_for('login'))
     configs = database.get_all_module_configs()
-    return render_template('settings.html', configs=configs)
+    show_console = database.get_global_setting('show_console', 'false') == 'true'
+    return render_template('settings.html', configs=configs, show_console=show_console)
 
 @app.route('/api/modules')
 def get_modules():
@@ -105,23 +129,32 @@ def delete_config(module_name):
     database.delete_module_config(module_name)
     return jsonify({'success': True})
 
+@app.route('/api/settings/global', methods=['POST'])
+def save_global_setting():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json
+    database.set_global_setting(data['key'], data['value'])
+    return jsonify({'success': True})
+
 def geocode_address(address):
     cached = database.get_cached_geocode(address)
     if cached:
         return cached['lat'], cached['lng']
     
-    print(f"Geocoding new address (this may take a moment): {address}")
+    log_debug(f"Geocoding new address (this may take a moment): {address}")
     url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address)}&key={GOOGLE_MAPS_API_KEY}"
     try:
         resp = requests.get(url, timeout=5).json()
         if resp.get('status') == 'OK' and len(resp.get('results', [])) > 0:
             loc = resp['results'][0]['geometry']['location']
             database.set_cached_geocode(address, loc['lat'], loc['lng'])
+            log_debug(f"Success! Cached coordinates for {address}.")
             return loc['lat'], loc['lng']
         else:
-            print(f"Geocode failed for {address}: {resp.get('status')}")
+            log_debug(f"Geocode failed for {address}: {resp.get('status')}")
     except Exception as e:
-        print(f"Error geocoding {address}: {e}")
+        log_debug(f"Error geocoding {address}: {e}")
     return None, None
 
 @app.route('/api/map-data')
@@ -144,7 +177,7 @@ def get_map_data():
             
         data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields)
         if 'data' not in data:
-            print(f"No data returned from Zoho API for module {module_name}. Response: {data}")
+            log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
             continue
             
         for record in data['data']:

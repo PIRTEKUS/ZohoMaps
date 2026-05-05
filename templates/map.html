@@ -24,6 +24,39 @@
     <div id="map" class="map-container"></div>
 </div>
 
+{% if show_console %}
+<div class="debug-console" id="debug-console">
+    <div class="console-header">
+        <span>Server Output</span>
+        <span class="pulse-dot" style="width:6px;height:6px;margin:0;"></span>
+    </div>
+    <div class="console-body" id="console-body">
+        <div>Connected to logs...</div>
+    </div>
+</div>
+<script>
+    function pollLogs() {
+        fetch('/api/logs')
+            .then(r => r.json())
+            .then(data => {
+                if(data.logs && data.logs.length > 0) {
+                    const cb = document.getElementById('console-body');
+                    cb.innerHTML = '';
+                    data.logs.forEach(line => {
+                        const d = document.createElement('div');
+                        d.textContent = line;
+                        cb.appendChild(d);
+                    });
+                    cb.scrollTop = cb.scrollHeight;
+                }
+            })
+            .catch(e => console.error(e));
+    }
+    setInterval(pollLogs, 1000);
+    pollLogs();
+</script>
+{% endif %}
+
 <script>
   (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
     key: "{{ google_maps_api_key }}",

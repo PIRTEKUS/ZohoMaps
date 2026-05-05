@@ -33,6 +33,31 @@ def init_db():
             lng REAL
         )
     ''')
+    # Table for Global Settings
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS global_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def get_global_setting(key, default=None):
+    conn = get_db_connection()
+    row = conn.execute('SELECT value FROM global_settings WHERE key = ?', (key,)).fetchone()
+    conn.close()
+    if row:
+        return row['value']
+    return default
+
+def set_global_setting(key, value):
+    conn = get_db_connection()
+    conn.execute('''
+        INSERT INTO global_settings (key, value)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    ''', (key, str(value)))
     conn.commit()
     conn.close()
 
