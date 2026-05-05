@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card glass">
+        <div class="login-header">
+            <h1>Welcome to ZohoMap</h1>
+            <p>Connect your Zoho CRM to visualize your data geographically.</p>
+        </div>
+        
+        <div class="login-action">
+            <a href="{{ auth_url }}" class="btn-primary btn-large">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path>
+                    <polyline points="10 17 15 12 10 7"></polyline>
+                    <line x1="15" y1="12" x2="3" y2="12"></line>
+                </svg>
+                Connect with Zoho
+            </a>
+            <p class="login-hint">You will be securely redirected to Zoho to authorize access.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

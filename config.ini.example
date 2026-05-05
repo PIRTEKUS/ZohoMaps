@@ -1,0 +1,15 @@
+[ZOHO]
+client_id = YOUR_ZOHO_CLIENT_ID
+client_secret = YOUR_ZOHO_CLIENT_SECRET
+redirect_uri = http://localhost:5000/callback
+# Example: https://accounts.zoho.com
+accounts_url = https://accounts.zoho.com
+# Example: https://www.zohoapis.com
+api_url = https://www.zohoapis.com
+
+[GOOGLE]
+maps_api_key = YOUR_GOOGLE_MAPS_API_KEY
+
+[APP]
+secret_key = super_secret_random_key_change_in_production
+database_uri = sqlite:///database.db

@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="settings-container">
+    <div class="settings-header">
+        <h1>Configuration Settings</h1>
+        <p>Map your Zoho CRM modules to geographic coordinates or addresses.</p>
+    </div>
+
+    <div class="settings-grid">
+        <!-- Add New Config Form -->
+        <div class="settings-card glass">
+            <h2>Add New Mapping</h2>
+            <form id="config-form" class="config-form">
+                <div class="form-group">
+                    <label>Zoho Module</label>
+                    <select id="module-select" required>
+                        <option value="">Loading modules...</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Marker Color</label>
+                    <input type="color" id="marker-color" value="#ff0000" class="color-picker">
+                </div>
+
+                <div class="form-group">
+                    <label>Location Type</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="location_type" value="address" checked> Address Fields
+                        </label>
+                        <label>
+                            <input type="radio" name="location_type" value="coordinates"> Latitude/Longitude
+                        </label>
+                    </div>
+                </div>
+
+                <div id="fields-container" class="fields-container" style="display:none;">
+                    <h3>Field Mapping</h3>
+                    
+                    <div id="address-fields" class="mapping-section">
+                        <div class="form-group">
+                            <label>Street Address 1</label>
+                            <select id="map-address1" class="field-select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Street Address 2</label>
+                            <select id="map-address2" class="field-select"></select>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>City</label>
+                                <select id="map-city" class="field-select"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>State/Province</label>
+                                <select id="map-state" class="field-select"></select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Zip/Postal Code</label>
+                                <select id="map-zip" class="field-select"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Country</label>
+                                <select id="map-country" class="field-select"></select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="coordinate-fields" class="mapping-section" style="display:none;">
+                        <div class="form-group">
+                            <label>Latitude Field</label>
+                            <select id="map-lat" class="field-select"></select>
+                        </div>
+                        <div class="form-group">
+                            <label>Longitude Field</label>
+                            <select id="map-lng" class="field-select"></select>
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Existing Mappings List -->
+        <div class="settings-card glass">
+            <h2>Active Mappings</h2>
+            <div class="mappings-list">
+                {% if configs %}
+                    {% for conf in configs %}
+                    <div class="mapping-item">
+                        <div class="mapping-info">
+                            <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
+                            <div class="mapping-details">
+                                <strong>{{ conf.module_name }}</strong>
+                                <span class="mapping-type">Via {{ conf.location_type|title }}</span>
+                            </div>
+                        </div>
+                        <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')">
+                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <p class="empty-state">No modules mapped yet. Add one to get started.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentFields = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+    fetchModules();
+    
+    document.querySelectorAll('input[name="location_type"]').forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            document.getElementById('address-fields').style.display = e.target.value === 'address' ? 'block' : 'none';
+            document.getElementById('coordinate-fields').style.display = e.target.value === 'coordinates' ? 'block' : 'none';
+        });
+    });
+
+    document.getElementById('module-select').addEventListener('change', (e) => {
+        if(e.target.value) {
+            fetchFields(e.target.value);
+        } else {
+            document.getElementById('fields-container').style.display = 'none';
+        }
+    });
+
+    document.getElementById('config-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const module_name = document.getElementById('module-select').value;
+        const location_type = document.querySelector('input[name="location_type"]:checked').value;
+        const marker_color = document.getElementById('marker-color').value;
+        
+        let field_mappings = {};
+        if (location_type === 'address') {
+            ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+                field_mappings[f] = document.getElementById('map-' + f).value;
+            });
+        } else {
+            field_mappings['latitude'] = document.getElementById('map-lat').value;
+            field_mappings['longitude'] = document.getElementById('map-lng').value;
+        }
+
+        try {
+            const resp = await fetch('/api/settings/config', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({module_name, location_type, marker_color, field_mappings})
+            });
+            if(resp.ok) {
+                window.location.reload();
+            } else {
+                alert('Failed to save mapping');
+            }
+        } catch(e) {
+            console.error(e);
+            alert('Error saving mapping');
+        }
+    });
+});
+
+async function fetchModules() {
+    try {
+        const res = await fetch('/api/modules');
+        const modules = await res.json();
+        const select = document.getElementById('module-select');
+        select.innerHTML = '<option value="">Select a Module...</option>';
+        modules.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.api_name;
+            opt.textContent = m.plural_label || m.api_name;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error(e);
+        document.getElementById('module-select').innerHTML = '<option value="">Error loading modules</option>';
+    }
+}
+
+async function fetchFields(moduleName) {
+    document.getElementById('fields-container').style.display = 'none';
+    try {
+        const res = await fetch('/api/fields/' + moduleName);
+        currentFields = await res.json();
+        
+        const populateSelect = (selectId) => {
+            const select = document.getElementById(selectId);
+            select.innerHTML = '<option value="">-- None --</option>';
+            currentFields.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.api_name;
+                opt.textContent = f.display_label || f.api_name;
+                select.appendChild(opt);
+            });
+        };
+
+        ['map-address1', 'map-address2', 'map-city', 'map-state', 'map-zip', 'map-country', 'map-lat', 'map-lng'].forEach(populateSelect);
+        document.getElementById('fields-container').style.display = 'block';
+    } catch (e) {
+        console.error(e);
+        alert('Error loading fields for module');
+    }
+}
+
+async function deleteMapping(moduleName) {
+    if(confirm(`Are you sure you want to remove the mapping for ${moduleName}?`)) {
+        try {
+            const res = await fetch('/api/settings/config/' + moduleName, {method: 'DELETE'});
+            if(res.ok) window.location.reload();
+        } catch(e) {
+            console.error(e);
+            alert('Error deleting mapping');
+        }
+    }
+}
+</script>
+{% endblock %}
