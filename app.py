@@ -23,8 +23,8 @@ def log_debug(msg):
         with open('debug.log', 'a') as f:
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{ts}] {msg}\n")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Error writing to debug.log: {e}")
 
 @app.route('/api/logs')
 def get_logs():
@@ -33,9 +33,11 @@ def get_logs():
     try:
         with open('debug.log', 'r') as f:
             lines = f.readlines()
+            if not lines:
+                return jsonify({'logs': ['Waiting for server activity...']})
             return jsonify({'logs': [line.strip() for line in lines[-50:]]})
     except FileNotFoundError:
-        return jsonify({'logs': []})
+        return jsonify({'logs': ['Waiting for server activity...']})
 
 
 @app.before_request
@@ -162,6 +164,7 @@ def get_map_data():
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     
+    log_debug("Fetching map data from Zoho...")
     configs = database.get_all_module_configs()
     map_points = []
     
@@ -216,6 +219,7 @@ def get_map_data():
                     'record_data': {k: record.get(k) for k in fetch_fields}
                 })
 
+    log_debug(f"Finished loading {len(map_points)} records to map.")
     return jsonify(map_points)
 
 if __name__ == '__main__':
