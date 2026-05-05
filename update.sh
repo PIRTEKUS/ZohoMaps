@@ -4,6 +4,9 @@ echo "=========================================="
 echo "    ZohoMap Server Update Script"
 echo "=========================================="
 
+# Navigate to the project directory first
+cd /var/www/zohomap || { echo "Error: /var/www/zohomap directory not found"; exit 1; }
+
 # 1. Pull latest code from GitHub
 echo "[1/4] Pulling latest changes from GitHub..."
 git pull origin main
