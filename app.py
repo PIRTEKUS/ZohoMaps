@@ -176,8 +176,18 @@ def sync_module(module_name):
     
     fields = config['field_mappings']
     fetch_fields = [f for f in fields.values() if f]
-    if 'Name' not in fetch_fields and 'Full_Name' not in fetch_fields:
-        fetch_fields.extend(['id'])
+    
+    # Dynamically determine the name field to fetch based on module
+    name_field = 'Name'
+    if module_name == 'Accounts':
+        name_field = 'Account_Name'
+    elif module_name == 'Leads' or module_name == 'Contacts':
+        name_field = 'Full_Name'
+        
+    if name_field not in fetch_fields:
+        fetch_fields.append(name_field)
+    if 'id' not in fetch_fields:
+        fetch_fields.append('id')
         
     # In a production app, we would paginate until no more data.
     # For now, we fetch one large page (200 records).
@@ -189,7 +199,7 @@ def sync_module(module_name):
     count = 0
     for record in data['data']:
         lat, lng = None, None
-        name = record.get('Name', record.get('Full_Name', f"{module_name} {record.get('id')}"))
+        name = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
         
         if config['location_type'] == 'coordinates':
             lat_field = fields.get('latitude')
