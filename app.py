@@ -6,6 +6,7 @@ import requests
 import json
 import time
 import datetime
+import os
 
 config = ConfigParser()
 config.read('config.ini')
@@ -17,21 +18,23 @@ GOOGLE_MAPS_API_KEY = config['GOOGLE'].get('maps_api_key')
 # Initialize Database
 database.init_db()
 
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
+
 def log_debug(msg):
     print(msg)
     try:
-        with open('debug.log', 'a') as f:
+        with open(LOG_FILE, 'a') as f:
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{ts}] {msg}\n")
     except Exception as e:
-        print(f"Error writing to debug.log: {e}")
+        print(f"Error writing to {LOG_FILE}: {e}")
 
 @app.route('/api/logs')
 def get_logs():
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        with open('debug.log', 'r') as f:
+        with open(LOG_FILE, 'r') as f:
             lines = f.readlines()
             if not lines:
                 return jsonify({'logs': ['Waiting for server activity...']})
