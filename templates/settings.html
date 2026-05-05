@@ -93,6 +93,20 @@
                         </div>
                     </div>
                     
+                    <div class="mapping-section" style="margin-top: 1rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+                        <h3>Display Settings</h3>
+                        <div class="form-group">
+                            <label>Title Field (Required)</label>
+                            <select id="map-title_field" class="field-select" required></select>
+                            <small style="color: #94a3b8; font-size: 0.75rem;">This will be the main name of the pin on the map.</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Additional Display Fields (Optional)</label>
+                            <select id="map-additional_fields" class="field-select" multiple size="4" style="height: auto;"></select>
+                            <small style="color: #94a3b8; font-size: 0.75rem;">Hold Ctrl/Cmd to select multiple. These will show up in the map popup.</small>
+                        </div>
+                    </div>
+                    
                     <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
                 </div>
             </form>
@@ -115,6 +129,9 @@
                         <div style="display: flex; gap: 0.5rem;">
                             <button class="btn-primary" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;" onclick="syncMapping('{{ conf.module_name }}')" id="sync-btn-{{ conf.module_name }}">
                                 Sync Data
+                            </button>
+                            <button class="btn-primary" style="padding: 0.2rem 0.5rem; font-size: 0.8rem; background: var(--secondary);" onclick='editMapping({{ conf|tojson|safe }})'>
+                                Edit
                             </button>
                             <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')">
                             <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
@@ -181,6 +198,11 @@ document.addEventListener('DOMContentLoaded', () => {
             field_mappings['longitude'] = document.getElementById('map-lng').value;
         }
 
+        // Add Title and Additional Fields
+        field_mappings['title_field'] = document.getElementById('map-title_field').value;
+        const addFieldsSelect = document.getElementById('map-additional_fields');
+        field_mappings['additional_fields'] = Array.from(addFieldsSelect.selectedOptions).map(opt => opt.value);
+
         try {
             const resp = await fetch('/api/settings/config', {
                 method: 'POST',
@@ -225,6 +247,7 @@ async function fetchFields(moduleName) {
         
         const populateSelect = (selectId) => {
             const select = document.getElementById(selectId);
+            if(!select) return;
             select.innerHTML = '<option value="">-- None --</option>';
             currentFields.forEach(f => {
                 const opt = document.createElement('option');
@@ -234,7 +257,7 @@ async function fetchFields(moduleName) {
             });
         };
 
-        ['map-address1', 'map-address2', 'map-city', 'map-state', 'map-zip', 'map-country', 'map-lat', 'map-lng'].forEach(populateSelect);
+        ['map-address1', 'map-address2', 'map-city', 'map-state', 'map-zip', 'map-country', 'map-lat', 'map-lng', 'map-title_field', 'map-additional_fields'].forEach(populateSelect);
         document.getElementById('fields-container').style.display = 'block';
     } catch (e) {
         console.error(e);
@@ -274,6 +297,44 @@ async function syncMapping(moduleName) {
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
+    }
+}
+}
+
+async function editMapping(conf) {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    document.getElementById('module-select').value = conf.module_name;
+    document.getElementById('marker-color').value = conf.marker_color;
+    
+    const radios = document.querySelectorAll('input[name="location_type"]');
+    radios.forEach(r => {
+        r.checked = (r.value === conf.location_type);
+        r.dispatchEvent(new Event('change'));
+    });
+
+    await fetchFields(conf.module_name);
+
+    if (conf.location_type === 'address') {
+        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+            const el = document.getElementById('map-' + f);
+            if(el) el.value = conf.field_mappings[f] || '';
+        });
+    } else {
+        const latEl = document.getElementById('map-lat');
+        const lngEl = document.getElementById('map-lng');
+        if(latEl) latEl.value = conf.field_mappings['latitude'] || '';
+        if(lngEl) lngEl.value = conf.field_mappings['longitude'] || '';
+    }
+
+    const titleEl = document.getElementById('map-title_field');
+    if(titleEl) titleEl.value = conf.field_mappings['title_field'] || '';
+    
+    const addSelect = document.getElementById('map-additional_fields');
+    if(addSelect) {
+        const additional = conf.field_mappings['additional_fields'] || [];
+        Array.from(addSelect.options).forEach(opt => {
+            opt.selected = additional.includes(opt.value);
+        });
     }
 }
 </script>

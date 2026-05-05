@@ -175,23 +175,33 @@ def sync_module(module_name):
     database.clear_module_records(module_name)
     
     fields = config['field_mappings']
-    fetch_fields = [f for f in fields.values() if f]
     
-    # Dynamically determine the name field to fetch based on module
-    name_field = 'Name'
-    if module_name == 'Accounts':
-        name_field = 'Account_Name'
-    elif module_name == 'Leads' or module_name == 'Contacts':
-        name_field = 'Full_Name'
-        
-    if name_field not in fetch_fields:
-        fetch_fields.append(name_field)
-    if 'id' not in fetch_fields:
-        fetch_fields.append('id')
+    fetch_fields = set()
+    for k, v in fields.items():
+        if k == 'additional_fields' and isinstance(v, list):
+            fetch_fields.update([f for f in v if f])
+        elif isinstance(v, str) and v:
+            fetch_fields.add(v)
+            
+    title_field = fields.get('title_field')
+    
+    if title_field:
+        name_field = title_field
+    else:
+        name_field = 'Name'
+        if module_name == 'Accounts':
+            name_field = 'Account_Name'
+        elif module_name == 'Leads' or module_name == 'Contacts':
+            name_field = 'Full_Name'
+            
+    fetch_fields.add(name_field)
+    fetch_fields.add('id')
+    
+    fetch_fields_list = list(fetch_fields)
         
     # In a production app, we would paginate until no more data.
     # For now, we fetch one large page (200 records).
-    data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields)
+    data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields_list)
     if 'data' not in data:
         log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
         return jsonify({'success': True, 'synced': 0})
@@ -222,6 +232,11 @@ def sync_module(module_name):
                 lat, lng = geocode_address(full_address)
         
         if lat and lng:
+            record_data = {}
+            for k in fetch_fields_list:
+                if k not in ['id', name_field, fields.get('latitude'), fields.get('longitude')] and record.get(k):
+                    record_data[k] = record.get(k)
+                    
             database.save_module_record(
                 id=record.get('id'),
                 module_name=module_name,
@@ -229,7 +244,7 @@ def sync_module(module_name):
                 lat=lat,
                 lng=lng,
                 color=config['marker_color'],
-                record_data={k: record.get(k) for k in fetch_fields}
+                record_data=record_data
             )
             count += 1
 
