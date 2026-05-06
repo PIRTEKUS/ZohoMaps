@@ -37,6 +37,31 @@ def log_debug(msg):
     except Exception as e:
         print(f"Error writing to {LOG_FILE}: {e}")
 
+def extract_val(val):
+    if isinstance(val, dict):
+        return val.get('name', val.get('display_value', str(val)))
+    return val
+
+def geocode_address(address):
+    cached = database.get_cached_geocode(address)
+    if cached:
+        return cached['lat'], cached['lng']
+    
+    log_debug(f"Geocoding new address (this may take a moment): {address}")
+    url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address)}&key={GOOGLE_MAPS_API_KEY}"
+    try:
+        resp = requests.get(url, timeout=5).json()
+        if resp.get('status') == 'OK' and len(resp.get('results', [])) > 0:
+            loc = resp['results'][0]['geometry']['location']
+            database.set_cached_geocode(address, loc['lat'], loc['lng'])
+            log_debug(f"Success! Cached coordinates for {address}.")
+            return loc['lat'], loc['lng']
+        else:
+            log_debug(f"Geocode failed for {address}: {resp.get('status')}")
+    except Exception as e:
+        log_debug(f"Error geocoding {address}: {e}")
+    return None, None
+
 @app.route('/api/logs')
 def get_logs():
     if 'access_token' not in session:
@@ -182,25 +207,7 @@ def save_global_setting():
     database.set_global_setting(data['key'], data['value'])
     return jsonify({'success': True})
 
-def geocode_address(address):
-    cached = database.get_cached_geocode(address)
-    if cached:
-        return cached['lat'], cached['lng']
-    
-    log_debug(f"Geocoding new address (this may take a moment): {address}")
-    url = f"https://maps.googleapis.com/maps/api/geocode/json?address={requests.utils.quote(address)}&key={GOOGLE_MAPS_API_KEY}"
-    try:
-        resp = requests.get(url, timeout=5).json()
-        if resp.get('status') == 'OK' and len(resp.get('results', [])) > 0:
-            loc = resp['results'][0]['geometry']['location']
-            database.set_cached_geocode(address, loc['lat'], loc['lng'])
-            log_debug(f"Success! Cached coordinates for {address}.")
-            return loc['lat'], loc['lng']
-        else:
-            log_debug(f"Geocode failed for {address}: {resp.get('status')}")
-    except Exception as e:
-        log_debug(f"Error geocoding {address}: {e}")
-    return None, None
+
 
 @app.route('/api/preview-record/<module_name>')
 def preview_record(module_name):
@@ -264,10 +271,8 @@ def sync_module(module_name):
     
     log_debug(f"Mapped {len(field_label_map)} labels for {module_name}. Samples: {list(field_label_map.keys())[:5]}")
 
-    def extract_val(val):
-        if isinstance(val, dict):
-            return val.get('name', val.get('display_value', str(val)))
-        return val
+    # Logic moved to module level extract_val function
+    pass
         
     count = 0
     page = 1
@@ -370,6 +375,79 @@ def sync_module(module_name):
     log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {session.get('user_id')}).")
     return jsonify({'success': True, 'synced': count})
 
+def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng):
+    """
+    Background sync for records specifically in the current map viewport.
+    Only works for modules with Latitude/Longitude fields mapped in Zoho.
+    """
+    configs = database.get_all_module_configs(user_id)
+    total_new = 0
+    
+    for config in configs:
+        module_name = config['module_name']
+        fields = config['field_mappings']
+        lat_field = fields.get('latitude')
+        lng_field = fields.get('longitude')
+        
+        # Only modules with mapped lat/lng in Zoho can be searched by area
+        if not lat_field or not lng_field:
+            continue
+            
+        try:
+            # Construct criteria: (Lat > min) AND (Lat < max) AND (Lng > min) AND (Lng < max)
+            # Note: Criteria syntax might vary, using standard Zoho V3 pattern
+            criteria = f"(({lat_field}:greater_than:{min_lat}) AND ({lat_field}:less_than:{max_lat}) AND ({lng_field}:greater_than:{min_lng}) AND ({lng_field}:less_than:{max_lng}))"
+            
+            # Fetch fields needed
+            fetch_fields = set(['id', fields.get('title_field', 'Name')])
+            for f in fields.values():
+                if f: fetch_fields.add(f)
+            for f in fields.get('additional_fields', []):
+                fetch_fields.add(f)
+            
+            data = zoho_api.search_records(module_name, criteria, access_token, fields=list(fetch_fields))
+            
+            if 'data' not in data or not data['data']:
+                continue
+                
+            new_records = []
+            for record in data['data']:
+                # Basic processing (similar to full sync but lighter)
+                name_field = fields.get('title_field', 'Name')
+                name = str(extract_val(record.get(name_field, '')))
+                
+                try:
+                    lat = float(record[lat_field])
+                    lng = float(record[lng_field])
+                except:
+                    continue # Skip if no valid coords returned
+                
+                # Build record_data for popup
+                record_data = {}
+                for k, v in record.items():
+                    if k not in ['id', '$', 'Entity_Id']:
+                        record_data[k] = str(extract_val(v))
+                
+                new_records.append((
+                    record['id'],
+                    module_name,
+                    name,
+                    lat,
+                    lng,
+                    config['marker_color'],
+                    record_data
+                ))
+            
+            if new_records:
+                database.save_module_records_batch(user_id, new_records)
+                total_new += len(new_records)
+                
+        except Exception as e:
+            log_debug(f"Error in area-sync for {module_name}: {str(e)}")
+            
+    log_debug(f"Area sync finished. Added/Updated {total_new} records from Zoho.")
+    return total_new
+
 @app.route('/api/map-data')
 def get_map_data():
     if 'access_token' not in session:
@@ -379,6 +457,11 @@ def get_map_data():
     max_lat = float(request.args.get('max_lat', 90))
     min_lng = float(request.args.get('min_lng', -180))
     max_lng = float(request.args.get('max_lng', 180))
+    do_sync = request.args.get('sync', 'false').lower() == 'true'
+    
+    if do_sync:
+        log_debug(f"Triggering background area-sync for user: {session.get('user_id')}")
+        sync_records_by_bounds(session.get('user_id'), session['access_token'], min_lat, max_lat, min_lng, max_lng)
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
     

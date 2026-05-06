@@ -62,7 +62,8 @@ async function loadMapData() {
             min_lat: sw.lat(),
             max_lat: ne.lat(),
             min_lng: sw.lng(),
-            max_lng: ne.lng()
+            max_lng: ne.lng(),
+            sync: 'true' // Trigger background sync for the area
         });
 
         const res = await fetch('/api/map-data?' + params.toString());

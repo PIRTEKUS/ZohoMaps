@@ -85,6 +85,19 @@ def fetch_org_metadata(access_token):
     response = requests.get(url, headers=headers)
     return response.json()
 
+def search_records(module_name, criteria, access_token, fields=None):
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    url = f"{ZOHO_API_URL}/crm/v3/{module_name}/search"
+    params = {'criteria': criteria}
+    if fields:
+        params['fields'] = ",".join(fields)
+    response = requests.get(url, headers=headers, params=params)
+    if response.status_code == 200:
+        return response.json()
+    return {'data': []}
+
 def fetch_user_info(access_token):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
