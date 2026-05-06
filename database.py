@@ -16,99 +16,54 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    # Table for Module Configuration (partitioned by user_id)
-    # We recreate it to ensure the UNIQUE constraint is correct (user_id, module_name)
-    # instead of just (module_name) which might exist from older versions
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='module_config'")
-    if c.fetchone():
-        # Check if we need to migrate (if the old unique constraint on module_name exists)
-        c.execute("PRAGMA index_list('module_config')")
-        indices = c.fetchall()
-        has_user_id_unique = any('idx_user_module' in idx['name'] for idx in indices)
+    
+    # Check current schema version
+    c.execute("CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT)")
+    row = c.execute("SELECT value FROM global_settings WHERE key = 'schema_version'").fetchone()
+    schema_version = int(row['value']) if row else 0
+    
+    # Version 2 is the multi-tenant version
+    if schema_version < 2:
+        print("Migrating to schema version 2 (Multi-tenancy reset)...")
+        # The user requested a clean start to fix constraint issues
+        c.execute("DROP TABLE IF EXISTS module_config")
+        c.execute("DROP TABLE IF EXISTS module_records")
+        c.execute("DROP TABLE IF EXISTS module_config_old")
+        c.execute("DROP TABLE IF EXISTS module_records_old")
         
-        if not has_user_id_unique:
-            # Recreate table strategy
-            c.execute("ALTER TABLE module_config RENAME TO module_config_old")
-            c.execute('''
-                CREATE TABLE module_config (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    module_name TEXT NOT NULL,
-                    location_type TEXT NOT NULL,
-                    field_mappings TEXT NOT NULL,
-                    marker_color TEXT NOT NULL,
-                    marker_icon TEXT NOT NULL DEFAULT 'pin',
-                    UNIQUE(user_id, module_name)
-                )
-            ''')
-            # Try to copy data back, setting user_id to 'legacy' for old records
-            try:
-                c.execute('''
-                    INSERT INTO module_config (user_id, module_name, location_type, field_mappings, marker_color, marker_icon)
-                    SELECT 'legacy', module_name, location_type, field_mappings, marker_color, marker_icon FROM module_config_old
-                ''')
-            except Exception:
-                pass
-            c.execute("DROP TABLE module_config_old")
-    else:
-        c.execute('''
-            CREATE TABLE module_config (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT NOT NULL,
-                module_name TEXT NOT NULL,
-                location_type TEXT NOT NULL,
-                field_mappings TEXT NOT NULL,
-                marker_color TEXT NOT NULL,
-                marker_icon TEXT NOT NULL DEFAULT 'pin',
-                UNIQUE(user_id, module_name)
-            )
-        ''')
+        # Update version
+        c.execute("INSERT OR REPLACE INTO global_settings (key, value) VALUES ('schema_version', '2')")
 
-    # Table for Cached Zoho Records
-    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='module_records'")
-    if c.fetchone():
-        # Check columns
-        c.execute("PRAGMA table_info('module_records')")
-        cols = [col['name'] for col in c.fetchall()]
-        if 'user_id' not in cols:
-            c.execute("ALTER TABLE module_records RENAME TO module_records_old")
-            c.execute('''
-                CREATE TABLE module_records (
-                    id TEXT,
-                    user_id TEXT NOT NULL,
-                    module_name TEXT,
-                    name TEXT,
-                    lat REAL,
-                    lng REAL,
-                    color TEXT,
-                    record_data TEXT,
-                    PRIMARY KEY (id, module_name, user_id)
-                )
-            ''')
-            try:
-                c.execute('''
-                    INSERT INTO module_records (id, user_id, module_name, name, lat, lng, color, record_data)
-                    SELECT id, 'legacy', module_name, name, lat, lng, color, record_data FROM module_records_old
-                ''')
-            except Exception:
-                pass
-            c.execute("DROP TABLE module_records_old")
-    else:
-        c.execute('''
-            CREATE TABLE module_records (
-                id TEXT,
-                user_id TEXT NOT NULL,
-                module_name TEXT,
-                name TEXT,
-                lat REAL,
-                lng REAL,
-                color TEXT,
-                record_data TEXT,
-                PRIMARY KEY (id, module_name, user_id)
-            )
-        ''')
+    # Table for Module Configuration (Clean Slate)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS module_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            module_name TEXT NOT NULL,
+            location_type TEXT NOT NULL,
+            field_mappings TEXT NOT NULL,
+            marker_color TEXT NOT NULL,
+            marker_icon TEXT NOT NULL DEFAULT 'pin',
+            UNIQUE(user_id, module_name)
+        )
+    ''')
 
-    # Table for Geocode Caching
+    # Table for Cached Zoho Records (Clean Slate)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS module_records (
+            id TEXT,
+            user_id TEXT NOT NULL,
+            module_name TEXT,
+            name TEXT,
+            lat REAL,
+            lng REAL,
+            color TEXT,
+            record_data TEXT,
+            PRIMARY KEY (id, module_name, user_id)
+        )
+    ''')
+
+    # Table for Geocode Caching (Keep this, it's expensive to refill)
     c.execute('''
         CREATE TABLE IF NOT EXISTS geocode_cache (
             address TEXT PRIMARY KEY,
@@ -116,19 +71,13 @@ def init_db():
             lng REAL
         )
     ''')
-    # Table for Global Settings
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS global_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    ''')
-    
+
     # Ensure unique index exists for safety
     try:
         c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
     except Exception:
         pass
+        
     conn.commit()
     conn.close()
 
