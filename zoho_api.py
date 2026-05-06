@@ -13,7 +13,7 @@ ZOHO_API_URL = config['ZOHO'].get('api_url', 'https://www.zohoapis.com')
 
 def get_authorization_url():
     params = {
-        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all',
+        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ',
         'client_id': ZOHO_CLIENT_ID,
         'response_type': 'code',
         'access_type': 'offline',
