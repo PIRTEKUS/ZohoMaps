@@ -104,13 +104,22 @@ const ICON_PATHS = {
     ]
 };
 
+let markerCluster;
+
 function plotData(data) {
     // Clear existing markers
     markers.forEach(m => m.setMap(null));
     markers = [];
+    if (markerCluster) {
+        markerCluster.clearMarkers();
+    }
 
     const bounds = new google.maps.LatLngBounds();
     const infoWindow = new google.maps.InfoWindow();
+    
+    if (data.length >= 1000) {
+        document.getElementById('legend-stats').innerHTML += ` <span style="color:var(--warning);font-size:0.75rem;">(Limit reached, zoom in for more)</span>`;
+    }
 
     data.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
@@ -178,9 +187,9 @@ function plotData(data) {
         markers.push(marker);
     });
 
-    if (data.length > 0) {
-        // Do not auto-fit bounds because we want the user to maintain their viewport
-        // when searching an area.
+    // Initialize or Update Clusterer
+    if (typeof markerClusterer !== 'undefined') {
+        markerCluster = new markerClusterer.MarkerClusterer({ markers, map });
     }
 }
 
