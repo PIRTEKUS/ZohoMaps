@@ -134,6 +134,28 @@
                                 <small id="preview-status" style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 0.5rem;">Waiting for module selection...</small>
                             </div>
                         </div>
+
+                        <!-- Marker Aesthetics -->
+                        <div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1);">
+                            <div style="flex: 1; min-width: 250px;">
+                                <div class="form-group">
+                                    <label>Marker Color</label>
+                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                        <div id="color-preview" style="width: 24px; height: 24px; border-radius: 50%; border: 2px solid white;"></div>
+                                        <span id="color-hex" style="font-family: monospace; font-size: 0.9rem;">#3b82f6</span>
+                                        <input type="hidden" id="marker-color" value="#3b82f6">
+                                    </div>
+                                    <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                                </div>
+                            </div>
+                            <div style="flex: 1; min-width: 250px;">
+                                <div class="form-group">
+                                    <label>Marker Icon</label>
+                                    <input type="hidden" id="marker-icon" value="pin">
+                                    <div id="icon-selector" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                     <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
