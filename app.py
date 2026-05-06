@@ -162,6 +162,18 @@ def geocode_address(address):
         log_debug(f"Error geocoding {address}: {e}")
     return None, None
 
+@app.route('/api/preview-record/<module_name>')
+def preview_record(module_name):
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Fetch 1 record to use for preview. We don't specify fields so we get all fields.
+    data = zoho_api.fetch_module_records(module_name, session['access_token'], page=1)
+    if 'data' not in data or len(data['data']) == 0:
+        return jsonify({'error': 'No records found'}), 404
+        
+    return jsonify(data['data'][0])
+
 @app.route('/api/sync-module/<module_name>', methods=['POST'])
 def sync_module(module_name):
     if 'access_token' not in session:
