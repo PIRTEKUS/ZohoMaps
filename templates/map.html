@@ -63,12 +63,34 @@
     function copyLogs() {
         const body = document.getElementById('console-body');
         const text = Array.from(body.querySelectorAll('div')).map(d => d.textContent).join('\n');
-        navigator.clipboard.writeText(text).then(() => {
-            const btn = document.querySelector('.console-copy-btn');
-            const original = btn.innerHTML;
-            btn.innerHTML = 'Copied!';
+        const btn = document.querySelector('.console-copy-btn');
+        const original = btn.innerHTML;
+        
+        const showFeedback = () => {
+            btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
             setTimeout(() => btn.innerHTML = original, 2000);
-        });
+        };
+
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(showFeedback);
+        } else {
+            // Fallback for non-HTTPS
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            textArea.style.top = "0";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) showFeedback();
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textArea);
+        }
     }
 
     function pollLogs() {
