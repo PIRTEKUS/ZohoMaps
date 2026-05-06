@@ -470,8 +470,14 @@ def get_map_data():
     do_sync = request.args.get('sync', 'false').lower() == 'true'
     
     if do_sync:
-        log_debug(f"Triggering background area-sync for user: {session.get('user_id')}")
-        sync_records_by_bounds(session.get('user_id'), session['access_token'], min_lat, max_lat, min_lng, max_lng)
+        # Use sync-specific bounds if provided (capped at 200 miles by frontend)
+        s_min_lat = float(request.args.get('sync_min_lat', min_lat))
+        s_max_lat = float(request.args.get('sync_max_lat', max_lat))
+        s_min_lng = float(request.args.get('sync_min_lng', min_lng))
+        s_max_lng = float(request.args.get('sync_max_lng', max_lng))
+        
+        log_debug(f"Triggering background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
+        sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng)
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
     

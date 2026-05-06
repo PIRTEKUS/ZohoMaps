@@ -35,7 +35,7 @@ async function initMap() {
                     lng: position.coords.longitude,
                 };
                 map.setCenter(pos);
-                map.setZoom(12);
+                map.setZoom(8); // Approx 200 miles across
                 // Load data for the device's local area once centered
                 google.maps.event.addListenerOnce(map, 'idle', loadMapData);
             },
@@ -54,16 +54,33 @@ async function loadMapData() {
     document.getElementById('legend-stats').innerHTML = `<span class="pulse-dot"></span> Loading area data...`;
 
     try {
-        const bounds = map.getBounds();
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
+        const center = map.getCenter();
+
+        // 200 miles is approx 3 degrees of latitude/longitude.
+        // If viewport is larger than ~200 miles, we cap the SYNC area to the central 200 miles
+        // to avoid hitting Zoho API limits or syncing too many records at once.
+        let sync_min_lat = sw.lat();
+        let sync_max_lat = ne.lat();
+        let sync_min_lng = sw.lng();
+        let sync_max_lng = ne.lng();
+
+        if (ne.lat() - sw.lat() > 3.0) {
+            sync_min_lat = center.lat() - 1.5;
+            sync_max_lat = center.lat() + 1.5;
+            sync_min_lng = center.lng() - 1.5;
+            sync_max_lng = center.lng() + 1.5;
+        }
 
         const params = new URLSearchParams({
             min_lat: sw.lat(),
             max_lat: ne.lat(),
             min_lng: sw.lng(),
             max_lng: ne.lng(),
-            sync: 'true' // Trigger background sync for the area
+            sync_min_lat: sync_min_lat,
+            sync_max_lat: sync_max_lat,
+            sync_min_lng: sync_min_lng,
+            sync_max_lng: sync_max_lng,
+            sync: 'true'
         });
 
         const res = await fetch('/api/map-data?' + params.toString());
