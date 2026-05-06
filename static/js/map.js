@@ -16,11 +16,11 @@ async function initMap() {
 
     // Setup Search Button
     const searchBtn = document.getElementById('search-area-btn');
-    
+
     // Show button when map is panned/zoomed
     map.addListener('dragend', () => { searchBtn.style.display = 'block'; });
     map.addListener('zoom_changed', () => { searchBtn.style.display = 'block'; });
-    
+
     searchBtn.addEventListener('click', () => {
         searchBtn.style.display = 'none';
         loadMapData();
@@ -52,12 +52,12 @@ async function initMap() {
 
 async function loadMapData() {
     document.getElementById('legend-stats').innerHTML = `<span class="pulse-dot"></span> Loading area data...`;
-    
+
     try {
         const bounds = map.getBounds();
         const ne = bounds.getNorthEast();
         const sw = bounds.getSouthWest();
-        
+
         const params = new URLSearchParams({
             min_lat: sw.lat(),
             max_lat: ne.lat(),
@@ -67,16 +67,16 @@ async function loadMapData() {
 
         const res = await fetch('/api/map-data?' + params.toString());
         if (!res.ok) {
-            if(res.status === 401) window.location.href = '/login';
+            if (res.status === 401) window.location.href = '/login';
             throw new Error('Failed to fetch data');
         }
         const data = await res.json();
-        
+
         document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${data.length} records in area</span>`;
-        
+
         plotData(data);
         updateLegend(data);
-    } catch(e) {
+    } catch (e) {
         console.error(e);
         document.getElementById('legend-stats').innerHTML = `<span style="color:var(--error)">Error loading data</span>`;
     }
@@ -87,7 +87,24 @@ const ICON_PATHS = {
     'building': "M4 2h16v20H4V2zm2 2v16h3v-3h6v3h3V4H6zm2 2h2v2H8V6zm4 0h2v2h-2V6zm4 0h2v2h-2V6zm-8 4h2v2H8v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H8v-2zm8 0h2v2h-2v-2z",
     'person': "M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z",
     'star': "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
-    'home': "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
+    'home': "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
+    'building-community': [
+        "M8 9l5 5v7h-5v-4m0 4h-5v-7l5 -5m1 1v-6a1 1 0 0 1 1 -1h10a1 1 0 0 1 1 1v17h-8",
+        "M13 7l0 .01",
+        "M17 7l0 .01",
+        "M17 11l0 .01",
+        "M17 15l0 .01"
+    ],
+    'building_standard': [
+        "M3 21l18 0",
+        "M9 8l1 0",
+        "M9 12l1 0",
+        "M9 16l1 0",
+        "M14 8l1 0",
+        "M14 12l1 0",
+        "M14 16l1 0",
+        "M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16"
+    ]
 };
 
 function plotData(data) {
@@ -102,7 +119,13 @@ function plotData(data) {
         const position = { lat: item.lat, lng: item.lng };
         
         // Custom SVG Marker to use the dynamically configured color and icon
-        const path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
+        let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
+        
+        // If path is an array, join it into a single string for Google Maps
+        if (Array.isArray(path)) {
+            path = path.join(' ');
+        }
+        
         const svgMarker = {
             path: path,
             fillColor: item.color || "#3b82f6",
@@ -131,19 +154,19 @@ function plotData(data) {
 
         marker.addListener('click', () => {
             let content = `<div class="info-window"><h3>${item.name}</h3><p><strong>Module:</strong> ${item.module}</p><div class="info-details">`;
-            for(let [k,v] of Object.entries(item.record_data)) {
-                if(v) content += `<div><strong>${k}:</strong> ${v}</div>`;
+            for (let [k, v] of Object.entries(item.record_data)) {
+                if (v) content += `<div><strong>${k}:</strong> ${v}</div>`;
             }
-            
+
             // Add route action buttons
             const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
             content += `<div class="info-actions">
                 <button class="btn-primary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" onclick="window.getDirections(${item.lat}, ${item.lng})">Directions</button>
                 <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #1e293b;" onclick="window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
             </div>`;
-            
+
             content += `</div></div>`;
-            
+
             infoWindow.setContent(content);
             infoWindow.open(map, marker);
         });
@@ -160,17 +183,17 @@ function plotData(data) {
 function updateLegend(data) {
     const legend = document.getElementById('legend-container');
     legend.innerHTML = '';
-    
+
     // Group by module
     const modules = {};
     data.forEach(item => {
-        if(!modules[item.module]) {
+        if (!modules[item.module]) {
             modules[item.module] = { count: 0, color: item.color };
         }
         modules[item.module].count++;
     });
 
-    for(let [mod, info] of Object.entries(modules)) {
+    for (let [mod, info] of Object.entries(modules)) {
         const item = document.createElement('div');
         item.className = 'legend-item';
         item.innerHTML = `
@@ -185,12 +208,12 @@ function updateLegend(data) {
 // ROUTING LOGIC
 window.routeStops = []; // { id, name, lat, lng, pinnedPos: null | number }
 
-window.getDirections = function(lat, lng) {
+window.getDirections = function (lat, lng) {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
     window.open(url, '_blank');
 };
 
-window.addToRoute = function(id, name, lat, lng) {
+window.addToRoute = function (id, name, lat, lng) {
     if (window.routeStops.length >= 10) {
         alert("Google Maps only supports a maximum of 10 stops per route.");
         return;
@@ -203,12 +226,12 @@ window.addToRoute = function(id, name, lat, lng) {
     window.renderRoutePlanner();
 };
 
-window.removeRouteStop = function(index) {
+window.removeRouteStop = function (index) {
     window.routeStops.splice(index, 1);
     window.renderRoutePlanner();
 };
 
-window.setPinnedPos = function(index, val) {
+window.setPinnedPos = function (index, val) {
     const num = val === '' ? null : parseInt(val, 10);
     if (num !== null && (num < 1 || num > window.routeStops.length)) {
         window.routeStops[index].pinnedPos = null;
@@ -221,10 +244,10 @@ function haversineKm(a, b) {
     const R = 6371;
     const dLat = (b.lat - a.lat) * Math.PI / 180;
     const dLng = (b.lng - a.lng) * Math.PI / 180;
-    const x = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(a.lat * Math.PI/180) * Math.cos(b.lat * Math.PI/180) *
-              Math.sin(dLng/2) * Math.sin(dLng/2);
-    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+    const x = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) *
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
 function optimizeRoute(stops, userLat, userLng) {
@@ -273,25 +296,25 @@ function optimizeRoute(stops, userLat, userLng) {
     return result;
 }
 
-window.renderRoutePlanner = function() {
+window.renderRoutePlanner = function () {
     const container = document.getElementById('route-planner-container');
     const list = document.getElementById('route-stops-list');
     const stats = document.getElementById('route-stats');
-    
+
     if (window.routeStops.length === 0) {
         container.style.display = 'none';
         return;
     }
-    
+
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
     stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10) — will auto-optimize`;
-    
+
     list.innerHTML = '';
     window.routeStops.forEach((stop, idx) => {
         const el = document.createElement('div');
         el.className = 'route-stop-item';
-        
+
         // Build pin options
         let pinOptions = `<option value="">Auto</option>`;
         for (let p = 1; p <= window.routeStops.length; p++) {
@@ -315,12 +338,12 @@ window.renderRoutePlanner = function() {
     });
 };
 
-window.generateRoute = function() {
+window.generateRoute = function () {
     if (window.routeStops.length === 0) return;
 
     const doGenerate = (userLat, userLng) => {
         const optimized = optimizeRoute(window.routeStops, userLat, userLng);
-        
+
         let url = `https://www.google.com/maps/dir/?api=1`;
         if (optimized.length === 1) {
             url += `&destination=${optimized[0].lat},${optimized[0].lng}`;
@@ -336,7 +359,7 @@ window.generateRoute = function() {
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
             pos => doGenerate(pos.coords.latitude, pos.coords.longitude),
-            ()  => doGenerate(window.routeStops[0].lat, window.routeStops[0].lng) // fallback: start from first stop
+            () => doGenerate(window.routeStops[0].lat, window.routeStops[0].lng) // fallback: start from first stop
         );
     } else {
         doGenerate(window.routeStops[0].lat, window.routeStops[0].lng);
@@ -350,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // The script is loaded by the map.html template automatically,
     // which then calls window.initMap.
     // If maps api is already loaded, initialize manually
-    if(window.google && window.google.maps) {
+    if (window.google && window.google.maps) {
         initMap();
     }
 });
