@@ -103,15 +103,15 @@ function plotData(data) {
 
     data.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
-        
+
         // Custom SVG Marker to use the dynamically configured color and icon
         let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
-        
+
         const svgMarker = {
             path: path,
             fillColor: item.color || "#3b82f6",
             fillOpacity: 0.85,
-            strokeWeight: 2,
+            strokeWeight: 1.4,
             strokeColor: "#FFFFFF",
             rotation: 0,
             scale: 1.4,
@@ -123,7 +123,7 @@ function plotData(data) {
             svgMarker.anchor = new google.maps.Point(12, 22);
             svgMarker.scale = 1.3;
         } else if (item.icon && item.icon.startsWith('building')) {
-            svgMarker.strokeWeight = 1.8;
+            svgMarker.strokeWeight = 1.4;
             svgMarker.fillOpacity = 0.9;
             svgMarker.scale = 1.5;
         }
