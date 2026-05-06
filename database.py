@@ -21,9 +21,15 @@ def init_db():
             module_name TEXT UNIQUE NOT NULL,
             location_type TEXT NOT NULL,  -- 'address' or 'coordinates'
             field_mappings TEXT NOT NULL, -- JSON string of mapped fields
-            marker_color TEXT NOT NULL
+            marker_color TEXT NOT NULL,
+            marker_icon TEXT NOT NULL DEFAULT 'pin'
         )
     ''')
+    # Migrate: add marker_icon if it doesn't exist yet
+    try:
+        c.execute("ALTER TABLE module_config ADD COLUMN marker_icon TEXT NOT NULL DEFAULT 'pin'")
+    except Exception:
+        pass
     
     # Table for Geocode Caching
     c.execute('''
@@ -97,19 +103,20 @@ def get_module_config(module_name):
         return r
     return None
 
-def save_module_config(module_name, location_type, field_mappings, marker_color):
+def save_module_config(module_name, location_type, field_mappings, marker_color, marker_icon='pin'):
     conn = get_db_connection()
     c = conn.cursor()
     field_mappings_str = json.dumps(field_mappings)
     
     c.execute('''
-        INSERT INTO module_config (module_name, location_type, field_mappings, marker_color)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO module_config (module_name, location_type, field_mappings, marker_color, marker_icon)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(module_name) DO UPDATE SET
             location_type=excluded.location_type,
             field_mappings=excluded.field_mappings,
-            marker_color=excluded.marker_color
-    ''', (module_name, location_type, field_mappings_str, marker_color))
+            marker_color=excluded.marker_color,
+            marker_icon=excluded.marker_icon
+    ''', (module_name, location_type, field_mappings_str, marker_color, marker_icon))
     
     conn.commit()
     conn.close()

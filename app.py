@@ -123,7 +123,8 @@ def save_config():
         data['module_name'],
         data['location_type'],
         data['field_mappings'],
-        data['marker_color']
+        data['marker_color'],
+        data.get('marker_icon', 'pin')
     )
     return jsonify({'success': True})
 
@@ -285,8 +286,12 @@ def get_map_data():
     
     log_debug(f"Found {len(records)} records in bounds.")
     
+    # Build a config lookup dict once to avoid per-record DB queries
+    configs = {c['module_name']: c for c in database.get_all_module_configs()}
+    
     map_points = []
     for r in records:
+        cfg = configs.get(r['module_name'], {})
         map_points.append({
             'id': r['id'],
             'module': r['module_name'],
@@ -294,6 +299,7 @@ def get_map_data():
             'lat': r['lat'],
             'lng': r['lng'],
             'color': r['color'],
+            'icon': cfg.get('marker_icon', 'pin'),
             'record_data': r['record_data']
         })
 

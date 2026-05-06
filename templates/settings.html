@@ -33,7 +33,19 @@
                 
                 <div class="form-group">
                     <label>Marker Color</label>
-                    <input type="color" id="marker-color" value="#ff0000" class="color-picker">
+                    <input type="hidden" id="marker-color" value="#3b82f6">
+                    <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;">
+                        <!-- Swatches injected by JS -->
+                    </div>
+                    <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 6px;">Selected: <span id="color-preview" style="display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;background:#3b82f6;"></span> <span id="color-hex">#3b82f6</span></small>
+                </div>
+
+                <div class="form-group">
+                    <label>Marker Icon</label>
+                    <div id="icon-selector" style="display:flex; gap:12px; flex-wrap: wrap; margin-top: 6px;">
+                        <!-- Icon options injected by JS -->
+                    </div>
+                    <input type="hidden" id="marker-icon" value="pin">
                 </div>
 
                 <div class="form-group">
@@ -176,6 +188,44 @@ let previewRecord = null;
 document.addEventListener('DOMContentLoaded', () => {
     fetchModules();
     
+    // Initialize color swatches
+    const SWATCHES = [
+        '#ef4444','#f97316','#eab308','#22c55e','#14b8a6',
+        '#3b82f6','#8b5cf6','#ec4899','#f43f5e','#64748b',
+        '#0ea5e9','#a3e635','#fb923c','#c084fc','#34d399','#ffffff'
+    ];
+    const swatchContainer = document.getElementById('color-swatches');
+    SWATCHES.forEach(c => {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.title = c;
+        swatch.style.cssText = `width:28px;height:28px;border-radius:50%;background:${c};border:3px solid transparent;cursor:pointer;transition:transform 0.15s,border-color 0.15s;`;
+        swatch.addEventListener('click', () => selectColor(c));
+        swatchContainer.appendChild(swatch);
+    });
+    selectColor('#3b82f6');
+
+    // Initialize icon selector
+    const ICONS = [
+        { id:'pin',      label:'Pin',      svg:'<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z"/></svg>' },
+        { id:'building', label:'Company',  svg:'<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M4 2h16v20H4V2zm2 2v16h3v-3h6v3h3V4H6zm2 2h2v2H8V6zm4 0h2v2h-2V6zm4 0h2v2h-2V6zm-8 4h2v2H8v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H8v-2zm8 0h2v2h-2v-2z"/></svg>' },
+        { id:'person',   label:'Contact',  svg:'<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>' },
+        { id:'star',     label:'Lead',     svg:'<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>' },
+        { id:'home',     label:'Address',  svg:'<svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>' },
+    ];
+    const iconContainer = document.getElementById('icon-selector');
+    ICONS.forEach(ic => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.title = ic.label;
+        btn.dataset.icon = ic.id;
+        btn.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(255,255,255,0.07);border:2px solid transparent;border-radius:8px;padding:8px 10px;cursor:pointer;color:white;font-size:0.7rem;transition:border-color 0.15s,background 0.15s;';
+        btn.innerHTML = ic.svg + `<span>${ic.label}</span>`;
+        btn.addEventListener('click', () => selectIcon(ic.id));
+        iconContainer.appendChild(btn);
+    });
+    selectIcon('pin');
+
     document.getElementById('toggle-console').addEventListener('change', async (e) => {
         try {
             await fetch('/api/settings/global', {
@@ -234,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch('/api/settings/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({module_name, location_type, marker_color, field_mappings})
+                body: JSON.stringify({module_name, location_type, marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings})
             });
             if(resp.ok) {
                 window.location.reload();
@@ -247,6 +297,34 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
+
+function selectColor(hex) {
+    document.getElementById('marker-color').value = hex;
+    document.getElementById('color-preview').style.background = hex;
+    document.getElementById('color-hex').textContent = hex;
+    
+    // Update swatch borders
+    document.querySelectorAll('#color-swatches button').forEach(btn => {
+        btn.style.borderColor = (btn.title.toLowerCase() === hex.toLowerCase()) ? 'white' : 'transparent';
+        btn.style.transform = (btn.title.toLowerCase() === hex.toLowerCase()) ? 'scale(1.15)' : 'scale(1)';
+    });
+}
+
+function selectIcon(iconId) {
+    document.getElementById('marker-icon').value = iconId;
+    
+    // Update icon button borders
+    document.querySelectorAll('#icon-selector button').forEach(btn => {
+        if (btn.dataset.icon === iconId) {
+            btn.style.borderColor = 'var(--primary)';
+            btn.style.background = 'rgba(59, 130, 246, 0.2)';
+        } else {
+            btn.style.borderColor = 'transparent';
+            btn.style.background = 'rgba(255,255,255,0.07)';
+        }
+    });
+}
+
 
 async function fetchModules() {
     try {
@@ -334,7 +412,8 @@ async function editMapping(moduleName) {
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
     document.getElementById('module-select').value = conf.module_name;
-    document.getElementById('marker-color').value = conf.marker_color;
+    selectColor(conf.marker_color || '#3b82f6');
+    selectIcon(conf.marker_icon || 'pin');
     
     const radios = document.querySelectorAll('input[name="location_type"]');
     radios.forEach(r => {

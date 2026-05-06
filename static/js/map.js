@@ -82,6 +82,14 @@ async function loadMapData() {
     }
 }
 
+const ICON_PATHS = {
+    'pin': "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
+    'building': "M4 2h16v20H4V2zm2 2v16h3v-3h6v3h3V4H6zm2 2h2v2H8V6zm4 0h2v2h-2V6zm4 0h2v2h-2V6zm-8 4h2v2H8v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H8v-2zm8 0h2v2h-2v-2z",
+    'person': "M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z",
+    'star': "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
+    'home': "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
+};
+
 function plotData(data) {
     // Clear existing markers
     markers.forEach(m => m.setMap(null));
@@ -93,17 +101,24 @@ function plotData(data) {
     data.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
         
-        // Custom SVG Marker to use the dynamically configured color
+        // Custom SVG Marker to use the dynamically configured color and icon
+        const path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
         const svgMarker = {
-            path: "M10.453 14.016l6.563-6.609-1.406-1.406-5.156 5.203-2.063-2.109-1.406 1.406zM12 2.016q2.906 0 4.945 2.039t2.039 4.945q0 1.453-0.727 3.328t-1.758 3.516-2.039 3.070-1.711 2.273l-0.75 0.797q-0.281-0.328-0.75-0.867t-1.688-2.156-2.133-3.141-1.664-3.445-0.75-3.375q0-2.906 2.039-4.945t4.945-2.039z",
-            fillColor: item.color || "#FF0000",
-            fillOpacity: 0.9,
-            strokeWeight: 1,
+            path: path,
+            fillColor: item.color || "#3b82f6",
+            fillOpacity: 1,
+            strokeWeight: 1.5,
             strokeColor: "#FFFFFF",
             rotation: 0,
-            scale: 2,
-            anchor: new google.maps.Point(12, 24),
+            scale: 1.5,
+            anchor: new google.maps.Point(12, 12),
         };
+
+        // Adjust anchor for the 'pin' which points at the bottom
+        if (item.icon === 'pin' || !item.icon) {
+            svgMarker.anchor = new google.maps.Point(12, 22);
+            svgMarker.scale = 1.3;
+        }
 
         const marker = new google.maps.Marker({
             position: position,
