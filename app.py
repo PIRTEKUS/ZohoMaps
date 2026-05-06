@@ -243,87 +243,101 @@ def sync_module(module_name):
     
     log_debug(f"Mapped {len(field_label_map)} labels for {module_name}. Samples: {list(field_label_map.keys())[:5]}")
 
-    # In a production app, we would paginate until no more data.
-    # For now, we fetch one large page (200 records).
-    data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields_list)
-    if 'data' not in data:
-        log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
-        return jsonify({'success': True, 'synced': 0})
-        
     def extract_val(val):
         if isinstance(val, dict):
             return val.get('name', val.get('display_value', str(val)))
         return val
         
     count = 0
-    for record in data['data']:
-        lat, lng = None, None
-        name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
-        name = str(extract_val(name_raw))
+    page = 1
+    more_records = True
+    
+    while more_records:
+        log_debug(f"Fetching page {page} for {module_name}...")
+        data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields_list, page=page)
         
-        if config['location_type'] == 'coordinates':
-            lat_field = fields.get('latitude')
-            lng_field = fields.get('longitude')
-            if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
-                try:
-                    lat = float(record[lat_field])
-                    lng = float(record[lng_field])
-                except ValueError:
-                    pass
-        else:
-            address_parts = []
-            for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
-                val = extract_val(record.get(fields.get(k)))
-                if val:
-                    address_parts.append(str(val))
+        if 'data' not in data or not data['data']:
+            break
             
-            full_address = ", ".join(address_parts)
-            if full_address:
-                lat, lng = geocode_address(full_address)
-        
-        if lat is not None and lng is not None:
-            record_data = {}
+        for record in data['data']:
+            lat, lng = None, None
+            name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
+            name = str(extract_val(name_raw))
             
-            # 1. Add location info in the requested order
-            if config['location_type'] == 'address':
-                addr1 = extract_val(record.get(fields.get('address1')))
-                addr2 = extract_val(record.get(fields.get('address2')))
-                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
-                if full_addr: record_data['Address'] = full_addr
-                
-                for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
-                    val = extract_val(record.get(fields.get(k)))
-                    if val: record_data[label] = str(val)
+            if config['location_type'] == 'coordinates':
+                lat_field = fields.get('latitude')
+                lng_field = fields.get('longitude')
+                if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+                    try:
+                        lat = float(record[lat_field])
+                        lng = float(record[lng_field])
+                    except ValueError:
+                        pass
             else:
-                lat_val = record.get(fields.get('latitude'))
-                lng_val = record.get(fields.get('longitude'))
-                if lat_val: record_data['Latitude'] = str(lat_val)
-                if lng_val: record_data['Longitude'] = str(lng_val)
-
-            # 2. Add additional fields
-            for k in fetch_fields_list:
-                # Skip fields we already handled or standard IDs
-                if k in ['id', name_field] or k in fields.values():
-                    continue
+                address_parts = []
+                for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+                    val = extract_val(record.get(fields.get(k)))
+                    if val:
+                        address_parts.append(str(val))
                 
-                val = record.get(k)
-                if val:
-                    label = field_label_map.get(k, k.replace('_', ' '))
-                    record_data[label] = str(extract_val(val))
+                full_address = ", ".join(address_parts)
+                if full_address:
+                    lat, lng = geocode_address(full_address)
+            
+            if lat is not None and lng is not None:
+                record_data = {}
+                
+                # 1. Add location info in the requested order
+                if config['location_type'] == 'address':
+                    addr1 = extract_val(record.get(fields.get('address1')))
+                    addr2 = extract_val(record.get(fields.get('address2')))
+                    full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+                    if full_addr: record_data['Address'] = full_addr
                     
-            database.save_module_record(
-                user_id=session.get('user_id'),
-                id=record.get('id'),
-                module_name=module_name,
-                name=name,
-                lat=lat,
-                lng=lng,
-                color=config['marker_color'],
-                record_data=record_data
-            )
-            count += 1
-        else:
-            log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
+                    for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
+                        val = extract_val(record.get(fields.get(k)))
+                        if val: record_data[label] = str(val)
+                else:
+                    lat_val = record.get(fields.get('latitude'))
+                    lng_val = record.get(fields.get('longitude'))
+                    if lat_val: record_data['Latitude'] = str(lat_val)
+                    if lng_val: record_data['Longitude'] = str(lng_val)
+
+                # 2. Add additional fields
+                for k in fetch_fields_list:
+                    # Skip fields we already handled or standard IDs
+                    if k in ['id', name_field] or k in fields.values():
+                        continue
+                    
+                    val = record.get(k)
+                    if val:
+                        label = field_label_map.get(k, k.replace('_', ' '))
+                        record_data[label] = str(extract_val(val))
+                        
+                database.save_module_record(
+                    user_id=session.get('user_id'),
+                    id=record.get('id'),
+                    module_name=module_name,
+                    name=name,
+                    lat=lat,
+                    lng=lng,
+                    color=config['marker_color'],
+                    record_data=record_data
+                )
+                count += 1
+            else:
+                log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
+
+        # Check for more records
+        info = data.get('info', {})
+        more_records = info.get('more_records', False)
+        if more_records:
+            page += 1
+        
+        # Safety break to avoid infinite loops in case of API issues
+        if page > 50: # Limit to 10,000 records per module sync
+            break
+
 
     log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {session.get('user_id')}).")
     return jsonify({'success': True, 'synced': count})
