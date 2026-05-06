@@ -339,7 +339,9 @@ async function editMapping(moduleName) {
     const radios = document.querySelectorAll('input[name="location_type"]');
     radios.forEach(r => {
         r.checked = (r.value === conf.location_type);
-        r.dispatchEvent(new Event('change'));
+        if (r.checked) {
+            r.dispatchEvent(new Event('change'));
+        }
     });
 
     await fetchFields(conf.module_name);
@@ -366,7 +368,11 @@ async function editMapping(moduleName) {
             opt.selected = additional.includes(opt.value);
         });
     }
+    
+    // Automatically fetch preview for the newly selected module
+    fetchPreviewRecord(conf.module_name);
 }
+
 async function fetchPreviewRecord(moduleName) {
     const statusEl = document.getElementById('preview-status');
     statusEl.textContent = 'Fetching sample record...';
@@ -387,6 +393,13 @@ async function fetchPreviewRecord(moduleName) {
     updatePreview();
 }
 
+function extractZohoVal(val) {
+    if (val && typeof val === 'object') {
+        return val.name || val.display_value || JSON.stringify(val);
+    }
+    return val;
+}
+
 function updatePreview() {
     const titleSelect = document.getElementById('map-title_field');
     const additionalSelect = document.getElementById('map-additional_fields');
@@ -399,8 +412,8 @@ function updatePreview() {
     
     const titleEl = document.getElementById('preview-title');
     if (titleField) {
-        if (previewRecord && previewRecord[titleField]) {
-            titleEl.textContent = previewRecord[titleField];
+        if (previewRecord && previewRecord[titleField] != null) {
+            titleEl.textContent = extractZohoVal(previewRecord[titleField]);
         } else {
             titleEl.textContent = '[' + (titleSelect.options[titleSelect.selectedIndex]?.text || titleField) + ']';
         }
@@ -417,8 +430,8 @@ function updatePreview() {
         additionalFields.forEach(field => {
             const label = Array.from(additionalSelect.options).find(o => o.value === field)?.text || field;
             let val = '[' + label + ']';
-            if (previewRecord && previewRecord[field]) {
-                val = previewRecord[field];
+            if (previewRecord && previewRecord[field] != null) {
+                val = extractZohoVal(previewRecord[field]);
             }
             const div = document.createElement('div');
             div.innerHTML = `<strong>${label}:</strong> ${val}`;

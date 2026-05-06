@@ -218,10 +218,16 @@ def sync_module(module_name):
         log_debug(f"No data returned from Zoho API for module {module_name}. Response: {data}")
         return jsonify({'success': True, 'synced': 0})
         
+    def extract_val(val):
+        if isinstance(val, dict):
+            return val.get('name', val.get('display_value', str(val)))
+        return val
+        
     count = 0
     for record in data['data']:
         lat, lng = None, None
-        name = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
+        name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
+        name = str(extract_val(name_raw))
         
         if config['location_type'] == 'coordinates':
             lat_field = fields.get('latitude')
@@ -235,7 +241,7 @@ def sync_module(module_name):
         else:
             address_parts = []
             for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
-                val = record.get(fields.get(k))
+                val = extract_val(record.get(fields.get(k)))
                 if val:
                     address_parts.append(str(val))
             
@@ -247,7 +253,7 @@ def sync_module(module_name):
             record_data = {}
             for k in fetch_fields_list:
                 if k not in ['id', name_field, fields.get('latitude'), fields.get('longitude')] and record.get(k):
-                    record_data[k] = record.get(k)
+                    record_data[k] = str(extract_val(record.get(k)))
                     
             database.save_module_record(
                 id=record.get('id'),
