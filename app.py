@@ -472,10 +472,15 @@ def get_map_data():
     # Get module labels and org info for display
     module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
     org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
+    log_debug(f"DEBUG: Org Metadata: {org_metadata}")
     
     org_id = ""
+    domain_name = ""
     if 'org' in org_metadata and len(org_metadata['org']) > 0:
-        org_id = org_metadata['org'][0]['zoid']
+        org = org_metadata['org'][0]
+        org_id = org['zoid']
+        domain_name = org.get('domain_name', '')
+        log_debug(f"DEBUG: Using OrgID={org_id}, Domain={domain_name}")
 
     module_label_map = {}
     module_url_map = {} # Map api_name to URL segment
@@ -499,10 +504,17 @@ def get_map_data():
     for r in records:
         cfg = configs.get(r['module_name'], {})
         
-        # Build robust link for CRM Plus
+        # Build robust link for CRM Plus / CX App
         link_module = module_url_map.get(r['module_name'], r['module_name'])
         if org_id:
-            zoho_link = f"{ZOHO_CRM_URL}/{org_id}/crm/tab/{link_module}/{r['id']}"
+            # Prefix org_id with 'org' if it's purely numeric
+            safe_org_id = f"org{org_id}" if str(org_id).isdigit() else org_id
+            
+            if domain_name:
+                # Modern CRM Plus / CX App format: /pirtekus/index.do/cxapp/crm/org897316137/tab/Leads/...
+                zoho_link = f"{ZOHO_CRM_URL}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
+            else:
+                zoho_link = f"{ZOHO_CRM_URL}/{safe_org_id}/crm/tab/{link_module}/{r['id']}"
         else:
             zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
 
