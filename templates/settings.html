@@ -151,6 +151,15 @@
                         </div>
                     </div>
                     
+                    {% if is_admin %}
+                    <div class="form-group" style="display:flex; align-items:center; gap: 0.75rem; margin-top: 1rem; background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
+                        <label style="margin:0; color: #fff; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 500;">
+                            <input type="checkbox" id="map-is_shared" style="width:auto;">
+                            Share this configuration with all users
+                        </label>
+                    </div>
+                    {% endif %}
+                    
                     <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
                 </div>
             </form>
@@ -192,6 +201,41 @@
                 {% endfor %}
             {% else %}
                 <p class="empty-state">No modules mapped yet. Add one to get started.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Shared Configurations from Admins -->
+    <div class="settings-card glass" style="margin-top: 2rem; border-color: rgba(59, 130, 246, 0.3);">
+        <h2 style="display: flex; align-items: center; gap: 0.75rem;">
+            <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            Shared Configurations (Admin)
+        </h2>
+        <div class="mappings-list">
+            {% if shared_configs %}
+                {% for conf in shared_configs %}
+                {% if conf.user_id != session.get('user_id') %}
+                <div class="mapping-item" style="border-left: 4px solid var(--primary);">
+                    <div class="mapping-info">
+                        <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
+                        <div class="mapping-details">
+                            <strong>{{ conf.module_name }}</strong>
+                            <span class="mapping-type">Shared by Administrator</span>
+                        </div>
+                    </div>
+                    <div>
+                        <script type="application/json" id="shared-conf-{{ loop.index }}">
+                            {{ conf|tojson|safe }}
+                        </script>
+                        <button class="btn-primary" style="padding: 0.4rem 1rem; font-size: 0.85rem;" onclick="copySharedConfig({{ loop.index }})">
+                            Copy to My Mapping
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+                {% endfor %}
+            {% else %}
+                <p class="empty-state">No shared configurations available yet.</p>
             {% endif %}
         </div>
     </div>
@@ -292,11 +336,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const addFieldsSelect = document.getElementById('map-additional_fields');
         field_mappings['additional_fields'] = Array.from(addFieldsSelect.selectedOptions).map(opt => opt.value);
 
+        const isSharedEl = document.getElementById('map-is_shared');
+        const is_shared = isSharedEl ? isSharedEl.checked : false;
+
         try {
             const resp = await fetch('/api/settings/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({module_name, location_type: 'both', marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings})
+                body: JSON.stringify({module_name, location_type: 'both', marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings, is_shared})
             });
             if(resp.ok) {
                 window.location.reload();
@@ -427,6 +474,9 @@ async function editMapping(moduleName) {
     selectColor(conf.marker_color || '#3b82f6');
     selectIcon(conf.marker_icon || 'pin');
     
+    const sharedEl = document.getElementById('map-is_shared');
+    if(sharedEl) sharedEl.checked = !!conf.is_shared;
+
     await fetchFields(conf.module_name);
 
     // Populating both sets of fields
@@ -520,6 +570,39 @@ function updatePreview() {
             detailsEl.appendChild(div);
         });
     }
+}
+function copySharedConfig(index) {
+    const confScript = document.getElementById('shared-conf-' + index);
+    if(!confScript) return;
+    const conf = JSON.parse(confScript.textContent);
+    
+    // Fill the form using the existing editMapping logic but don't set is_shared (user can't reshare unless admin)
+    editMapping(conf.module_name);
+    
+    // We need to wait for fields to load then set values again because editMapping is async
+    setTimeout(async () => {
+        // Double check field values after fetchFields finishes in editMapping
+        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+            const el = document.getElementById('map-' + f);
+            if(el) el.value = conf.field_mappings[f] || '';
+        });
+        const latEl = document.getElementById('map-lat');
+        const lngEl = document.getElementById('map-lng');
+        if(latEl) latEl.value = conf.field_mappings['latitude'] || '';
+        if(lngEl) lngEl.value = conf.field_mappings['longitude'] || '';
+        
+        const titleEl = document.getElementById('map-title_field');
+        if(titleEl) titleEl.value = conf.field_mappings['title_field'] || '';
+        
+        const addSelect = document.getElementById('map-additional_fields');
+        if(addSelect) {
+            const additional = conf.field_mappings['additional_fields'] || [];
+            Array.from(addSelect.options).forEach(opt => {
+                opt.selected = additional.includes(opt.value);
+            });
+        }
+        updatePreview();
+    }, 1000); // Small delay to ensure fetchFields completed
 }
 </script>
 {% endblock %}

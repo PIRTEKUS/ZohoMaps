@@ -44,9 +44,21 @@ def init_db():
             field_mappings TEXT NOT NULL,
             marker_color TEXT NOT NULL,
             marker_icon TEXT NOT NULL DEFAULT 'pin',
+            is_shared INTEGER NOT NULL DEFAULT 0,
             UNIQUE(user_id, module_name)
         )
     ''')
+
+    if schema_version < 3:
+        print("Migrating to schema version 3 (Shared Configs)...")
+        try:
+            # Check if column exists first to be safe
+            cols = [col[1] for col in c.execute("PRAGMA table_info(module_config)").fetchall()]
+            if 'is_shared' not in cols:
+                c.execute("ALTER TABLE module_config ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
+        except Exception as e:
+            print(f"Migration error: {e}")
+        c.execute("INSERT OR REPLACE INTO global_settings (key, value) VALUES ('schema_version', '3')")
 
     # Table for Cached Zoho Records (Clean Slate)
     c.execute('''
@@ -121,23 +133,36 @@ def get_module_config(user_id, module_name):
         return r
     return None
 
-def save_module_config(user_id, module_name, location_type, field_mappings, marker_color, marker_icon='pin'):
+def save_module_config(user_id, module_name, location_type, field_mappings, marker_color, marker_icon='pin', is_shared=False):
     conn = get_db_connection()
     c = conn.cursor()
     field_mappings_str = json.dumps(field_mappings)
     
     c.execute('''
-        INSERT INTO module_config (user_id, module_name, location_type, field_mappings, marker_color, marker_icon)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO module_config (user_id, module_name, location_type, field_mappings, marker_color, marker_icon, is_shared)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, module_name) DO UPDATE SET
             location_type=excluded.location_type,
             field_mappings=excluded.field_mappings,
             marker_color=excluded.marker_color,
-            marker_icon=excluded.marker_icon
-    ''', (str(user_id), module_name, location_type, field_mappings_str, marker_color, marker_icon))
+            marker_icon=excluded.marker_icon,
+            is_shared=excluded.is_shared
+    ''', (str(user_id), module_name, location_type, field_mappings_str, marker_color, marker_icon, 1 if is_shared else 0))
     
     conn.commit()
     conn.close()
+
+def get_shared_configs():
+    conn = get_db_connection()
+    configs = conn.execute('SELECT * FROM module_config WHERE is_shared = 1').fetchall()
+    conn.close()
+    
+    results = []
+    for row in configs:
+        r = dict(row)
+        r['field_mappings'] = json.loads(r['field_mappings'])
+        results.append(r)
+    return results
 
 def delete_module_config(user_id, module_name):
     conn = get_db_connection()

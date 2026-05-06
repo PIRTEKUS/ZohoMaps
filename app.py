@@ -95,7 +95,10 @@ def check_token_refresh():
                     user = user_info['users'][0]
                     session['user_id'] = user['id']
                     session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
-                    log_debug(f"DEBUG: Set session user_id={session['user_id']}, name={session['user_name']}")
+                    # Check if user is admin
+                    profile_name = user.get('profile', {}).get('name', '')
+                    session['is_admin'] = (profile_name == 'Administrator')
+                    log_debug(f"DEBUG: Set session user_id={session['user_id']}, name={session['user_name']}, is_admin={session['is_admin']}")
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
                 pass
@@ -146,8 +149,14 @@ def settings():
     if 'access_token' not in session:
         return redirect(url_for('login'))
     configs = database.get_all_module_configs(session.get('user_id'))
+    shared_configs = database.get_shared_configs()
     show_console = database.get_global_setting('show_console', 'false') == 'true'
-    return render_template('settings.html', configs=configs, show_console=show_console)
+    is_admin = session.get('is_admin', False)
+    return render_template('settings.html', 
+                           configs=configs, 
+                           shared_configs=shared_configs,
+                           show_console=show_console, 
+                           is_admin=is_admin)
 
 @app.route('/api/modules')
 def get_modules():
@@ -184,7 +193,8 @@ def save_config():
             location_type='both',
             field_mappings=data['field_mappings'],
             marker_color=data['marker_color'],
-            marker_icon=data.get('marker_icon', 'pin')
+            marker_icon=data.get('marker_icon', 'pin'),
+            is_shared=data.get('is_shared', False)
         )
         return jsonify({'success': True})
     except Exception as e:
