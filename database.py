@@ -7,8 +7,10 @@ config.read('config.ini')
 DB_URI = config['APP']['database_uri'].replace('sqlite:///', '')
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_URI)
+    conn = sqlite3.connect(DB_URI, timeout=30.0) # Increase timeout
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrency
+    conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
 def init_db():
@@ -212,19 +214,31 @@ def set_cached_geocode(address, lat, lng):
     conn.close()
 
 def save_module_record(user_id, id, module_name, name, lat, lng, color, record_data):
+    save_module_records_batch(user_id, [(id, module_name, name, lat, lng, color, record_data)])
+
+def save_module_records_batch(user_id, records):
+    """Save multiple records in a single transaction."""
     conn = get_db_connection()
-    conn.execute('''
-        INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id, module_name, user_id) DO UPDATE SET
-            name=excluded.name,
-            lat=excluded.lat,
-            lng=excluded.lng,
-            color=excluded.color,
-            record_data=excluded.record_data
-    ''', (str(user_id), str(id), module_name, name, lat, lng, color, json.dumps(record_data)))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('BEGIN TRANSACTION')
+        for rec in records:
+            id, module_name, name, lat, lng, color, record_data = rec
+            conn.execute('''
+                INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id, module_name, user_id) DO UPDATE SET
+                    name=excluded.name,
+                    lat=excluded.lat,
+                    lng=excluded.lng,
+                    color=excluded.color,
+                    record_data=excluded.record_data
+            ''', (str(user_id), str(id), module_name, name, lat, lng, color, json.dumps(record_data)))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
     conn = get_db_connection()

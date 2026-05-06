@@ -274,6 +274,7 @@ def sync_module(module_name):
         if 'data' not in data or not data['data']:
             break
             
+        page_records = []
         for record in data['data']:
             lat, lng = None, None
             name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
@@ -329,19 +330,23 @@ def sync_module(module_name):
                         label = field_label_map.get(k, k.replace('_', ' '))
                         record_data[label] = str(extract_val(val))
                         
-                database.save_module_record(
-                    user_id=session.get('user_id'),
-                    id=record.get('id'),
-                    module_name=module_name,
-                    name=name,
-                    lat=lat,
-                    lng=lng,
-                    color=config['marker_color'],
-                    record_data=record_data
-                )
+                page_records.append((
+                    record.get('id'),
+                    module_name,
+                    name,
+                    lat,
+                    lng,
+                    config['marker_color'],
+                    record_data
+                ))
                 count += 1
             else:
                 log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
+
+        # Batch save the current page
+        if page_records:
+            database.save_module_records_batch(session.get('user_id'), page_records)
+
 
         # Check for more records
         info = data.get('info', {})
