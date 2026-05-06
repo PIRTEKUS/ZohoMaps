@@ -72,6 +72,13 @@ async function loadMapData() {
     document.getElementById('legend-stats').innerHTML = `<span class="pulse-dot"></span> Loading area data...`;
 
     try {
+        const bounds = map.getBounds();
+        if (!bounds) {
+            console.log("Map bounds not yet available. Skipping load.");
+            return;
+        }
+        const sw = bounds.getSouthWest();
+        const ne = bounds.getNorthEast();
         const center = map.getCenter();
 
         // 200 miles is approx 3 degrees of latitude/longitude.

@@ -479,8 +479,11 @@ def get_map_data():
         s_min_lng = float(request.args.get('sync_min_lng', min_lng))
         s_max_lng = float(request.args.get('sync_max_lng', max_lng))
         
-        log_debug(f"Triggering background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
-        sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng)
+        try:
+            log_debug(f"Triggering background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
+            sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng)
+        except Exception as e:
+            log_debug(f"WARNING: Area sync failed but continuing with local data: {str(e)}")
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
     
