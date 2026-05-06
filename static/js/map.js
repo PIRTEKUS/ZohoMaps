@@ -119,6 +119,14 @@ function plotData(data) {
             for(let [k,v] of Object.entries(item.record_data)) {
                 if(v) content += `<div><strong>${k}:</strong> ${v}</div>`;
             }
+            
+            // Add route action buttons
+            const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+            content += `<div class="info-actions">
+                <button class="btn-primary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" onclick="window.getDirections(${item.lat}, ${item.lng})">Directions</button>
+                <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #1e293b;" onclick="window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
+            </div>`;
+            
             content += `</div></div>`;
             
             infoWindow.setContent(content);
@@ -158,6 +166,93 @@ function updateLegend(data) {
         legend.appendChild(item);
     }
 }
+
+// ROUTING LOGIC
+window.routeStops = [];
+
+window.getDirections = function(lat, lng) {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    window.open(url, '_blank');
+};
+
+window.addToRoute = function(id, name, lat, lng) {
+    if (window.routeStops.length >= 10) {
+        alert("Google Maps only supports a maximum of 10 stops per route.");
+        return;
+    }
+    window.routeStops.push({ id, name, lat, lng });
+    window.renderRoutePlanner();
+};
+
+window.removeRouteStop = function(index) {
+    window.routeStops.splice(index, 1);
+    window.renderRoutePlanner();
+};
+
+window.moveRouteStop = function(index, direction) {
+    if (direction === -1 && index > 0) {
+        const temp = window.routeStops[index];
+        window.routeStops[index] = window.routeStops[index - 1];
+        window.routeStops[index - 1] = temp;
+    } else if (direction === 1 && index < window.routeStops.length - 1) {
+        const temp = window.routeStops[index];
+        window.routeStops[index] = window.routeStops[index + 1];
+        window.routeStops[index + 1] = temp;
+    }
+    window.renderRoutePlanner();
+};
+
+window.renderRoutePlanner = function() {
+    const container = document.getElementById('route-planner-container');
+    const list = document.getElementById('route-stops-list');
+    const stats = document.getElementById('route-stats');
+    
+    if (window.routeStops.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'flex';
+    container.style.flexDirection = 'column';
+    stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10)`;
+    
+    list.innerHTML = '';
+    window.routeStops.forEach((stop, idx) => {
+        const el = document.createElement('div');
+        el.className = 'route-stop-item';
+        el.innerHTML = `
+            <div class="route-stop-controls">
+                <button class="route-btn-small" onclick="window.moveRouteStop(${idx}, -1)" ${idx === 0 ? 'style="visibility:hidden"' : ''}>▲</button>
+                <button class="route-btn-small" onclick="window.moveRouteStop(${idx}, 1)" ${idx === window.routeStops.length - 1 ? 'style="visibility:hidden"' : ''}>▼</button>
+            </div>
+            <div class="route-stop-name" title="${stop.name}">
+                <strong style="color:var(--primary)">${idx + 1}.</strong> ${stop.name}
+            </div>
+            <button class="route-stop-remove" onclick="window.removeRouteStop(${idx})" title="Remove">✕</button>
+        `;
+        list.appendChild(el);
+    });
+};
+
+window.generateRoute = function() {
+    if (window.routeStops.length === 0) return;
+    
+    let url = `https://www.google.com/maps/dir/?api=1`;
+    
+    if (window.routeStops.length === 1) {
+        url += `&destination=${window.routeStops[0].lat},${window.routeStops[0].lng}`;
+    } else {
+        const dest = window.routeStops[window.routeStops.length - 1];
+        url += `&destination=${dest.lat},${dest.lng}`;
+        
+        if (window.routeStops.length > 1) {
+            const waypoints = window.routeStops.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
+            url += `&waypoints=${waypoints}`;
+        }
+    }
+    
+    window.open(url, '_blank');
+};
 
 // Make initMap globally available for the Google Maps callback
 window.initMap = initMap;

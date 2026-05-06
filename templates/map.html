@@ -20,6 +20,17 @@
         <div class="legend-container" id="legend-container">
             <!-- Legend items will be injected here -->
         </div>
+        
+        <div class="route-planner" id="route-planner-container" style="display: none; border-top: 1px solid var(--glass-border); padding-top: 1rem; margin-top: 1rem; flex: 1; overflow-y: auto;">
+            <div class="sidebar-header" style="margin-bottom: 0.5rem; padding-bottom: 0;">
+                <h2>Route Planner</h2>
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.2rem;" id="route-stats">0 stops</div>
+            </div>
+            <div id="route-stops-list" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; overflow-y: auto;">
+                <!-- Route stops injected here -->
+            </div>
+            <button class="btn-primary" style="width: 100%;" onclick="window.generateRoute()">Generate Route</button>
+        </div>
     </div>
     <div style="position: relative; flex: 1; display: flex; flex-direction: column;">
         <div id="search-area-container" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10;">

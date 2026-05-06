@@ -521,6 +521,71 @@ input:checked + .slider:before {
     word-break: break-all;
 }
 
+/* Route Planner Styles */
+.route-stop-item {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 0.5rem;
+}
+
+.route-stop-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.route-btn-small {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+}
+
+.route-btn-small:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.route-stop-name {
+    flex: 1;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.route-stop-remove {
+    color: #ef4444;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.route-stop-remove:hover {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.info-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e2e8f0;
+}
+
 @media (max-width: 768px) {
     .settings-grid {
         grid-template-columns: 1fr;
