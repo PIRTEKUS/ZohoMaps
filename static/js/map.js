@@ -36,16 +36,34 @@ async function initMap() {
                 };
                 map.setCenter(pos);
                 map.setZoom(8); // Approx 200 miles across
-                // Load data for the device's local area once centered
                 google.maps.event.addListenerOnce(map, 'idle', loadMapData);
             },
             () => {
-                // Geolocation failed or denied, load data for default view
-                google.maps.event.addListenerOnce(map, 'idle', loadMapData);
-            }
+                // Browser geolocation failed or denied, try IP-based fallback
+                tryIPFallback();
+            },
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
         );
     } else {
-        // Browser doesn't support Geolocation
+        tryIPFallback();
+    }
+}
+
+async function tryIPFallback() {
+    try {
+        console.log("Browser geolocation failed. Attempting IP-based location fallback...");
+        const res = await fetch('https://ipapi.co/json/');
+        const data = await res.json();
+        if (data.latitude && data.longitude) {
+            const pos = { lat: data.latitude, lng: data.longitude };
+            map.setCenter(pos);
+            map.setZoom(8);
+            console.log("IP-based location success:", pos);
+        }
+    } catch (e) {
+        console.error("IP-based fallback failed:", e);
+    } finally {
+        // Load data regardless of success
         google.maps.event.addListenerOnce(map, 'idle', loadMapData);
     }
 }

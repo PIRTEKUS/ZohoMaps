@@ -86,19 +86,22 @@ def check_token_refresh():
                     session['access_token'] = token_data['access_token']
                     session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
         
-        # Ensure user_id is in session if token exists
-        if 'user_id' not in session:
+        # Fetch user info if missing OR to refresh permissions
+        if 'user_id' not in session or 'is_admin' not in session:
             try:
                 user_info = zoho_api.fetch_user_info(session['access_token'])
-                log_debug(f"DEBUG: Raw user_info: {user_info}")
                 if 'users' in user_info and len(user_info['users']) > 0:
                     user = user_info['users'][0]
                     session['user_id'] = user['id']
                     session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
-                    # Check if user is admin
-                    profile_name = user.get('profile', {}).get('name', '')
-                    session['is_admin'] = (profile_name == 'Administrator')
-                    log_debug(f"DEBUG: Set session user_id={session['user_id']}, name={session['user_name']}, is_admin={session['is_admin']}")
+                    
+                    # Robust Admin Check
+                    profile = user.get('profile', {})
+                    profile_name = profile.get('name', '')
+                    profile_id = profile.get('id', '')
+                    session['is_admin'] = (profile_name.lower() in ['administrator', 'admin'])
+                    
+                    log_debug(f"LOGIN INFO: Name={session['user_name']}, Profile={profile_name}, IsAdmin={session['is_admin']}, ID={session['user_id']}")
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
                 pass
