@@ -84,3 +84,12 @@ def fetch_org_metadata(access_token):
     url = f"{ZOHO_API_URL}/crm/v3/settings/org"
     response = requests.get(url, headers=headers)
     return response.json()
+
+def fetch_user_info(access_token):
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    # Fetch current user
+    url = f"{ZOHO_API_URL}/crm/v3/users?type=CurrentUser"
+    response = requests.get(url, headers=headers)
+    return response.json()

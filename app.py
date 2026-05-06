@@ -82,6 +82,15 @@ def callback():
             session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
             if 'refresh_token' in token_data:
                 session['refresh_token'] = token_data['refresh_token']
+            
+            # Fetch User Info to identify them uniquely
+            user_info = zoho_api.fetch_user_info(session['access_token'])
+            if 'users' in user_info and len(user_info['users']) > 0:
+                user = user_info['users'][0]
+                session['user_id'] = user['id']
+                session['user_name'] = user['full_name']
+                log_debug(f"User logged in: {session['user_name']} ({session['user_id']})")
+                
             return redirect(url_for('index'))
     return "Error in Zoho Authentication", 400
 
@@ -94,7 +103,7 @@ def logout():
 def settings():
     if 'access_token' not in session:
         return redirect(url_for('login'))
-    configs = database.get_all_module_configs()
+    configs = database.get_all_module_configs(session.get('user_id'))
     show_console = database.get_global_setting('show_console', 'false') == 'true'
     return render_template('settings.html', configs=configs, show_console=show_console)
 
@@ -127,11 +136,12 @@ def save_config():
     
     data = request.json
     database.save_module_config(
-        data['module_name'],
-        data['location_type'],
-        data['field_mappings'],
-        data['marker_color'],
-        data.get('marker_icon', 'pin')
+        user_id=session.get('user_id'),
+        module_name=data['module_name'],
+        location_type=data['location_type'],
+        field_mappings=data['field_mappings'],
+        marker_color=data['marker_color'],
+        marker_icon=data.get('marker_icon', 'pin')
     )
     return jsonify({'success': True})
 
@@ -139,7 +149,8 @@ def save_config():
 def delete_config(module_name):
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
-    database.delete_module_config(module_name)
+    database.delete_module_config(session.get('user_id'), module_name)
+    database.clear_module_records(session.get('user_id'), module_name)
     return jsonify({'success': True})
 
 @app.route('/api/settings/global', methods=['POST'])
@@ -187,12 +198,12 @@ def sync_module(module_name):
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    config = database.get_module_config(module_name)
+    config = database.get_module_config(session.get('user_id'), module_name)
     if not config:
         return jsonify({'error': 'Module not configured'}), 404
         
-    log_debug(f"Starting sync for module: {module_name}...")
-    database.clear_module_records(module_name)
+    log_debug(f"Starting sync for module: {module_name} for user {session.get('user_name')}...")
+    database.clear_module_records(session.get('user_id'), module_name)
     
     fields = config['field_mappings']
     
@@ -301,6 +312,7 @@ def sync_module(module_name):
                     record_data[label] = str(extract_val(val))
                     
             database.save_module_record(
+                user_id=session.get('user_id'),
                 id=record.get('id'),
                 module_name=module_name,
                 name=name,
@@ -313,7 +325,7 @@ def sync_module(module_name):
         else:
             log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
 
-    log_debug(f"Sync complete! Saved {count} records for {module_name}.")
+    log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {session.get('user_id')}).")
     return jsonify({'success': True, 'synced': count})
 
 @app.route('/api/map-data')
@@ -326,9 +338,9 @@ def get_map_data():
     min_lng = float(request.args.get('min_lng', -180))
     max_lng = float(request.args.get('max_lng', 180))
     
-    log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng})")
+    log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
     
-    records = database.get_records_in_bounds(min_lat, max_lat, min_lng, max_lng)
+    records = database.get_records_in_bounds(session.get('user_id'), min_lat, max_lat, min_lng, max_lng)
     
     log_debug(f"Found {len(records)} records in bounds.")
     
@@ -346,20 +358,17 @@ def get_map_data():
         for m in module_metadata['modules']:
             module_label_map[m['api_name']] = m['plural_label']
             # If it's a custom module, we might need a different identifier for the URL
-            # Let's log it to see what we have
             if m.get('generated_type') == 'custom':
-                log_debug(f"DEBUG: Custom Module {m['api_name']} labels: {m.get('plural_label')}, {m.get('singular_label')}")
                 module_url_map[m['api_name']] = m['api_name'] # Default
                 for key, value in m.items():
                     if isinstance(value, str) and 'CustomModule' in value:
-                        log_debug(f"DEBUG: Found URL segment: {key} = {value}")
                         module_url_map[m['api_name']] = value
                         break
             else:
                 module_url_map[m['api_name']] = m['api_name']
 
     # Build a config lookup dict once to avoid per-record DB queries
-    configs = {c['module_name']: c for c in database.get_all_module_configs()}
+    configs = {c['module_name']: c for c in database.get_all_module_configs(session.get('user_id'))}
     
     map_points = []
     for r in records:
