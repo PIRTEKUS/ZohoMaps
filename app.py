@@ -102,6 +102,18 @@ def check_token_refresh():
                     session['is_admin'] = (profile_name.lower() in ['administrator', 'admin'])
                     
                     log_debug(f"LOGIN INFO: Name={session['user_name']}, Profile={profile_name}, IsAdmin={session['is_admin']}, ID={session['user_id']}")
+                    
+                    # Auto-detect Domain/Org if not already in session
+                    if 'org_id' not in session:
+                        try:
+                            org_info = zoho_api.fetch_org_metadata(session['access_token'])
+                            if 'org' in org_info and len(org_info['org']) > 0:
+                                org = org_info['org'][0]
+                                session['org_id'] = org['zoid']
+                                session['domain_name'] = org.get('domain_name', '')
+                                log_debug(f"AUTO-DETECT: OrgID={session['org_id']}, Domain={session['domain_name']}")
+                        except:
+                            pass
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
                 pass
@@ -497,17 +509,20 @@ def get_map_data():
     
     # Get module labels and org info for display
     module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
-    org_id = database.get_global_setting('crmplus_orgid', '')
-    domain_name = database.get_global_setting('crmplus_domain', '')
+    # Priority: Manual Global Setting > Session Cache > Fresh API Fetch
+    org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', '')
+    domain_name = database.get_global_setting('crmplus_domain', '') or session.get('domain_name', '')
     
-    # Only fetch from Zoho if not manually overridden
+    # Only fetch from Zoho if still missing
     if not org_id or not domain_name:
-        org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
-        log_debug(f"DEBUG: Org Metadata: {org_metadata}")
-        if 'org' in org_metadata and len(org_metadata['org']) > 0:
-            org = org_metadata['org'][0]
-            if not org_id: org_id = org['zoid']
-            if not domain_name: domain_name = org.get('domain_name', '')
+        try:
+            org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
+            if 'org' in org_metadata and len(org_metadata['org']) > 0:
+                org = org_metadata['org'][0]
+                if not org_id: org_id = org['zoid']
+                if not domain_name: domain_name = org.get('domain_name', '')
+        except:
+            pass
             
     log_debug(f"DEBUG: Using OrgID={org_id}, Domain={domain_name}")
 

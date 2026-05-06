@@ -500,7 +500,10 @@ async function editMapping(moduleName) {
     const confScript = document.getElementById('conf-data-' + moduleName);
     if(!confScript) return;
     const conf = JSON.parse(confScript.textContent);
+    await loadConfigIntoForm(conf);
+}
 
+async function loadConfigIntoForm(conf) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
     document.getElementById('module-select').value = conf.module_name;
     selectColor(conf.marker_color || '#3b82f6');
@@ -608,33 +611,12 @@ function copySharedConfig(index) {
     if(!confScript) return;
     const conf = JSON.parse(confScript.textContent);
     
-    // Fill the form using the existing editMapping logic but don't set is_shared (user can't reshare unless admin)
-    editMapping(conf.module_name);
+    // Fill the form using the new centralized logic
+    loadConfigIntoForm(conf);
     
-    // We need to wait for fields to load then set values again because editMapping is async
-    setTimeout(async () => {
-        // Double check field values after fetchFields finishes in editMapping
-        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
-            const el = document.getElementById('map-' + f);
-            if(el) el.value = conf.field_mappings[f] || '';
-        });
-        const latEl = document.getElementById('map-lat');
-        const lngEl = document.getElementById('map-lng');
-        if(latEl) latEl.value = conf.field_mappings['latitude'] || '';
-        if(lngEl) lngEl.value = conf.field_mappings['longitude'] || '';
-        
-        const titleEl = document.getElementById('map-title_field');
-        if(titleEl) titleEl.value = conf.field_mappings['title_field'] || '';
-        
-        const addSelect = document.getElementById('map-additional_fields');
-        if(addSelect) {
-            const additional = conf.field_mappings['additional_fields'] || [];
-            Array.from(addSelect.options).forEach(opt => {
-                opt.selected = additional.includes(opt.value);
-            });
-        }
-        updatePreview();
-    }, 1000); // Small delay to ensure fetchFields completed
+    // Uncheck shared status if the user is not admin (they can't reshare)
+    const sharedEl = document.getElementById('map-is_shared');
+    if(sharedEl) sharedEl.checked = false;
 }
 </script>
 {% endblock %}
