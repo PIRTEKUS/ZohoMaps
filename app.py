@@ -21,11 +21,12 @@ database.init_db()
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 
 # Derive CRM base URL from API URL for record links
-ZOHO_CRM_URL = "https://crm.zoho.com"
-if "zohoapis.eu" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.eu"
-elif "zohoapis.com.au" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.com.au"
-elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.in"
-elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.jp"
+# Use crmplus.zoho.com as requested for CRM Plus/Zoho One environments
+ZOHO_CRM_URL = "https://crmplus.zoho.com"
+if "zohoapis.eu" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.eu"
+elif "zohoapis.com.au" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.com.au"
+elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.in"
+elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.jp"
 
 def log_debug(msg):
     print(msg)
@@ -413,11 +414,12 @@ def get_map_data():
     for r in records:
         cfg = configs.get(r['module_name'], {})
         
-        # Build robust link
+        # Build robust link for CRM Plus
         link_module = module_url_map.get(r['module_name'], r['module_name'])
-        zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
         if org_id:
-            zoho_link = f"{ZOHO_CRM_URL}/crm/org{org_id}/tab/{link_module}/{r['id']}"
+            zoho_link = f"{ZOHO_CRM_URL}/{org_id}/crm/tab/{link_module}/{r['id']}"
+        else:
+            zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
 
         map_points.append({
             'id': r['id'],
