@@ -30,6 +30,9 @@ def init_db():
     # Migrate: add user_id and marker_icon if they don't exist yet
     try:
         c.execute("ALTER TABLE module_config ADD COLUMN user_id TEXT NOT NULL DEFAULT 'legacy'")
+    except Exception:
+        pass
+    try:
         c.execute("ALTER TABLE module_config ADD COLUMN marker_icon TEXT NOT NULL DEFAULT 'pin'")
     except Exception:
         pass

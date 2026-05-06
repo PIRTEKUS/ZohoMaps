@@ -59,6 +59,17 @@ def check_token_refresh():
                 if 'access_token' in token_data:
                     session['access_token'] = token_data['access_token']
                     session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
+        
+        # Ensure user_id is in session if token exists
+        if 'user_id' not in session:
+            try:
+                user_info = zoho_api.fetch_user_info(session['access_token'])
+                if 'users' in user_info and len(user_info['users']) > 0:
+                    user = user_info['users'][0]
+                    session['user_id'] = user['id']
+                    session['user_name'] = user['full_name']
+            except Exception:
+                pass
 
 @app.route('/')
 def index():
@@ -135,15 +146,19 @@ def save_config():
         return jsonify({'error': 'Unauthorized'}), 401
     
     data = request.json
-    database.save_module_config(
-        user_id=session.get('user_id'),
-        module_name=data['module_name'],
-        location_type=data['location_type'],
-        field_mappings=data['field_mappings'],
-        marker_color=data['marker_color'],
-        marker_icon=data.get('marker_icon', 'pin')
-    )
-    return jsonify({'success': True})
+    try:
+        database.save_module_config(
+            user_id=session.get('user_id'),
+            module_name=data['module_name'],
+            location_type=data['location_type'],
+            field_mappings=data['field_mappings'],
+            marker_color=data['marker_color'],
+            marker_icon=data.get('marker_icon', 'pin')
+        )
+        return jsonify({'success': True})
+    except Exception as e:
+        log_debug(f"Error saving config: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/settings/config/<module_name>', methods=['DELETE'])
 def delete_config(module_name):
