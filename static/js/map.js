@@ -168,7 +168,7 @@ function updateLegend(data) {
 }
 
 // ROUTING LOGIC
-window.routeStops = [];
+window.routeStops = []; // { id, name, lat, lng, pinnedPos: null | number }
 
 window.getDirections = function(lat, lng) {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
@@ -180,7 +180,11 @@ window.addToRoute = function(id, name, lat, lng) {
         alert("Google Maps only supports a maximum of 10 stops per route.");
         return;
     }
-    window.routeStops.push({ id, name, lat, lng });
+    if (window.routeStops.find(s => s.id === id)) {
+        alert(`"${name}" is already in your route!`);
+        return;
+    }
+    window.routeStops.push({ id, name, lat, lng, pinnedPos: null });
     window.renderRoutePlanner();
 };
 
@@ -189,18 +193,70 @@ window.removeRouteStop = function(index) {
     window.renderRoutePlanner();
 };
 
-window.moveRouteStop = function(index, direction) {
-    if (direction === -1 && index > 0) {
-        const temp = window.routeStops[index];
-        window.routeStops[index] = window.routeStops[index - 1];
-        window.routeStops[index - 1] = temp;
-    } else if (direction === 1 && index < window.routeStops.length - 1) {
-        const temp = window.routeStops[index];
-        window.routeStops[index] = window.routeStops[index + 1];
-        window.routeStops[index + 1] = temp;
+window.setPinnedPos = function(index, val) {
+    const num = val === '' ? null : parseInt(val, 10);
+    if (num !== null && (num < 1 || num > window.routeStops.length)) {
+        window.routeStops[index].pinnedPos = null;
+    } else {
+        window.routeStops[index].pinnedPos = num;
     }
-    window.renderRoutePlanner();
 };
+
+function haversineKm(a, b) {
+    const R = 6371;
+    const dLat = (b.lat - a.lat) * Math.PI / 180;
+    const dLng = (b.lng - a.lng) * Math.PI / 180;
+    const x = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(a.lat * Math.PI/180) * Math.cos(b.lat * Math.PI/180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+}
+
+function optimizeRoute(stops, userLat, userLng) {
+    const n = stops.length;
+    if (n <= 1) return stops;
+
+    // Build pinned map: pinnedPos (1-indexed) -> stop index in original list
+    const pinnedSlots = {}; // slot (0-indexed) -> stop
+    const freeStops = [];
+    stops.forEach(s => {
+        if (s.pinnedPos !== null) {
+            pinnedSlots[s.pinnedPos - 1] = s;
+        } else {
+            freeStops.push(s);
+        }
+    });
+
+    // Nearest-neighbor on free stops, starting from user location
+    const start = { lat: userLat, lng: userLng };
+    const ordered = [];
+    const remaining = [...freeStops];
+
+    let current = start;
+    while (remaining.length > 0) {
+        let bestIdx = 0;
+        let bestDist = haversineKm(current, remaining[0]);
+        for (let i = 1; i < remaining.length; i++) {
+            const d = haversineKm(current, remaining[i]);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        current = remaining[bestIdx];
+        ordered.push(remaining.splice(bestIdx, 1)[0]);
+    }
+
+    // Build final array of n slots, inserting pinned stops then free ones
+    const result = new Array(n).fill(null);
+    for (const [slot, stop] of Object.entries(pinnedSlots)) {
+        result[parseInt(slot)] = stop;
+    }
+    let freeIdx = 0;
+    for (let i = 0; i < n; i++) {
+        if (result[i] === null) {
+            result[i] = ordered[freeIdx++];
+        }
+    }
+    return result;
+}
 
 window.renderRoutePlanner = function() {
     const container = document.getElementById('route-planner-container');
@@ -214,19 +270,29 @@ window.renderRoutePlanner = function() {
     
     container.style.display = 'flex';
     container.style.flexDirection = 'column';
-    stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10)`;
+    stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10) — will auto-optimize`;
     
     list.innerHTML = '';
     window.routeStops.forEach((stop, idx) => {
         const el = document.createElement('div');
         el.className = 'route-stop-item';
+        
+        // Build pin options
+        let pinOptions = `<option value="">Auto</option>`;
+        for (let p = 1; p <= window.routeStops.length; p++) {
+            pinOptions += `<option value="${p}" ${stop.pinnedPos === p ? 'selected' : ''}>Stop #${p}</option>`;
+        }
+
         el.innerHTML = `
-            <div class="route-stop-controls">
-                <button class="route-btn-small" onclick="window.moveRouteStop(${idx}, -1)" ${idx === 0 ? 'style="visibility:hidden"' : ''}>▲</button>
-                <button class="route-btn-small" onclick="window.moveRouteStop(${idx}, 1)" ${idx === window.routeStops.length - 1 ? 'style="visibility:hidden"' : ''}>▼</button>
-            </div>
             <div class="route-stop-name" title="${stop.name}">
-                <strong style="color:var(--primary)">${idx + 1}.</strong> ${stop.name}
+                <span style="color:var(--primary);font-weight:600;">${idx + 1}.</span> ${stop.name}
+                <div style="margin-top:4px;">
+                    <label style="font-size:0.7rem;color:#94a3b8;">Force position: </label>
+                    <select class="pin-select" onchange="window.setPinnedPos(${idx}, this.value)"
+                        style="font-size:0.72rem;padding:1px 4px;border-radius:4px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.15);color:#fff;width:auto;">
+                        ${pinOptions}
+                    </select>
+                </div>
             </div>
             <button class="route-stop-remove" onclick="window.removeRouteStop(${idx})" title="Remove">✕</button>
         `;
@@ -236,22 +302,30 @@ window.renderRoutePlanner = function() {
 
 window.generateRoute = function() {
     if (window.routeStops.length === 0) return;
-    
-    let url = `https://www.google.com/maps/dir/?api=1`;
-    
-    if (window.routeStops.length === 1) {
-        url += `&destination=${window.routeStops[0].lat},${window.routeStops[0].lng}`;
-    } else {
-        const dest = window.routeStops[window.routeStops.length - 1];
-        url += `&destination=${dest.lat},${dest.lng}`;
+
+    const doGenerate = (userLat, userLng) => {
+        const optimized = optimizeRoute(window.routeStops, userLat, userLng);
         
-        if (window.routeStops.length > 1) {
-            const waypoints = window.routeStops.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
+        let url = `https://www.google.com/maps/dir/?api=1`;
+        if (optimized.length === 1) {
+            url += `&destination=${optimized[0].lat},${optimized[0].lng}`;
+        } else {
+            const dest = optimized[optimized.length - 1];
+            url += `&destination=${dest.lat},${dest.lng}`;
+            const waypoints = optimized.slice(0, -1).map(s => `${s.lat},${s.lng}`).join('|');
             url += `&waypoints=${waypoints}`;
         }
+        window.open(url, '_blank');
+    };
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            pos => doGenerate(pos.coords.latitude, pos.coords.longitude),
+            ()  => doGenerate(window.routeStops[0].lat, window.routeStops[0].lng) // fallback: start from first stop
+        );
+    } else {
+        doGenerate(window.routeStops[0].lat, window.routeStops[0].lng);
     }
-    
-    window.open(url, '_blank');
 };
 
 // Make initMap globally available for the Google Maps callback
