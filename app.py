@@ -212,6 +212,19 @@ def sync_module(module_name):
     
     fetch_fields_list = list(fetch_fields)
         
+    # Get field labels for display
+    field_metadata = zoho_api.fetch_module_fields(module_name, session['access_token'])
+    field_label_map = {}
+    if 'fields' in field_metadata:
+        for f in field_metadata['fields']:
+            field_label_map[f['api_name']] = f['display_label']
+    else:
+        log_debug(f"Warning: No 'fields' key in metadata for {module_name}. Response keys: {list(field_metadata.keys())}")
+        if 'code' in field_metadata:
+            log_debug(f"Metadata error: {field_metadata.get('code')} - {field_metadata.get('message')}")
+    
+    log_debug(f"Mapped {len(field_label_map)} labels for {module_name}. Samples: {list(field_label_map.keys())[:5]}")
+
     # In a production app, we would paginate until no more data.
     # For now, we fetch one large page (200 records).
     data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields_list)
@@ -252,9 +265,33 @@ def sync_module(module_name):
         
         if lat and lng:
             record_data = {}
+            
+            # 1. Add location info in the requested order
+            if config['location_type'] == 'address':
+                addr1 = extract_val(record.get(fields.get('address1')))
+                addr2 = extract_val(record.get(fields.get('address2')))
+                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+                if full_addr: record_data['Address'] = full_addr
+                
+                for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
+                    val = extract_val(record.get(fields.get(k)))
+                    if val: record_data[label] = str(val)
+            else:
+                lat_val = record.get(fields.get('latitude'))
+                lng_val = record.get(fields.get('longitude'))
+                if lat_val: record_data['Latitude'] = str(lat_val)
+                if lng_val: record_data['Longitude'] = str(lng_val)
+
+            # 2. Add additional fields
             for k in fetch_fields_list:
-                if k not in ['id', name_field, fields.get('latitude'), fields.get('longitude')] and record.get(k):
-                    record_data[k] = str(extract_val(record.get(k)))
+                # Skip fields we already handled or standard IDs
+                if k in ['id', name_field] or k in fields.values():
+                    continue
+                
+                val = record.get(k)
+                if val:
+                    label = field_label_map.get(k, k.replace('_', ' '))
+                    record_data[label] = str(extract_val(val))
                     
             database.save_module_record(
                 id=record.get('id'),
@@ -286,6 +323,13 @@ def get_map_data():
     
     log_debug(f"Found {len(records)} records in bounds.")
     
+    # Get module labels for display
+    module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
+    module_label_map = {}
+    if 'modules' in module_metadata:
+        for m in module_metadata['modules']:
+            module_label_map[m['api_name']] = m['plural_label']
+
     # Build a config lookup dict once to avoid per-record DB queries
     configs = {c['module_name']: c for c in database.get_all_module_configs()}
     
@@ -294,7 +338,7 @@ def get_map_data():
         cfg = configs.get(r['module_name'], {})
         map_points.append({
             'id': r['id'],
-            'module': r['module_name'],
+            'module': module_label_map.get(r['module_name'], r['module_name']),
             'name': r['name'],
             'lat': r['lat'],
             'lng': r['lng'],
