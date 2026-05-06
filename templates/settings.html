@@ -48,22 +48,26 @@
                     <input type="hidden" id="marker-icon" value="pin">
                 </div>
 
-                <div class="form-group">
-                    <label>Location Type</label>
-                    <div class="radio-group">
-                        <label>
-                            <input type="radio" name="location_type" value="address" checked> Address Fields
-                        </label>
-                        <label>
-                            <input type="radio" name="location_type" value="coordinates"> Latitude/Longitude
-                        </label>
-                    </div>
-                </div>
-
                 <div id="fields-container" class="fields-container" style="display:none;">
                     <h3>Field Mapping</h3>
                     
-                    <div id="address-fields" class="mapping-section">
+                    <div class="mapping-section">
+                        <h4>Coordinates (Priority)</h4>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Latitude Field</label>
+                                <select id="map-lat" class="field-select"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Longitude Field</label>
+                                <select id="map-lng" class="field-select"></select>
+                            </div>
+                        </div>
+                        <small style="color: #94a3b8; font-size: 0.75rem;">If these fields have values, they will be used instead of the address.</small>
+                    </div>
+
+                    <div id="address-fields" class="mapping-section" style="margin-top: 1.5rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+                        <h4>Address Fields (Fallback)</h4>
                         <div class="form-group">
                             <label>Street Address 1</label>
                             <select id="map-address1" class="field-select"></select>
@@ -91,17 +95,6 @@
                                 <label>Country</label>
                                 <select id="map-country" class="field-select"></select>
                             </div>
-                        </div>
-                    </div>
-
-                    <div id="coordinate-fields" class="mapping-section" style="display:none;">
-                        <div class="form-group">
-                            <label>Latitude Field</label>
-                            <select id="map-lat" class="field-select"></select>
-                        </div>
-                        <div class="form-group">
-                            <label>Longitude Field</label>
-                            <select id="map-lng" class="field-select"></select>
                         </div>
                     </div>
                     
@@ -264,12 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    document.querySelectorAll('input[name="location_type"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            document.getElementById('address-fields').style.display = e.target.value === 'address' ? 'block' : 'none';
-            document.getElementById('coordinate-fields').style.display = e.target.value === 'coordinates' ? 'block' : 'none';
-        });
-    });
+    // Location type radios removed - always using both with priority logic
 
     document.getElementById('module-select').addEventListener('change', (e) => {
         if(e.target.value) {
@@ -288,18 +276,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('config-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const module_name = document.getElementById('module-select').value;
-        const location_type = document.querySelector('input[name="location_type"]:checked').value;
         const marker_color = document.getElementById('marker-color').value;
         
         let field_mappings = {};
-        if (location_type === 'address') {
-            ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
-                field_mappings[f] = document.getElementById('map-' + f).value;
-            });
-        } else {
-            field_mappings['latitude'] = document.getElementById('map-lat').value;
-            field_mappings['longitude'] = document.getElementById('map-lng').value;
-        }
+        // Collect both Address and Coordinates
+        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+            field_mappings[f] = document.getElementById('map-' + f).value;
+        });
+        field_mappings['latitude'] = document.getElementById('map-lat').value;
+        field_mappings['longitude'] = document.getElementById('map-lng').value;
 
         // Add Title and Additional Fields
         field_mappings['title_field'] = document.getElementById('map-title_field').value;
@@ -310,7 +295,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const resp = await fetch('/api/settings/config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({module_name, location_type, marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings})
+                body: JSON.stringify({module_name, location_type: 'both', marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings})
             });
             if(resp.ok) {
                 window.location.reload();
@@ -441,27 +426,18 @@ async function editMapping(moduleName) {
     selectColor(conf.marker_color || '#3b82f6');
     selectIcon(conf.marker_icon || 'pin');
     
-    const radios = document.querySelectorAll('input[name="location_type"]');
-    radios.forEach(r => {
-        r.checked = (r.value === conf.location_type);
-        if (r.checked) {
-            r.dispatchEvent(new Event('change'));
-        }
-    });
-
     await fetchFields(conf.module_name);
 
-    if (conf.location_type === 'address') {
-        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
-            const el = document.getElementById('map-' + f);
-            if(el) el.value = conf.field_mappings[f] || '';
-        });
-    } else {
-        const latEl = document.getElementById('map-lat');
-        const lngEl = document.getElementById('map-lng');
-        if(latEl) latEl.value = conf.field_mappings['latitude'] || '';
-        if(lngEl) lngEl.value = conf.field_mappings['longitude'] || '';
-    }
+    // Populating both sets of fields
+    ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+        const el = document.getElementById('map-' + f);
+        if(el) el.value = conf.field_mappings[f] || '';
+    });
+    
+    const latEl = document.getElementById('map-lat');
+    const lngEl = document.getElementById('map-lng');
+    if(latEl) latEl.value = conf.field_mappings['latitude'] || '';
+    if(lngEl) lngEl.value = conf.field_mappings['longitude'] || '';
 
     const titleEl = document.getElementById('map-title_field');
     if(titleEl) titleEl.value = conf.field_mappings['title_field'] || '';

@@ -196,7 +196,7 @@ def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
             SELECT * FROM module_records 
             WHERE user_id = ? AND lat >= ? AND lat <= ? 
             AND (lng >= ? OR lng <= ?)
-            LIMIT 1000
+            LIMIT 5000
         '''
         rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
     else:
@@ -204,7 +204,7 @@ def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
             SELECT * FROM module_records 
             WHERE user_id = ? AND lat >= ? AND lat <= ? 
             AND lng >= ? AND lng <= ?
-            LIMIT 1000
+            LIMIT 5000
         '''
         rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
     conn.close()

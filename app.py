@@ -156,7 +156,7 @@ def save_config():
         database.save_module_config(
             user_id=session.get('user_id'),
             module_name=data['module_name'],
-            location_type=data['location_type'],
+            location_type='both',
             field_mappings=data['field_mappings'],
             marker_color=data['marker_color'],
             marker_icon=data.get('marker_icon', 'pin')
@@ -286,16 +286,18 @@ def sync_module(module_name):
             name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
             name = str(extract_val(name_raw))
             
-            if config['location_type'] == 'coordinates':
-                lat_field = fields.get('latitude')
-                lng_field = fields.get('longitude')
-                if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
-                    try:
-                        lat = float(record[lat_field])
-                        lng = float(record[lng_field])
-                    except ValueError:
-                        pass
-            else:
+            # Prioritize Coordinates if available
+            lat_field = fields.get('latitude')
+            lng_field = fields.get('longitude')
+            if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+                try:
+                    lat = float(record[lat_field])
+                    lng = float(record[lng_field])
+                except (ValueError, TypeError):
+                    pass
+            
+            # Fallback to Address if Coordinates failed or were missing
+            if lat is None or lng is None:
                 address_parts = []
                 for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
                     val = extract_val(record.get(fields.get(k)))
@@ -309,21 +311,21 @@ def sync_module(module_name):
             if lat is not None and lng is not None:
                 record_data = {}
                 
-                # 1. Add location info in the requested order
-                if config['location_type'] == 'address':
-                    addr1 = extract_val(record.get(fields.get('address1')))
-                    addr2 = extract_val(record.get(fields.get('address2')))
-                    full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
-                    if full_addr: record_data['Address'] = full_addr
-                    
-                    for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
-                        val = extract_val(record.get(fields.get(k)))
-                        if val: record_data[label] = str(val)
-                else:
-                    lat_val = record.get(fields.get('latitude'))
-                    lng_val = record.get(fields.get('longitude'))
-                    if lat_val: record_data['Latitude'] = str(lat_val)
-                    if lng_val: record_data['Longitude'] = str(lng_val)
+                # Add location info
+                lat_val = record.get(fields.get('latitude'))
+                lng_val = record.get(fields.get('longitude'))
+                if lat_val: record_data['Latitude'] = str(lat_val)
+                if lng_val: record_data['Longitude'] = str(lng_val)
+
+                addr1 = extract_val(record.get(fields.get('address1')))
+                addr2 = extract_val(record.get(fields.get('address2')))
+                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+                if full_addr: record_data['Address'] = full_addr
+                
+                for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
+                    val = extract_val(record.get(fields.get(k)))
+                    if val: record_data[label] = str(val)
+
 
                 # 2. Add additional fields
                 for k in fetch_fields_list:

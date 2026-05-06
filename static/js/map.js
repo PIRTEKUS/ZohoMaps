@@ -118,15 +118,14 @@ function plotData(data) {
     const bounds = new google.maps.LatLngBounds();
     const infoWindow = new google.maps.InfoWindow();
     
-    if (data.length >= 1000) {
+    // Filter visible data first
+    const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
+    
+    if (visibleData.length >= 1000) {
         document.getElementById('legend-stats').innerHTML += ` <span style="color:var(--warning);font-size:0.75rem;">(Limit reached, zoom in for more)</span>`;
     }
 
-    data.forEach(item => {
-        // Skip hidden modules
-        if (window.hiddenModules && window.hiddenModules.has(item.module)) {
-            return;
-        }
+    visibleData.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
 
         // Custom SVG Marker to use the dynamically configured color and icon
@@ -192,9 +191,19 @@ function plotData(data) {
         markers.push(marker);
     });
 
-    // Initialize or Update Clusterer
-    if (typeof markerClusterer !== 'undefined') {
-        markerCluster = new markerClusterer.MarkerClusterer({ markers, map });
+    // Initialize or Update Clusterer only if visible markers >= 50
+    if (typeof markerClusterer !== 'undefined' && markers.length >= 50) {
+        markerCluster = new markerClusterer.MarkerClusterer({ 
+            markers, 
+            map,
+            onClusterClick: (event, cluster, map) => {
+                // Prevent auto-zoom on click as requested
+                // console.log("Cluster clicked, zoom prevented.");
+            }
+        });
+    } else {
+        // If not clustering (less than 50 markers), show them all individually
+        markers.forEach(m => m.setMap(map));
     }
 }
 
