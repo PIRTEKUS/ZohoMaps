@@ -64,11 +64,14 @@ def check_token_refresh():
         if 'user_id' not in session:
             try:
                 user_info = zoho_api.fetch_user_info(session['access_token'])
+                log_debug(f"DEBUG: Raw user_info: {user_info}")
                 if 'users' in user_info and len(user_info['users']) > 0:
                     user = user_info['users'][0]
                     session['user_id'] = user['id']
-                    session['user_name'] = user['full_name']
-            except Exception:
+                    session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
+                    log_debug(f"DEBUG: Set session user_id={session['user_id']}, name={session['user_name']}")
+            except Exception as e:
+                log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
                 pass
 
 @app.route('/')
@@ -97,10 +100,11 @@ def callback():
             
             # Fetch User Info to identify them uniquely
             user_info = zoho_api.fetch_user_info(session['access_token'])
+            log_debug(f"DEBUG: Callback Raw user_info: {user_info}")
             if 'users' in user_info and len(user_info['users']) > 0:
                 user = user_info['users'][0]
                 session['user_id'] = user['id']
-                session['user_name'] = user['full_name']
+                session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
                 log_debug(f"User logged in: {session['user_name']} ({session['user_id']})")
                 
             return redirect(url_for('index'))
