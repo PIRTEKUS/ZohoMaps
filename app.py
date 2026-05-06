@@ -341,9 +341,22 @@ def get_map_data():
         org_id = org_metadata['org'][0]['zoid']
 
     module_label_map = {}
+    module_url_map = {} # Map api_name to URL segment
     if 'modules' in module_metadata:
         for m in module_metadata['modules']:
             module_label_map[m['api_name']] = m['plural_label']
+            # If it's a custom module, we might need a different identifier for the URL
+            # Let's log it to see what we have
+            if m.get('generated_type') == 'custom':
+                log_debug(f"DEBUG: Custom Module {m['api_name']} labels: {m.get('plural_label')}, {m.get('singular_label')}")
+                module_url_map[m['api_name']] = m['api_name'] # Default
+                for key, value in m.items():
+                    if isinstance(value, str) and 'CustomModule' in value:
+                        log_debug(f"DEBUG: Found URL segment: {key} = {value}")
+                        module_url_map[m['api_name']] = value
+                        break
+            else:
+                module_url_map[m['api_name']] = m['api_name']
 
     # Build a config lookup dict once to avoid per-record DB queries
     configs = {c['module_name']: c for c in database.get_all_module_configs()}
@@ -353,7 +366,7 @@ def get_map_data():
         cfg = configs.get(r['module_name'], {})
         
         # Build robust link
-        link_module = r['module_name']
+        link_module = module_url_map.get(r['module_name'], r['module_name'])
         zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
         if org_id:
             zoho_link = f"{ZOHO_CRM_URL}/crm/org{org_id}/tab/{link_module}/{r['id']}"
