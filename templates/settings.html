@@ -11,13 +11,28 @@
         <!-- Global Settings -->
         <div class="settings-card glass" style="grid-column: 1 / -1;">
             <h2>Global Application Settings</h2>
-            <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
-                <label style="margin:0;">Show Debug Console on Map View</label>
-                <label class="switch">
-                    <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
-                    <span class="slider round"></span>
-                </label>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+                <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
+                    <label style="margin:0;">Show Debug Console on Map View</label>
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label>CRM Plus Portal Name (Optional)</label>
+                    <input type="text" id="crmplus-domain" placeholder="e.g. pirtekus" value="{{ crm_domain or '' }}" style="margin-top: 5px;">
+                    <small style="color: #94a3b8; font-size: 0.75rem;">Required for 'Open in Zoho' links to work in Zoho One/CRM Plus.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>CRM Plus Org ID (Optional)</label>
+                    <input type="text" id="crmplus-orgid" placeholder="e.g. 897316137" value="{{ crm_org_id or '' }}" style="margin-top: 5px;">
+                    <small style="color: #94a3b8; font-size: 0.75rem;">Only enter if links show the wrong Org ID.</small>
+                </div>
             </div>
+            <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
         </div>
 
         <!-- Add New Config Form -->
@@ -290,15 +305,32 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     selectIcon('pin');
 
-    document.getElementById('toggle-console').addEventListener('change', async (e) => {
+    document.getElementById('save-global-btn').addEventListener('click', async () => {
+        const show_console = document.getElementById('toggle-console').checked ? 'true' : 'false';
+        const crm_domain = document.getElementById('crmplus-domain').value;
+        const crm_org_id = document.getElementById('crmplus-orgid').value;
+        
         try {
             await fetch('/api/settings/global', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: 'show_console', value: e.target.checked ? 'true' : 'false'})
+                body: JSON.stringify({key: 'show_console', value: show_console})
             });
+            await fetch('/api/settings/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: 'crmplus_domain', value: crm_domain})
+            });
+            await fetch('/api/settings/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({key: 'crmplus_orgid', value: crm_org_id})
+            });
+            alert('Global settings saved!');
+            window.location.reload();
         } catch (err) {
-            console.error('Failed to save setting', err);
+            console.error('Failed to save settings', err);
+            alert('Error saving global settings');
         }
     });
 

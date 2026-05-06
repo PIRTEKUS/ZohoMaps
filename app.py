@@ -154,11 +154,15 @@ def settings():
     configs = database.get_all_module_configs(session.get('user_id'))
     shared_configs = database.get_shared_configs()
     show_console = database.get_global_setting('show_console', 'false') == 'true'
+    crm_domain = database.get_global_setting('crmplus_domain', '')
+    crm_org_id = database.get_global_setting('crmplus_orgid', '')
     is_admin = session.get('is_admin', False)
     return render_template('settings.html', 
                            configs=configs, 
                            shared_configs=shared_configs,
-                           show_console=show_console, 
+                           show_console=show_console,
+                           crm_domain=crm_domain,
+                           crm_org_id=crm_org_id,
                            is_admin=is_admin)
 
 @app.route('/api/modules')
@@ -493,16 +497,19 @@ def get_map_data():
     
     # Get module labels and org info for display
     module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
-    org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
-    log_debug(f"DEBUG: Org Metadata: {org_metadata}")
+    org_id = database.get_global_setting('crmplus_orgid', '')
+    domain_name = database.get_global_setting('crmplus_domain', '')
     
-    org_id = ""
-    domain_name = ""
-    if 'org' in org_metadata and len(org_metadata['org']) > 0:
-        org = org_metadata['org'][0]
-        org_id = org['zoid']
-        domain_name = org.get('domain_name', '')
-        log_debug(f"DEBUG: Using OrgID={org_id}, Domain={domain_name}")
+    # Only fetch from Zoho if not manually overridden
+    if not org_id or not domain_name:
+        org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
+        log_debug(f"DEBUG: Org Metadata: {org_metadata}")
+        if 'org' in org_metadata and len(org_metadata['org']) > 0:
+            org = org_metadata['org'][0]
+            if not org_id: org_id = org['zoid']
+            if not domain_name: domain_name = org.get('domain_name', '')
+            
+    log_debug(f"DEBUG: Using OrgID={org_id}, Domain={domain_name}")
 
     module_label_map = {}
     module_url_map = {} # Map api_name to URL segment
