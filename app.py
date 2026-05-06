@@ -116,15 +116,22 @@ def check_token_refresh():
                     log_debug(f"LOGIN INFO: Name={session['user_name']}, Profile={profile_name}, IsAdmin={session['is_admin']}, ID={session['user_id']}")
                     
                     # Auto-detect Domain/Org if not already in session
-                    if 'org_id' not in session:
+                    if 'org_id' not in session or 'domain_name' not in session:
                         try:
+                            # Use v6 as per user provided documentation
                             org_info = zoho_api.fetch_org_metadata(session['access_token'])
                             if 'org' in org_info and len(org_info['org']) > 0:
                                 org = org_info['org'][0]
-                                session['org_id'] = org['zoid']
+                                # Log everything so we can find 'pirtekus' and '897316137'
+                                log_debug(f"DEBUG: Full Org Data: {json.dumps(org)}")
+                                
+                                # Try multiple ID fields
+                                session['org_id'] = org.get('zgid') or org.get('zoid') or org.get('id')
                                 session['domain_name'] = org.get('domain_name', '')
-                                log_debug(f"AUTO-DETECT: OrgID={session['org_id']}, Domain={session['domain_name']}")
-                        except:
+                                
+                                log_debug(f"AUTO-DETECTED: OrgID={session['org_id']}, Domain={session['domain_name']}")
+                        except Exception as org_err:
+                            log_debug(f"DEBUG: Org detect failed: {str(org_err)}")
                             pass
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")

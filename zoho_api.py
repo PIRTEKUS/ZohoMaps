@@ -81,7 +81,8 @@ def fetch_org_metadata(access_token):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
-    url = f"{ZOHO_API_URL}/crm/v3/settings/org"
+    # v6 /org is the latest stable for org metadata
+    url = f"{ZOHO_API_URL}/crm/v6/org"
     response = requests.get(url, headers=headers)
     return response.json()
 
