@@ -20,6 +20,13 @@ database.init_db()
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 
+# Derive CRM base URL from API URL for record links
+ZOHO_CRM_URL = "https://crm.zoho.com"
+if "zohoapis.eu" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.eu"
+elif "zohoapis.com.au" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.com.au"
+elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.in"
+elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crm.zoho.jp"
+
 def log_debug(msg):
     print(msg)
     try:
@@ -265,8 +272,11 @@ def sync_module(module_name):
         
         if lat and lng:
             record_data = {}
+        else:
+            log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
+            continue
             
-            # 1. Add location info in the requested order
+        # 1. Add location info in the requested order
             if config['location_type'] == 'address':
                 addr1 = extract_val(record.get(fields.get('address1')))
                 addr2 = extract_val(record.get(fields.get('address2')))
@@ -339,6 +349,7 @@ def get_map_data():
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
+            'zoho_link': f"{ZOHO_CRM_URL}/crm/tab/{r['module_name']}/{r['id']}",
             'name': r['name'],
             'lat': r['lat'],
             'lng': r['lng'],

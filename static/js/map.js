@@ -145,9 +145,10 @@ function plotData(data) {
 
             // Add route action buttons
             const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-            content += `<div class="info-actions">
-                <button class="btn-primary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;" onclick="window.getDirections(${item.lat}, ${item.lng})">Directions</button>
-                <button class="btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem; color: #1e293b;" onclick="window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
+            content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.getDirections(${item.lat}, ${item.lng})">Directions</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM</button>
             </div>`;
 
             content += `</div></div>`;
