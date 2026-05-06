@@ -75,6 +75,18 @@ def get_logs():
     except FileNotFoundError:
         return jsonify({'logs': ['Waiting for server activity...']})
 
+@app.route('/api/logs/clear', methods=['POST'])
+def clear_server_logs():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        with open(LOG_FILE, 'w') as f:
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{ts}] --- Logs cleared by {session.get('user_name')} ---\n")
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @app.before_request
 def check_token_refresh():
@@ -122,7 +134,16 @@ def check_token_refresh():
 def index():
     if 'access_token' not in session:
         return redirect(url_for('login'))
-    log_debug(f"Loading map for user: {session.get('user_name')} ({session.get('user_id')})")
+    
+    # Priority: Manual Global Setting > Session Cache
+    org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', 'Unknown')
+    domain_name = database.get_global_setting('crmplus_domain', '') or session.get('domain_name', 'Unknown')
+    is_manual = database.get_global_setting('crmplus_orgid', '') != '' or database.get_global_setting('crmplus_domain', '') != ''
+    
+    log_debug(f"--- MAP SESSION CONNECTED ---")
+    log_debug(f"User: {session.get('user_name')} ({'Administrator' if session.get('is_admin') else 'Standard User'})")
+    log_debug(f"CRM Plus Config: Domain={domain_name}, OrgID={org_id} ({'Manual Override' if is_manual else 'Auto-Detected'})")
+    
     show_console = database.get_global_setting('show_console', 'false') == 'true'
     return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console)
 
