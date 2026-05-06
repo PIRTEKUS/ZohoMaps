@@ -90,7 +90,18 @@ const ICON_PATHS = {
     'person': "M12 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4z",
     'star': "M12 2l3.1 6.3 7 1-5 4.9 1.2 7-6.3-3.3-6.3 3.3 1.2-7-5-4.9 7-1z",
     'home': "M3 12l9-9 9 9M5 12v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8",
-    'factory': "M3 21h18M3 7l7 5V7l7 5V7l4 3v11H3V7z"
+    'factory': "M3 21h18M3 7l7 5V7l7 5V7l4 3v11H3V7z",
+    'building3D': [
+        "M2 14l12 0",          // Bottom frame line
+        "M6 5.33l.67 0",       // Windows Row 1
+        "M6 8l.67 0",          // Windows Row 2
+        "M6 10.67l.67 0",      // Windows Row 3
+        "M9.33 5.33l.67 0",    // Windows Row 1 (Right)
+        "M9.33 8l.67 0",       // Windows Row 2 (Right)
+        "M9.33 10.67l.67 0",   // Windows Row 3 (Right)
+        "M3.33 14v-10.67a1.33 1.33 0 0 1 1.33 -1.33h6.67a1.33 1.33 0 0 1 1.33 1.33v10.67", // Outline
+        "M7.33 14v-2.67h1.33v2.67" // Door
+    ]
 };
 
 function plotData(data) {
@@ -106,6 +117,10 @@ function plotData(data) {
 
         // Custom SVG Marker to use the dynamically configured color and icon
         let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
+        
+        if (Array.isArray(path)) {
+            path = path.join(' ');
+        }
 
         const svgMarker = {
             path: path,
@@ -122,6 +137,9 @@ function plotData(data) {
         if (item.icon === 'pin' || !item.icon) {
             svgMarker.anchor = new google.maps.Point(12, 22);
             svgMarker.scale = 1.3;
+        } else if (item.icon === 'building3D') {
+            svgMarker.anchor = new google.maps.Point(8, 8);
+            svgMarker.scale = 2.0;
         } else if (item.icon && item.icon.startsWith('building')) {
             svgMarker.strokeWeight = 1.4;
             svgMarker.fillOpacity = 0.9;
