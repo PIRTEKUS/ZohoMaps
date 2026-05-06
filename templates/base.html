@@ -21,6 +21,10 @@
         </div>
         {% if session.get('access_token') %}
         <div class="nav-links">
+            <span class="nav-user" style="color: #94a3b8; font-size: 0.85rem; margin-right: 0.5rem; display: flex; align-items: center; gap: 6px;">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                {{ session.get('user_name', 'User') }}
+            </span>
             <a href="{{ url_for('index') }}" class="nav-link">Map View</a>
             <a href="{{ url_for('settings') }}" class="nav-link">Settings</a>
             <a href="{{ url_for('logout') }}" class="nav-link btn-secondary">Logout</a>

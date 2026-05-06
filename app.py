@@ -75,6 +75,7 @@ def check_token_refresh():
 def index():
     if 'access_token' not in session:
         return redirect(url_for('login'))
+    log_debug(f"Loading map for user: {session.get('user_name')} ({session.get('user_id')})")
     show_console = database.get_global_setting('show_console', 'false') == 'true'
     return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console)
 
