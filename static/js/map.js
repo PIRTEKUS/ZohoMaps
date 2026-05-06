@@ -71,6 +71,7 @@ async function loadMapData() {
             throw new Error('Failed to fetch data');
         }
         const data = await res.json();
+        window.lastMapData = data;
 
         document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${data.length} records in area</span>`;
 
@@ -122,6 +123,10 @@ function plotData(data) {
     }
 
     data.forEach(item => {
+        // Skip hidden modules
+        if (window.hiddenModules && window.hiddenModules.has(item.module)) {
+            return;
+        }
         const position = { lat: item.lat, lng: item.lng };
 
         // Custom SVG Marker to use the dynamically configured color and icon
@@ -193,6 +198,8 @@ function plotData(data) {
     }
 }
 
+window.hiddenModules = window.hiddenModules || new Set();
+
 function updateLegend(data) {
     const legend = document.getElementById('legend-container');
     legend.innerHTML = '';
@@ -209,7 +216,11 @@ function updateLegend(data) {
     for (let [mod, info] of Object.entries(modules)) {
         const item = document.createElement('div');
         item.className = 'legend-item';
+        const isChecked = !window.hiddenModules.has(mod);
         item.innerHTML = `
+            <input type="checkbox" class="module-toggle" ${isChecked ? 'checked' : ''} 
+                   onchange="window.toggleModuleVisibility('${mod}', this.checked)"
+                   style="margin-right: 10px; cursor: pointer;">
             <span class="color-dot" style="background-color: ${info.color}"></span>
             <span class="legend-name">${mod}</span>
             <span class="legend-count">${info.count}</span>
@@ -217,6 +228,18 @@ function updateLegend(data) {
         legend.appendChild(item);
     }
 }
+
+window.toggleModuleVisibility = function(moduleName, visible) {
+    if (visible) {
+        window.hiddenModules.delete(moduleName);
+    } else {
+        window.hiddenModules.add(moduleName);
+    }
+    // Re-plot data to apply visibility changes
+    if (window.lastMapData) {
+        plotData(window.lastMapData);
+    }
+};
 
 // ROUTING LOGIC
 window.routeStops = []; // { id, name, lat, lng, pinnedPos: null | number }
