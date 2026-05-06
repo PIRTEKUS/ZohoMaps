@@ -76,3 +76,11 @@ def fetch_module_fields(module_name, access_token):
     params = {'module': module_name}
     response = requests.get(url, headers=headers, params=params)
     return response.json()
+
+def fetch_org_metadata(access_token):
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    url = f"{ZOHO_API_URL}/crm/v3/settings/org"
+    response = requests.get(url, headers=headers)
+    return response.json()

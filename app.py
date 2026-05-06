@@ -332,8 +332,14 @@ def get_map_data():
     
     log_debug(f"Found {len(records)} records in bounds.")
     
-    # Get module labels for display
+    # Get module labels and org info for display
     module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
+    org_metadata = zoho_api.fetch_org_metadata(session['access_token'])
+    
+    org_id = ""
+    if 'org' in org_metadata and len(org_metadata['org']) > 0:
+        org_id = org_metadata['org'][0]['zoid']
+
     module_label_map = {}
     if 'modules' in module_metadata:
         for m in module_metadata['modules']:
@@ -345,10 +351,17 @@ def get_map_data():
     map_points = []
     for r in records:
         cfg = configs.get(r['module_name'], {})
+        
+        # Build robust link
+        link_module = r['module_name']
+        zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
+        if org_id:
+            zoho_link = f"{ZOHO_CRM_URL}/crm/org{org_id}/tab/{link_module}/{r['id']}"
+
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
-            'zoho_link': f"{ZOHO_CRM_URL}/crm/EntityDetailsView.do?module={r['module_name']}&id={r['id']}",
+            'zoho_link': zoho_link,
             'name': r['name'],
             'lat': r['lat'],
             'lng': r['lng'],
