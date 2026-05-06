@@ -270,13 +270,10 @@ def sync_module(module_name):
             if full_address:
                 lat, lng = geocode_address(full_address)
         
-        if lat and lng:
+        if lat is not None and lng is not None:
             record_data = {}
-        else:
-            log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
-            continue
             
-        # 1. Add location info in the requested order
+            # 1. Add location info in the requested order
             if config['location_type'] == 'address':
                 addr1 = extract_val(record.get(fields.get('address1')))
                 addr2 = extract_val(record.get(fields.get('address2')))
@@ -313,6 +310,8 @@ def sync_module(module_name):
                 record_data=record_data
             )
             count += 1
+        else:
+            log_debug(f"Skipping record {record.get('id')} ({name}): No valid location found.")
 
     log_debug(f"Sync complete! Saved {count} records for {module_name}.")
     return jsonify({'success': True, 'synced': count})
