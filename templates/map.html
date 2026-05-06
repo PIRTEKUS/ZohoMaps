@@ -45,14 +45,31 @@
 {% if show_console %}
 <div class="debug-console" id="debug-console">
     <div class="console-header">
-        <span>Server Output</span>
-        <span class="pulse-dot" style="width:6px;height:6px;margin:0;"></span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="pulse-dot" style="width:6px;height:6px;margin:0;"></span>
+            <span>Server Output</span>
+        </div>
+        <button class="console-copy-btn" onclick="copyLogs()" title="Copy to clipboard">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy
+        </button>
     </div>
     <div class="console-body" id="console-body">
         <div>Connected to logs...</div>
     </div>
 </div>
 <script>
+    function copyLogs() {
+        const body = document.getElementById('console-body');
+        const text = Array.from(body.querySelectorAll('div')).map(d => d.textContent).join('\n');
+        navigator.clipboard.writeText(text).then(() => {
+            const btn = document.querySelector('.console-copy-btn');
+            const original = btn.innerHTML;
+            btn.innerHTML = 'Copied!';
+            setTimeout(() => btn.innerHTML = original, 2000);
+        });
+    }
+
     function pollLogs() {
         fetch('/api/logs')
             .then(r => r.json())

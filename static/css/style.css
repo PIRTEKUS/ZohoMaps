@@ -515,10 +515,31 @@ input:checked + .slider:before {
     font-size: 0.75rem;
     color: #4ade80; /* bright green */
     line-height: 1.4;
+    user-select: text; /* Ensure text is selectable */
 }
 .console-body div {
     margin-bottom: 0.2rem;
-    word-break: break-all;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.console-copy-btn {
+    background: rgba(255,255,255,0.1);
+    border: none;
+    color: #94a3b8;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+.console-copy-btn:hover {
+    background: rgba(255,255,255,0.2);
+    color: white;
 }
 
 /* Route Planner Styles */
