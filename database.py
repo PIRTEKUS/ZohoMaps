@@ -53,6 +53,12 @@ def init_db():
         )
     ''')
     
+    # Ensure unique constraint for ON CONFLICT to work
+    try:
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
+    except Exception:
+        pass
+    
     # Table for Cached Zoho Records (partitioned by user_id)
     c.execute('''
         CREATE TABLE IF NOT EXISTS module_records (
