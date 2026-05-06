@@ -84,27 +84,13 @@ async function loadMapData() {
 
 const ICON_PATHS = {
     'pin': "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z",
-    'building': "M4 2h16v20H4V2zm2 2v16h3v-3h6v3h3V4H6zm2 2h2v2H8V6zm4 0h2v2h-2V6zm4 0h2v2h-2V6zm-8 4h2v2H8v-2zm4 0h2v2h-2v-2zm4 0h2v2h-2v-2zm-8 4h2v2H8v-2zm8 0h2v2h-2v-2z",
-    'person': "M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z",
-    'star': "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
-    'home': "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z",
-    'building-community': [
-        "M8 9l5 5v7h-5v-4m0 4h-5v-7l5 -5m1 1v-6a1 1 0 0 1 1 -1h10a1 1 0 0 1 1 1v17h-8",
-        "M13 7l0 .01",
-        "M17 7l0 .01",
-        "M17 11l0 .01",
-        "M17 15l0 .01"
-    ],
-    'building_standard': [
-        "M3 21l18 0",
-        "M9 8l1 0",
-        "M9 12l1 0",
-        "M9 16l1 0",
-        "M14 8l1 0",
-        "M14 12l1 0",
-        "M14 16l1 0",
-        "M5 21v-16a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v16"
-    ]
+    'building': "M3 21h18M6 21V7a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v14M9 8v.01M14 8v.01M9 12v.01M14 12v.01M9 16v.01M14 16v.01",
+    'building_standard': "M3 21h18M6 21V7a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v14M10 8h4M10 12h4M10 16h4",
+    'building-community': "M3 21h18M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16M8 7h3M13 7h3M8 11h3M13 11h3M8 15h3M13 15h3",
+    'person': "M12 12c2.2 0 4-1.8 4-4s-1.8-4-4-4-4 1.8-4 4 1.8 4 4 4zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4z",
+    'star': "M12 2l3.1 6.3 7 1-5 4.9 1.2 7-6.3-3.3-6.3 3.3 1.2-7-5-4.9 7-1z",
+    'home': "M3 12l9-9 9 9M5 12v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8",
+    'factory': "M3 21h18M3 7l7 5V7l7 5V7l4 3v11H3V7z"
 };
 
 function plotData(data) {
@@ -121,26 +107,25 @@ function plotData(data) {
         // Custom SVG Marker to use the dynamically configured color and icon
         let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
         
-        // If path is an array, join it into a single string for Google Maps
-        if (Array.isArray(path)) {
-            path = path.join(' ');
-        }
-        
         const svgMarker = {
             path: path,
             fillColor: item.color || "#3b82f6",
-            fillOpacity: 1,
-            strokeWeight: 1.5,
+            fillOpacity: 0.85,
+            strokeWeight: 2,
             strokeColor: "#FFFFFF",
             rotation: 0,
-            scale: 1.5,
+            scale: 1.4,
             anchor: new google.maps.Point(12, 12),
         };
 
-        // Adjust anchor for the 'pin' which points at the bottom
+        // Specific adjustments for better visual alignment
         if (item.icon === 'pin' || !item.icon) {
             svgMarker.anchor = new google.maps.Point(12, 22);
             svgMarker.scale = 1.3;
+        } else if (item.icon && item.icon.startsWith('building')) {
+            svgMarker.strokeWeight = 1.8;
+            svgMarker.fillOpacity = 0.9;
+            svgMarker.scale = 1.5;
         }
 
         const marker = new google.maps.Marker({
