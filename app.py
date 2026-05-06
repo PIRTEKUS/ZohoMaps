@@ -348,7 +348,7 @@ def get_map_data():
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
-            'zoho_link': f"{ZOHO_CRM_URL}/crm/tab/{r['module_name']}/{r['id']}",
+            'zoho_link': f"{ZOHO_CRM_URL}/crm/EntityDetailsView.do?module={r['module_name']}&id={r['id']}",
             'name': r['name'],
             'lat': r['lat'],
             'lng': r['lng'],
