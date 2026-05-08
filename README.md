@@ -127,6 +127,9 @@ sudo nginx -t
 sudo systemctl restart nginx
 ```
 
+> [!IMPORTANT]
+> **Switching from IP to Domain Name:** If you initially set up the app using the server's IP address and later map a DNS name (domain) to it, you **must** update the `server_name` directive in `/etc/nginx/sites-available/zohomap` to match your new domain name (e.g., `server_name maps.yourdomain.com;`). After editing, always run `sudo systemctl restart nginx`. If you forget this, accessing via the domain name will show the default "Welcome to Nginx" page instead of the app.
+
 ### 7. Usage
 
 1. Navigate to your server's domain/IP.
