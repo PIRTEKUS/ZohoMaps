@@ -223,6 +223,16 @@ def callback():
 
 @app.route('/logout')
 def logout():
+    # Revoke the token at Zoho's server BEFORE clearing the session.
+    # This forces a fresh consent screen on next login so all current scopes are re-granted.
+    # Without this, Zoho continues issuing tokens with OLD limited scopes even after re-login.
+    refresh_token = session.get('refresh_token')
+    if refresh_token:
+        try:
+            zoho_api.revoke_token(refresh_token)
+            log_debug(f"OAuth token revoked for user: {session.get('user_name', 'unknown')}")
+        except Exception as e:
+            log_debug(f"Token revocation failed (non-fatal): {e}")
     session.clear()
     return redirect(url_for('login'))
 

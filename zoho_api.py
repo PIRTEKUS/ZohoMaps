@@ -67,6 +67,15 @@ def refresh_access_token(refresh_token):
     response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data)
     return response.json()
 
+def revoke_token(token):
+    """Revoke a refresh or access token at Zoho's accounts server.
+    This forces a full consent screen on next login so NEW SCOPES are picked up.
+    IMPORTANT: Without revoking, Zoho keeps issuing tokens with OLD, limited scopes
+    even if the user clicks logout and logs back in. Always revoke on logout."""
+    data = {'token': token}
+    response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token/revoke", data=data)
+    return response.status_code == 200
+
 def fetch_module_records(module_name, access_token, fields=None, page=1, page_token=None):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
