@@ -14,6 +14,12 @@ async function initMap() {
         zoomControl: true,
     });
 
+    // Setup the map-click listener ONCE here to close any open info popup
+    // Must be done after map is initialized, not inside plotData (which runs repeatedly)
+    map.addListener('click', () => {
+        if (window.activeInfoWindow) window.activeInfoWindow.close();
+    });
+
     // Setup Search Button
     const searchBtn = document.getElementById('search-area-btn');
 
@@ -149,8 +155,8 @@ const ICON_PATHS = {
 };
 
 let markerCluster;
-// Single shared infoWindow so only one popup is open at a time
-let activeInfoWindow = null;
+// Single shared infoWindow — stored on window so inline onclick= handlers can access it
+window.activeInfoWindow = null;
 
 function plotData(data) {
     // Clear existing markers
@@ -163,14 +169,9 @@ function plotData(data) {
     const bounds = new google.maps.LatLngBounds();
     
     // Reuse a single InfoWindow so only one popup is open at a time
-    if (!activeInfoWindow) {
-        activeInfoWindow = new google.maps.InfoWindow();
+    if (!window.activeInfoWindow) {
+        window.activeInfoWindow = new google.maps.InfoWindow();
     }
-    
-    // Close info window when clicking on the map background
-    map.addListener('click', () => {
-        if (activeInfoWindow) activeInfoWindow.close();
-    });
     
     // Filter visible data first
     const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
@@ -245,8 +246,8 @@ function plotData(data) {
 
             content += `</div></div>`;
 
-            activeInfoWindow.setContent(content);
-            activeInfoWindow.open(map, marker);
+            window.activeInfoWindow.setContent(content);
+            window.activeInfoWindow.open(map, marker);
         });
 
         markers.push(marker);
