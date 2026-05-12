@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block head %}
-<script src="https://polyfill.io/v3/polyfill.min.js?features=default"></script>
+<!-- Fix 2: polyfill.io removed — deprecated, blocked on iOS/Safari; modern browsers don't need it -->
 <script>
     const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";
 </script>
@@ -10,8 +10,25 @@
 {% endblock %}
 
 {% block content %}
+<!-- Fix 3: Mobile panel toggle button (floating, only visible on mobile) -->
+<button class="mobile-panel-toggle" id="mobile-panel-toggle" onclick="toggleMobilePanel()" aria-label="Toggle data panel">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+    </svg>
+    <span id="panel-badge" class="panel-badge" style="display:none;">0</span>
+</button>
+
 <div class="map-wrapper glass">
-    <div class="map-sidebar">
+    <!-- Sidebar / mobile bottom drawer -->
+    <div class="map-sidebar" id="map-sidebar">
+        <!-- Mobile drag handle -->
+        <div class="mobile-drag-handle" id="mobile-drag-handle">
+            <div class="drag-bar"></div>
+        </div>
+
         <div class="sidebar-header">
             <h2>Data Legend</h2>
             <div class="legend-stats" id="legend-stats">
@@ -24,7 +41,17 @@
         
         <div class="route-planner" id="route-planner-container" style="display: none; border-top: 1px solid var(--glass-border); padding-top: 1rem; margin-top: 1rem; flex: 1; overflow-y: auto;">
             <div class="sidebar-header" style="margin-bottom: 0.5rem; padding-bottom: 0;">
-                <h2>Route Planner</h2>
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <h2>Route Planner</h2>
+                    <!-- Fix 4: Clear Route button -->
+                    <button class="btn-clear-route" id="clear-route-btn" onclick="window.clearRoute()" title="Clear all stops">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        Clear
+                    </button>
+                </div>
                 <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 0.2rem;" id="route-stats">0 stops</div>
             </div>
             <div id="route-stops-list" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; overflow-y: auto;">
@@ -33,6 +60,8 @@
             <button class="btn-primary" style="width: 100%;" onclick="window.generateRoute()">Generate Route</button>
         </div>
     </div>
+
+    <!-- Map area -->
     <div style="position: relative; flex: 1; display: flex; flex-direction: column;">
         <div id="search-area-container" style="position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10;">
             <button id="search-area-btn" class="btn-primary" style="box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 20px; padding: 0.5rem 1.5rem; display: none;">
@@ -90,7 +119,6 @@
         if (navigator.clipboard && window.isSecureContext) {
             navigator.clipboard.writeText(text).then(showFeedback);
         } else {
-            // Fallback for non-HTTPS
             const textArea = document.createElement("textarea");
             textArea.value = text;
             textArea.style.position = "fixed";
@@ -130,6 +158,25 @@
     pollLogs();
 </script>
 {% endif %}
+
+<script>
+// Fix 3: Mobile panel toggle
+function toggleMobilePanel() {
+    const sidebar = document.getElementById('map-sidebar');
+    sidebar.classList.toggle('mobile-open');
+}
+
+// Close panel when tapping outside on mobile
+document.addEventListener('click', function(e) {
+    const sidebar = document.getElementById('map-sidebar');
+    const toggleBtn = document.getElementById('mobile-panel-toggle');
+    if (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open')) {
+        if (!sidebar.contains(e.target) && !toggleBtn.contains(e.target)) {
+            sidebar.classList.remove('mobile-open');
+        }
+    }
+});
+</script>
 
 <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
 {% endblock %}

@@ -7,27 +7,49 @@ config.read('config.ini')
 
 ZOHO_CLIENT_ID = config['ZOHO'].get('client_id')
 ZOHO_CLIENT_SECRET = config['ZOHO'].get('client_secret')
-ZOHO_REDIRECT_URI = config['ZOHO'].get('redirect_uri')
+
+# Support comma-separated list of redirect URIs (e.g. IP + DNS)
+_raw_redirect_uris = config['ZOHO'].get('redirect_uri', '')
+ZOHO_REDIRECT_URIS = [u.strip() for u in _raw_redirect_uris.split(',') if u.strip()]
+ZOHO_REDIRECT_URI = ZOHO_REDIRECT_URIS[0] if ZOHO_REDIRECT_URIS else ''
+
 ZOHO_ACCOUNTS_URL = config['ZOHO'].get('accounts_url', 'https://accounts.zoho.com')
 ZOHO_API_URL = config['ZOHO'].get('api_url', 'https://www.zohoapis.com')
 
-def get_authorization_url():
+def get_matching_redirect_uri(request_host_url: str) -> str:
+    """Return the configured redirect URI whose base URL best matches the incoming request host.
+    Falls back to the first URI if no match found."""
+    # Normalise — strip trailing slash
+    host = request_host_url.rstrip('/')
+    for uri in ZOHO_REDIRECT_URIS:
+        # Compare scheme+host portion only (ignore path)
+        from urllib.parse import urlparse
+        parsed_uri = urlparse(uri)
+        uri_base = f"{parsed_uri.scheme}://{parsed_uri.netloc}"
+        if host.startswith(uri_base) or uri_base.startswith(host):
+            return uri
+    # Fallback: return first URI
+    return ZOHO_REDIRECT_URI
+
+def get_authorization_url(redirect_uri: str = None):
+    uri = redirect_uri or ZOHO_REDIRECT_URI
     params = {
         'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ',
         'client_id': ZOHO_CLIENT_ID,
         'response_type': 'code',
         'access_type': 'offline',
-        'redirect_uri': ZOHO_REDIRECT_URI,
+        'redirect_uri': uri,
         'prompt': 'consent'
     }
     return f"{ZOHO_ACCOUNTS_URL}/oauth/v2/auth?{urlencode(params)}"
 
-def exchange_code_for_token(code):
+def exchange_code_for_token(code, redirect_uri: str = None):
+    uri = redirect_uri or ZOHO_REDIRECT_URI
     data = {
         'grant_type': 'authorization_code',
         'client_id': ZOHO_CLIENT_ID,
         'client_secret': ZOHO_CLIENT_SECRET,
-        'redirect_uri': ZOHO_REDIRECT_URI,
+        'redirect_uri': uri,
         'code': code
     }
     response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data)

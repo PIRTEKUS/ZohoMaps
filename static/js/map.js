@@ -265,14 +265,21 @@ function updateLegend(data) {
         modules[item.module].count++;
     });
 
+    // Fix 5: Eye icon toggle instead of checkbox
     for (let [mod, info] of Object.entries(modules)) {
         const item = document.createElement('div');
         item.className = 'legend-item';
-        const isChecked = !window.hiddenModules.has(mod);
+        const isVisible = !(window.hiddenModules && window.hiddenModules.has(mod));
+        const eyeVisible = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+        const eyeHidden = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+        const safeModule = mod.replace(/'/g, "\\'");
         item.innerHTML = `
-            <input type="checkbox" class="module-toggle" ${isChecked ? 'checked' : ''} 
-                   onchange="window.toggleModuleVisibility('${mod}', this.checked)"
-                   style="margin-right: 10px; cursor: pointer;">
+            <button class="legend-eye-btn ${isVisible ? 'visible' : 'hidden'}" 
+                    id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
+                    onclick="window.toggleModuleVisibility('${safeModule}', ${!isVisible})"
+                    title="${isVisible ? 'Hide' : 'Show'} ${mod}">
+                ${isVisible ? eyeVisible : eyeHidden}
+            </button>
             <span class="color-dot" style="background-color: ${info.color}"></span>
             <span class="legend-name">${mod}</span>
             <span class="legend-count">${info.count}</span>
@@ -281,15 +288,17 @@ function updateLegend(data) {
     }
 }
 
-window.toggleModuleVisibility = function(moduleName, visible) {
-    if (visible) {
-        window.hiddenModules.delete(moduleName);
-    } else {
+window.toggleModuleVisibility = function(moduleName, makeHidden) {
+    // makeHidden=true means we want to HIDE it (eye was visible, user clicked to hide)
+    if (makeHidden) {
         window.hiddenModules.add(moduleName);
+    } else {
+        window.hiddenModules.delete(moduleName);
     }
     // Re-plot data to apply visibility changes
     if (window.lastMapData) {
         plotData(window.lastMapData);
+        updateLegend(window.lastMapData);
     }
 };
 
@@ -311,6 +320,12 @@ window.addToRoute = function (id, name, lat, lng) {
         return;
     }
     window.routeStops.push({ id, name, lat, lng, pinnedPos: null });
+    window.renderRoutePlanner();
+};
+
+// Fix 4: Clear all route stops at once
+window.clearRoute = function () {
+    window.routeStops = [];
     window.renderRoutePlanner();
 };
 
@@ -388,6 +403,17 @@ window.renderRoutePlanner = function () {
     const container = document.getElementById('route-planner-container');
     const list = document.getElementById('route-stops-list');
     const stats = document.getElementById('route-stats');
+
+    // Update mobile badge
+    const badge = document.getElementById('panel-badge');
+    if (badge) {
+        if (window.routeStops.length > 0) {
+            badge.textContent = window.routeStops.length;
+            badge.style.display = 'flex';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
 
     if (window.routeStops.length === 0) {
         container.style.display = 'none';

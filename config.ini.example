@@ -1,6 +1,7 @@
 [ZOHO]
 client_id = YOUR_ZOHO_CLIENT_ID
 client_secret = YOUR_ZOHO_CLIENT_SECRET
+# Comma-separated list of allowed callback URIs (e.g. IP + DNS). The server auto-picks the matching one.
 redirect_uri = http://localhost:5000/callback
 # Example: https://accounts.zoho.com
 accounts_url = https://accounts.zoho.com

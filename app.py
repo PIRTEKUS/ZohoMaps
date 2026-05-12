@@ -156,14 +156,20 @@ def index():
 
 @app.route('/login')
 def login():
-    auth_url = zoho_api.get_authorization_url()
+    # Dynamically select the redirect URI matching the current request host
+    matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
+    auth_url = zoho_api.get_authorization_url(redirect_uri=matched_uri)
+    log_debug(f"Login initiated — using redirect_uri: {matched_uri}")
     return render_template('login.html', auth_url=auth_url)
 
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
     if code:
-        token_data = zoho_api.exchange_code_for_token(code)
+        # Pick the redirect URI that matches the host the callback arrived on
+        matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
+        log_debug(f"OAuth callback received — using redirect_uri: {matched_uri}")
+        token_data = zoho_api.exchange_code_for_token(code, redirect_uri=matched_uri)
         if 'access_token' in token_data:
             session['access_token'] = token_data['access_token']
             session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
