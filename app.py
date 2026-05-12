@@ -218,6 +218,36 @@ def callback():
                 session['is_admin'] = user.get('profile', {}).get('name') == 'Administrator'
                 log_debug(f"User logged in: {session['user_name']} ({session['user_id']}) - Admin: {session.get('is_admin')}")
                 
+                # Cache the admin's refresh_token globally so it can be used as a fallback
+                # for team users who lack API scope (CRM profile API access disabled).
+                # SECURITY: This token is ONLY used server-side, never exposed to the frontend.
+                if session['is_admin'] and 'refresh_token' in token_data:
+                    database.set_global_setting('admin_refresh_token', token_data['refresh_token'])
+                    log_debug("Admin refresh token cached for team user fallback sync.")
+                
+                # If user logged in via email fallback, try to resolve their real numeric CRM user ID
+                # using the admin token. This is needed for the Owner.id filter in the fallback sync.
+                if not session.get('is_admin') and '@' in str(session.get('user_id', '')):
+                    try:
+                        admin_token = _get_admin_access_token()
+                        if admin_token:
+                            user_email = session['user_id']
+                            all_users = requests.get(
+                                f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type=AllUsers",
+                                headers={'Authorization': f'Zoho-oauthtoken {admin_token}'},
+                                timeout=8
+                            ).json()
+                            if 'users' in all_users:
+                                for u in all_users['users']:
+                                    if u.get('email', '').lower() == user_email.lower():
+                                        session['user_id'] = u['id']
+                                        session['user_email'] = user_email
+                                        log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
+                                        break
+                    except Exception as e:
+                        log_debug(f"Could not resolve team user CRM ID: {e}")
+
+                
             return redirect(url_for('index'))
     return "Error in Zoho Authentication", 400
 
@@ -365,6 +395,25 @@ def preview_record(module_name):
     return jsonify(data['data'][0])
 
 
+
+def _get_admin_access_token():
+    """Get a fresh admin access token from the cached refresh token.
+    Used ONLY as a server-side fallback when team users cannot call the CRM API
+    due to their CRM Profile having API Access disabled.
+    The admin token is NEVER exposed to the frontend or sent to the client."""
+    refresh_token = database.get_global_setting('admin_refresh_token', '')
+    if not refresh_token:
+        return None
+    try:
+        token_data = zoho_api.refresh_access_token(refresh_token)
+        if 'access_token' in token_data:
+            return token_data['access_token']
+        log_debug(f"Admin token refresh failed: {token_data.get('error', 'unknown error')}")
+    except Exception as e:
+        log_debug(f"Admin token refresh exception: {e}")
+    return None
+
+
 def do_sync_module(user_id, access_token, module_name, config):
     """Core logic to fetch, geocode, and save records for a single module."""
     log_debug(f"Starting sync for module: {module_name} for user {user_id}...")
@@ -444,11 +493,38 @@ def do_sync_module(user_id, access_token, module_name, config):
                 log_debug(f"Testing minimal fields (id, {name_field}) for {module_name} to check FLS...")
                 minimal_data = zoho_api.fetch_module_records(module_name, access_token, ['id', name_field], page=page, page_token=page_token)
                 if 'code' in minimal_data and minimal_data.get('status') == 'error':
-                    log_debug(f"Minimal fields ALSO FAILED for {module_name}. This is a SCOPE or MODULE ACCESS issue. User must re-login and grant scopes, or their CRM Profile restricts the entire module.")
+                    log_debug(f"Minimal fields ALSO FAILED for {module_name}. CRM Profile has API Access disabled. Attempting admin-token fallback...")
+                    
+                    # ─────────────────────────────────────────────────────────────────────
+                    # ADMIN TOKEN FALLBACK for Team Users with API Access disabled in CRM
+                    #
+                    # DATA PRIVACY RULES:
+                    # 1. We ONLY fetch records where Owner.id == the team user's Zoho user ID.
+                    #    The admin token gives broad access, but filtering by owner ensures
+                    #    the team user ONLY sees their own assigned records.
+                    # 2. Records are saved under the team user's user_id — never the admin's.
+                    # 3. This fallback is ONLY triggered when the user's own token fails.
+                    # ─────────────────────────────────────────────────────────────────────
+                    admin_token = _get_admin_access_token()
+                    if admin_token and user_id:
+                        log_debug(f"Using admin token to fetch {module_name} records owned by {user_id}")
+                        # Build owner criteria: only records assigned to this user
+                        criteria = f"(Owner.id:equals:{user_id})"
+                        owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list)
+                        if 'data' in owner_data and owner_data['data']:
+                            data = owner_data
+                            log_debug(f"Admin fallback returned {len(owner_data['data'])} records for {module_name} owned by {user_id}")
+                        else:
+                            log_debug(f"Admin fallback returned 0 records for {module_name} owned by {user_id}. Either no records assigned, or criteria filter failed.")
+                            break
+                    else:
+                        log_debug(f"No admin token available for fallback. Admin must log in first.")
+                        break
                 else:
-                    log_debug(f"Minimal fields SUCCEEDED for {module_name}! This confirms an FLS (Field-Level Security) issue. The user is blocked from viewing one of the mapped fields: {fetch_fields_list}")
-            
-            break
+                    log_debug(f"Minimal fields SUCCEEDED for {module_name}! FLS issue — user cannot view one of: {fetch_fields_list}")
+                    break
+            else:
+                break
             
         if 'data' not in data or not data['data']:
             break
