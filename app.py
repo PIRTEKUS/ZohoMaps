@@ -120,6 +120,7 @@ def check_token_refresh():
             org_fetched = False
             try:
                 org_info = zoho_api.fetch_org_metadata(session['access_token'])
+                log_debug(f"DEBUG Org API raw response keys: {list(org_info.keys())} | code={org_info.get('code','?')}")
                 if 'org' in org_info and len(org_info['org']) > 0:
                     org = org_info['org'][0]
                     log_debug(f"DEBUG: Full Org Data: {json.dumps(org)}")
@@ -127,15 +128,29 @@ def check_token_refresh():
                     session['domain_name'] = org.get('domain_name', '')
                     org_fetched = True
                     log_debug(f"AUTO-DETECTED: OrgID={session['org_id']}, Domain={session['domain_name']}")
-                    # Auto-save to global DB so team users can use it
                     if session['org_id'] and not database.get_global_setting('crmplus_orgid', ''):
                         database.set_global_setting('crmplus_orgid', str(session['org_id']))
                         log_debug(f"Saved OrgID to global settings: {session['org_id']}")
                     if session['domain_name'] and not database.get_global_setting('crmplus_domain', ''):
                         database.set_global_setting('crmplus_domain', session['domain_name'])
                         log_debug(f"Saved Domain to global settings: {session['domain_name']}")
+                else:
+                    # v6 failed — try v3 as fallback
+                    log_debug(f"Org v6 failed (code={org_info.get('code','?')}), trying v3...")
+                    org_info_v3 = zoho_api.fetch_org_metadata_v3(session['access_token'])
+                    log_debug(f"DEBUG Org v3 raw: {json.dumps(org_info_v3)[:300]}")
+                    if 'org' in org_info_v3 and len(org_info_v3['org']) > 0:
+                        org = org_info_v3['org'][0]
+                        session['org_id'] = org.get('zgid') or org.get('zoid') or org.get('id')
+                        session['domain_name'] = org.get('domain_name', '')
+                        org_fetched = True
+                        log_debug(f"AUTO-DETECTED (v3): OrgID={session['org_id']}, Domain={session['domain_name']}")
+                        if session['org_id'] and not database.get_global_setting('crmplus_orgid', ''):
+                            database.set_global_setting('crmplus_orgid', str(session['org_id']))
+                        if session['domain_name'] and not database.get_global_setting('crmplus_domain', ''):
+                            database.set_global_setting('crmplus_domain', session['domain_name'])
             except Exception as org_err:
-                log_debug(f"DEBUG: Org API failed ({str(org_err)}) — trying global settings fallback")
+                log_debug(f"DEBUG: Org API exception: {str(org_err)}")
 
             # Fallback: load from global DB (written by admin session)
             if not org_fetched:
@@ -147,6 +162,8 @@ def check_token_refresh():
                 if stored_domain:
                     session['domain_name'] = stored_domain
                     log_debug(f"Loaded Domain from global settings: {stored_domain}")
+                if not stored_org_id and not stored_domain:
+                    log_debug("WARNING: org/domain not found via API or global settings. Admin must log in or set manually in Settings.")
 
 
 @app.route('/')
@@ -209,6 +226,9 @@ def logout():
 def settings():
     if 'access_token' not in session:
         return redirect(url_for('login'))
+    # Team users don't need settings — redirect them to the map
+    if not session.get('is_admin', False):
+        return redirect(url_for('index'))
     configs = database.get_all_module_configs(session.get('user_id'))
     shared_configs = database.get_shared_configs()
     show_console = database.get_global_setting('show_console', 'false') == 'true'
@@ -607,9 +627,10 @@ def get_map_data():
             else:
                 module_url_map[m['api_name']] = m['api_name']
 
-    # Build a config lookup dict once to avoid per-record DB queries
-    configs = {c['module_name']: c for c in database.get_all_module_configs(session.get('user_id'))}
+    # Build a config lookup dict: for team users this includes shared configs automatically
+    configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'))}
     
+
     map_points = []
     for r in records:
         cfg = configs.get(r['module_name'], {})

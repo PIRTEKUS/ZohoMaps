@@ -164,6 +164,31 @@ def get_shared_configs():
         results.append(r)
     return results
 
+def get_effective_configs(user_id):
+    """
+    Returns the effective module configs for a user:
+    - If they have their own configs, return those.
+    - Always merge in any shared configs they don't already have.
+    This lets team users automatically see shared configurations.
+    """
+    conn = get_db_connection()
+    own = conn.execute(
+        'SELECT * FROM module_config WHERE user_id = ?', (str(user_id),)
+    ).fetchall()
+    own_modules = {r['module_name'] for r in own}
+    
+    shared = conn.execute(
+        'SELECT * FROM module_config WHERE is_shared = 1 AND user_id != ?', (str(user_id),)
+    ).fetchall()
+    conn.close()
+    
+    results = []
+    for row in list(own) + [r for r in shared if r['module_name'] not in own_modules]:
+        r = dict(row)
+        r['field_mappings'] = json.loads(r['field_mappings'])
+        results.append(r)
+    return results
+
 def delete_module_config(user_id, module_name):
     conn = get_db_connection()
     conn.execute('DELETE FROM module_config WHERE user_id = ? AND module_name = ?', (str(user_id), module_name))
@@ -215,30 +240,49 @@ def save_module_records_batch(user_id, records):
         conn.close()
 
 def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
+    """
+    Returns records for this user AND records from shared config owners
+    so team users see the same data as admins without needing their own sync.
+    """
     conn = get_db_connection()
+    
+    # Collect all relevant user_ids: own + shared config owners
+    shared_owners = conn.execute(
+        'SELECT DISTINCT user_id FROM module_config WHERE is_shared = 1 AND user_id != ?',
+        (str(user_id),)
+    ).fetchall()
+    user_ids = [str(user_id)] + [r['user_id'] for r in shared_owners]
+    placeholders = ','.join('?' * len(user_ids))
+    
     if min_lng > max_lng:
-        query = '''
+        query = f'''
             SELECT * FROM module_records 
-            WHERE user_id = ? AND lat >= ? AND lat <= ? 
+            WHERE user_id IN ({placeholders})
+            AND lat >= ? AND lat <= ? 
             AND (lng >= ? OR lng <= ?)
             LIMIT 5000
         '''
-        rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
+        rows = conn.execute(query, user_ids + [min_lat, max_lat, min_lng, max_lng]).fetchall()
     else:
-        query = '''
+        query = f'''
             SELECT * FROM module_records 
-            WHERE user_id = ? AND lat >= ? AND lat <= ? 
+            WHERE user_id IN ({placeholders})
+            AND lat >= ? AND lat <= ? 
             AND lng >= ? AND lng <= ?
             LIMIT 5000
         '''
-        rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
+        rows = conn.execute(query, user_ids + [min_lat, max_lat, min_lng, max_lng]).fetchall()
     conn.close()
     
     results = []
+    seen = set()  # de-duplicate by (id, module_name)
     for row in rows:
-        r = dict(row)
-        r['record_data'] = json.loads(r['record_data'])
-        results.append(r)
+        key = (row['id'], row['module_name'])
+        if key not in seen:
+            seen.add(key)
+            r = dict(row)
+            r['record_data'] = json.loads(r['record_data'])
+            results.append(r)
     return results
 
 def clear_module_records(user_id, module_name):

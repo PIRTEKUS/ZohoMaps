@@ -101,12 +101,16 @@ def fetch_module_fields(module_name, access_token):
     return response.json()
 
 def fetch_org_metadata(access_token):
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {access_token}'
-    }
-    # v6 /org is the latest stable for org metadata
+    headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
     url = f"{ZOHO_API_URL}/crm/v6/org"
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=8)
+    return response.json()
+
+def fetch_org_metadata_v3(access_token):
+    """Fallback: try the v3 org endpoint if v6 fails."""
+    headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
+    url = f"{ZOHO_API_URL}/crm/v3/org"
+    response = requests.get(url, headers=headers, timeout=8)
     return response.json()
 
 def search_records(module_name, criteria, access_token, fields=None):
