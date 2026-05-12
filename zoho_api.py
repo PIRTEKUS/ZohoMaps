@@ -35,7 +35,8 @@ def get_authorization_url(redirect_uri: str = None):
     uri = redirect_uri or ZOHO_REDIRECT_URI
     params = {
         # AaaServer.profile.Read allows /oauth/user/info fallback for team users
-        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ,AaaServer.profile.Read',
+        # ZohoCRM.org.READ is required for /crm/v3/org and /crm/v6/org endpoints
+        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ,ZohoCRM.org.READ,AaaServer.profile.Read',
         'client_id': ZOHO_CLIENT_ID,
         'response_type': 'code',
         'access_type': 'offline',
