@@ -426,7 +426,18 @@ def do_sync_module(user_id, access_token, module_name, config):
         data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page, page_token=page_token)
         
         if 'code' in data and data.get('status') == 'error':
-            log_debug(f"API Error fetching {module_name}: {data.get('code')} - {data.get('message')}")
+            error_code = data.get('code')
+            log_debug(f"API Error fetching {module_name}: {error_code} - {data.get('message')}")
+            
+            # If NO_PERMISSION, try fetching with minimal fields to determine if it's FLS or Scope/Module Access
+            if error_code == 'NO_PERMISSION':
+                log_debug(f"Testing minimal fields (id, {name_field}) for {module_name} to check FLS...")
+                minimal_data = zoho_api.fetch_module_records(module_name, access_token, ['id', name_field], page=page, page_token=page_token)
+                if 'code' in minimal_data and minimal_data.get('status') == 'error':
+                    log_debug(f"Minimal fields ALSO FAILED for {module_name}. This is a SCOPE or MODULE ACCESS issue. User must re-login and grant scopes, or their CRM Profile restricts the entire module.")
+                else:
+                    log_debug(f"Minimal fields SUCCEEDED for {module_name}! This confirms an FLS (Field-Level Security) issue. The user is blocked from viewing one of the mapped fields: {fetch_fields_list}")
+            
             break
             
         if 'data' not in data or not data['data']:

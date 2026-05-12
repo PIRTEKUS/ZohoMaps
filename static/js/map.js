@@ -262,8 +262,14 @@ function updateLegend(data) {
         moduleCounts[item.module] = (moduleCounts[item.module] || 0) + 1;
     });
 
-    // Ensure window.configuredModules exists
-    const configuredModules = window.configuredModules || [];
+    // Ensure window.configuredModules exists, or fallback to the data we have
+    let configuredModules = window.configuredModules || [];
+    if (configuredModules.length === 0) {
+        configuredModules = Object.keys(moduleCounts).map(mod => ({
+            module_name: mod, 
+            marker_color: '#4f46e5' // Default color fallback
+        }));
+    }
 
     // Fix 5: Eye icon toggle instead of checkbox, plus Sync buttons
     for (let config of configuredModules) {
