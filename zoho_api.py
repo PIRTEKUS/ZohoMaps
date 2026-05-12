@@ -125,6 +125,8 @@ def search_records(module_name, criteria, access_token, fields=None):
     response = requests.get(url, headers=headers, params=params)
     if response.status_code == 200:
         return response.json()
+    if response.status_code != 204:
+        print(f"[ZOHO API ERROR] search_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
     return {'data': []}
 
 def fetch_user_info(access_token):

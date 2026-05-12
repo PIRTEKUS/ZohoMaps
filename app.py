@@ -361,8 +361,10 @@ def sync_module(module_name):
     if not config:
         return jsonify({'error': 'Module not configured'}), 404
         
-    log_debug(f"Starting sync for module: {module_name} for user {session.get('user_name')}...")
-    database.clear_module_records(session.get('user_id'), module_name)
+def do_sync_module(user_id, access_token, module_name, config):
+    """Core logic to fetch, geocode, and save records for a single module."""
+    log_debug(f"Starting sync for module: {module_name} for user {user_id}...")
+    database.clear_module_records(user_id, module_name)
     
     fields = config['field_mappings']
     
@@ -390,7 +392,7 @@ def sync_module(module_name):
     fetch_fields_list = list(fetch_fields)
         
     # Get field labels for display
-    field_metadata = zoho_api.fetch_module_fields(module_name, session['access_token'])
+    field_metadata = zoho_api.fetch_module_fields(module_name, access_token)
     field_label_map = {}
     if 'fields' in field_metadata:
         for f in field_metadata['fields']:
@@ -401,9 +403,6 @@ def sync_module(module_name):
             log_debug(f"Metadata error: {field_metadata.get('code')} - {field_metadata.get('message')}")
     
     log_debug(f"Mapped {len(field_label_map)} labels for {module_name}. Samples: {list(field_label_map.keys())[:5]}")
-
-    # Logic moved to module level extract_val function
-    pass
         
     count = 0
     page = 1
@@ -411,7 +410,7 @@ def sync_module(module_name):
     
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
-        data = zoho_api.fetch_module_records(module_name, session['access_token'], fetch_fields_list, page=page)
+        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page)
         
         if 'data' not in data or not data['data']:
             break
@@ -489,8 +488,7 @@ def sync_module(module_name):
 
         # Batch save the current page
         if page_records:
-            database.save_module_records_batch(session.get('user_id'), page_records)
-
+            database.save_module_records_batch(user_id, page_records)
 
         # Check for more records
         info = data.get('info', {})
@@ -502,9 +500,52 @@ def sync_module(module_name):
         if page > 50: # Limit to 10,000 records per module sync
             break
 
+    log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {user_id}).")
+    return count
 
-    log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {session.get('user_id')}).")
-    return jsonify({'success': True, 'synced': count})
+@app.route('/api/sync-module/<module_name>', methods=['POST'])
+def sync_module(module_name):
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Use effective configs so admins and team users can sync shared configs manually if needed
+    configs = database.get_effective_configs(session.get('user_id'))
+    config = next((c for c in configs if c['module_name'] == module_name), None)
+    if not config:
+        return jsonify({'error': 'Module not configured'}), 404
+        
+    try:
+        count = do_sync_module(session.get('user_id'), session['access_token'], module_name, config)
+        return jsonify({'success': True, 'synced': count})
+    except Exception as e:
+        log_debug(f"Sync error for {module_name}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/sync-all', methods=['POST'])
+def sync_all_modules():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    # Use effective configs so team users can sync shared configs
+    configs = database.get_effective_configs(session.get('user_id'))
+    if not configs:
+        return jsonify({'error': 'No modules configured to sync'}), 404
+        
+    results = {}
+    total_synced = 0
+    
+    for config in configs:
+        module_name = config['module_name']
+        try:
+            count = do_sync_module(session.get('user_id'), session['access_token'], module_name, config)
+            results[module_name] = {'success': True, 'synced': count}
+            total_synced += count
+        except Exception as e:
+            results[module_name] = {'error': str(e)}
+            
+    return jsonify({'success': True, 'total_synced': total_synced, 'details': results})
+
+
 
 def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng):
     """
