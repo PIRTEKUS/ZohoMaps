@@ -184,6 +184,17 @@ def index():
     # it is intentionally NOT a global setting so team users never see the console.
     show_console = session.get('show_console', False) and session.get('is_admin', False)
     effective_configs = database.get_effective_configs(session.get('user_id'))
+    
+    # Enrich configs with module_label (display name) from cached module list
+    # so the data legend can match colors even when item.module shows display labels
+    cached_modules_json = database.get_global_setting('cached_modules', '[]')
+    try:
+        module_labels = {m['api_name']: m.get('plural_label', m['api_name']) for m in json.loads(cached_modules_json) if 'api_name' in m}
+        for c in effective_configs:
+            c['module_label'] = module_labels.get(c['module_name'], c['module_name'])
+    except Exception:
+        pass
+    
     return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console, configs=effective_configs)
 
 @app.route('/login')

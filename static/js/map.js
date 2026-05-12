@@ -149,6 +149,8 @@ const ICON_PATHS = {
 };
 
 let markerCluster;
+// Single shared infoWindow so only one popup is open at a time
+let activeInfoWindow = null;
 
 function plotData(data) {
     // Clear existing markers
@@ -159,7 +161,16 @@ function plotData(data) {
     }
 
     const bounds = new google.maps.LatLngBounds();
-    const infoWindow = new google.maps.InfoWindow();
+    
+    // Reuse a single InfoWindow so only one popup is open at a time
+    if (!activeInfoWindow) {
+        activeInfoWindow = new google.maps.InfoWindow();
+    }
+    
+    // Close info window when clicking on the map background
+    map.addListener('click', () => {
+        if (activeInfoWindow) activeInfoWindow.close();
+    });
     
     // Filter visible data first
     const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
@@ -217,18 +228,25 @@ function plotData(data) {
                 if (v) content += `<div><strong>${k}:</strong> ${v}</div>`;
             }
 
-            // Add route action buttons
+            // Add route action buttons — onclick handlers also close the info window
             const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+            
+            // Detect if user is on a mobile device for the "Open in App" link
+            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+            // Zoho CRM mobile deep link scheme: zohocrm://crm/[module]/[id]
+            const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.module)}/${item.id}`;
+            
             content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.getDirections(${item.lat}, ${item.lng})">Directions</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM</button>
+                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM (Web)</button>
+                ${isMobile ? `<button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2;" onclick="activeInfoWindow.close(); window.location.href='${zohoAppLink}'">Open in Zoho CRM App</button>` : ''}
             </div>`;
 
             content += `</div></div>`;
 
-            infoWindow.setContent(content);
-            infoWindow.open(map, marker);
+            activeInfoWindow.setContent(content);
+            activeInfoWindow.open(map, marker);
         });
 
         markers.push(marker);
@@ -241,7 +259,6 @@ function plotData(data) {
             map,
             onClusterClick: (event, cluster, map) => {
                 // Prevent auto-zoom on click as requested
-                // console.log("Cluster clicked, zoom prevented.");
             }
         });
     } else {
@@ -264,18 +281,38 @@ function updateLegend(data) {
 
     // Ensure window.configuredModules exists, or fallback to the data we have
     let configuredModules = window.configuredModules || [];
+    
+    // Build a color/icon lookup that matches BOTH the api_name AND the display label
+    // (item.module from the server is already the display label/plural_label)
+    const moduleColorByLabel = {};
+    for (let cfg of configuredModules) {
+        // Map api_name key
+        moduleColorByLabel[cfg.module_name] = cfg.marker_color;
+        // Also map the display label if stored
+        if (cfg.module_label) moduleColorByLabel[cfg.module_label] = cfg.marker_color;
+    }
+    // Also pick colors from the actual data (stored in record color)
+    data.forEach(item => {
+        if (item.color && !moduleColorByLabel[item.module]) {
+            moduleColorByLabel[item.module] = item.color;
+        }
+    });
+
     if (configuredModules.length === 0) {
         configuredModules = Object.keys(moduleCounts).map(mod => ({
             module_name: mod, 
-            marker_color: '#4f46e5' // Default color fallback
+            marker_color: moduleColorByLabel[mod] || '#4f46e5'
         }));
     }
 
-    // Fix 5: Eye icon toggle instead of checkbox, plus Sync buttons
+    // Eye icon toggle instead of checkbox, plus Sync buttons
     for (let config of configuredModules) {
         const mod = config.module_name;
-        const color = config.marker_color;
-        const count = moduleCounts[mod] || 0;
+        // Color: use config setting, then fall back to what's in the data
+        const color = config.marker_color || moduleColorByLabel[mod] || '#4f46e5';
+        // Count: check both api_name and display label
+        const count = moduleCounts[mod] || moduleCounts[config.module_label] || 0;
+
         
         const item = document.createElement('div');
         item.className = 'legend-item';
