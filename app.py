@@ -352,15 +352,7 @@ def preview_record(module_name):
         
     return jsonify(data['data'][0])
 
-@app.route('/api/sync-module/<module_name>', methods=['POST'])
-def sync_module(module_name):
-    if 'access_token' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    config = database.get_module_config(session.get('user_id'), module_name)
-    if not config:
-        return jsonify({'error': 'Module not configured'}), 404
-        
+
 def do_sync_module(user_id, access_token, module_name, config):
     """Core logic to fetch, geocode, and save records for a single module."""
     log_debug(f"Starting sync for module: {module_name} for user {user_id}...")
