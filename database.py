@@ -244,18 +244,18 @@ def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
     Returns map records for exactly ONE user_id within the given lat/lng bounds.
 
     ╔══════════════════════════════════════════════════════════════════════╗
-    ║  DATA PRIVACY — DO NOT MODIFY WITHOUT A FULL SECURITY REVIEW        ║
+    ║  DATA PRIVACY — DO NOT MODIFY WITHOUT A FULL SECURITY REVIEW         ║
     ║                                                                      ║
-    ║  Records in module_records are stored per-user. Mixing user_ids     ║
-    ║  here would expose one user's CRM data to another user.             ║
+    ║  Records in module_records are stored per-user. Mixing user_ids      ║
+    ║  here would expose one user's CRM data to another user.              ║
     ║                                                                      ║
-    ║  The query MUST remain `WHERE user_id = ?` (single user only).      ║
-    ║  Shared configs (is_shared=1) control DISPLAY CONFIGURATION only    ║
-    ║  (which modules/fields/colors to show) — NOT data access rights.    ║
+    ║  The query MUST remain `WHERE user_id = ?` (single user only).       ║
+    ║  Shared configs (is_shared=1) control DISPLAY CONFIGURATION only     ║
+    ║  (which modules/fields/colors to show) — NOT data access rights.     ║
     ║                                                                      ║
-    ║  Data access is enforced at two levels:                             ║
-    ║    1. Zoho CRM API — only returns records the token owner can see.  ║
-    ║    2. This query   — only reads records stored for that user_id.    ║
+    ║  Data access is enforced at two levels:                              ║
+    ║    1. Zoho CRM API — only returns records the token owner can see.   ║
+    ║    2. This query   — only reads records stored for that user_id.     ║
     ╚══════════════════════════════════════════════════════════════════════╝
     """
     conn = get_db_connection()

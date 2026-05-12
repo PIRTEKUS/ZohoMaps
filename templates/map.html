@@ -246,5 +246,10 @@ window.syncAllMyData = async function() {
 
 </script>
 
-<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
+    <script>
+        const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";
+        window.configuredModules = {{ configs | tojson | safe }};
+    </script>
+    <script src="{{ url_for('static', filename='js/map.js') }}"></script>
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
 {% endblock %}

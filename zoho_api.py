@@ -67,14 +67,18 @@ def refresh_access_token(refresh_token):
     response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data)
     return response.json()
 
-def fetch_module_records(module_name, access_token, fields=None, page=1):
+def fetch_module_records(module_name, access_token, fields=None, page=1, page_token=None):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
     params = {
-        'page': page,
         'per_page': 200 # Max per page
     }
+    if page_token:
+        params['page_token'] = page_token
+    else:
+        params['page'] = page
+        
     if fields:
         params['fields'] = ','.join(fields)
         

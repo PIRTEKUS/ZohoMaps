@@ -183,7 +183,8 @@ def index():
     # show_console is a per-user session setting — admins can toggle it in Settings;
     # it is intentionally NOT a global setting so team users never see the console.
     show_console = session.get('show_console', False) and session.get('is_admin', False)
-    return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console)
+    effective_configs = database.get_effective_configs(session.get('user_id'))
+    return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console, configs=effective_configs)
 
 @app.route('/login')
 def login():
@@ -415,13 +416,14 @@ def do_sync_module(user_id, access_token, module_name, config):
         
     count = 0
     page = 1
+    page_token = None
     more_records = True
     
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
         
         # We restore fetch_fields_list because omitting it seems to cause Zoho to return 0 records or an error for everyone.
-        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page)
+        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page, page_token=page_token)
         
         if 'code' in data and data.get('status') == 'error':
             log_debug(f"API Error fetching {module_name}: {data.get('code')} - {data.get('message')}")
@@ -508,11 +510,13 @@ def do_sync_module(user_id, access_token, module_name, config):
         # Check for more records
         info = data.get('info', {})
         more_records = info.get('more_records', False)
+        page_token = info.get('next_page_token')
+        
         if more_records:
             page += 1
         
-        # Safety break to avoid infinite loops in case of API issues
-        if page > 50: # Limit to 10,000 records per module sync
+        # Extended safety break: 500 pages * 200 = 100,000 records max per module
+        if page > 500:
             break
 
     log_debug(f"Sync complete! Saved {count} records for {module_name} (User: {user_id}).")
@@ -601,10 +605,12 @@ def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max
             
             # Fetch fields needed
             fetch_fields = set(['id', fields.get('title_field', 'Name')])
-            for f in fields.values():
-                if f: fetch_fields.add(f)
-            for f in fields.get('additional_fields', []):
-                fetch_fields.add(f)
+            for k, v in fields.items():
+                if k == 'additional_fields' and isinstance(v, list):
+                    fetch_fields.update([f for f in v if f])
+                elif isinstance(v, str) and v:
+                    fetch_fields.add(v)
+
             
             data = zoho_api.search_records(module_name, criteria, access_token, fields=list(fetch_fields))
             

@@ -256,37 +256,83 @@ function updateLegend(data) {
     const legend = document.getElementById('legend-container');
     legend.innerHTML = '';
 
-    // Group by module
-    const modules = {};
+    // Count visible records per module
+    const moduleCounts = {};
     data.forEach(item => {
-        if (!modules[item.module]) {
-            modules[item.module] = { count: 0, color: item.color };
-        }
-        modules[item.module].count++;
+        moduleCounts[item.module] = (moduleCounts[item.module] || 0) + 1;
     });
 
-    // Fix 5: Eye icon toggle instead of checkbox
-    for (let [mod, info] of Object.entries(modules)) {
+    // Ensure window.configuredModules exists
+    const configuredModules = window.configuredModules || [];
+
+    // Fix 5: Eye icon toggle instead of checkbox, plus Sync buttons
+    for (let config of configuredModules) {
+        const mod = config.module_name;
+        const color = config.marker_color;
+        const count = moduleCounts[mod] || 0;
+        
         const item = document.createElement('div');
         item.className = 'legend-item';
+        
         const isVisible = !(window.hiddenModules && window.hiddenModules.has(mod));
         const eyeVisible = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
         const eyeHidden = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
         const safeModule = mod.replace(/'/g, "\\'");
+        
         item.innerHTML = `
-            <button class="legend-eye-btn ${isVisible ? 'visible' : 'hidden'}" 
-                    id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
-                    onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})"
-                    title="${isVisible ? 'Hide' : 'Show'} ${mod}">
-                ${isVisible ? eyeVisible : eyeHidden}
-            </button>
-            <span class="color-dot" style="background-color: ${info.color}"></span>
-            <span class="legend-name">${mod}</span>
-            <span class="legend-count">${info.count}</span>
+            <div style="display: flex; align-items: center; gap: 8px; flex-grow: 1;">
+                <button class="legend-eye-btn ${isVisible ? 'visible' : 'hidden'}" 
+                        id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
+                        onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})"
+                        title="${isVisible ? 'Hide' : 'Show'} ${mod}">
+                    ${isVisible ? eyeVisible : eyeHidden}
+                </button>
+                <span class="color-dot" style="background-color: ${color}"></span>
+                <span class="legend-name" style="flex-grow: 1;">${mod} <span class="legend-count" style="margin-left: 4px;">(${count})</span></span>
+                <button class="btn-primary sync-mod-btn" onclick="syncSingleModule('${safeModule}', this)" style="padding: 2px 6px; font-size: 0.75rem; border-radius: 4px;" title="Sync ${mod} Data">Sync</button>
+            </div>
         `;
         legend.appendChild(item);
     }
 }
+
+window.syncSingleModule = async function(moduleName, btn) {
+    btn.disabled = true;
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner" style="width:10px;height:10px;"></span>`;
+    
+    // Also update the global status indicator if present
+    const status = document.getElementById('sync-status');
+    if (status) {
+        status.style.color = 'var(--text-secondary)';
+        status.textContent = 'Syncing ' + moduleName + '...';
+    }
+
+    try {
+        const res = await fetch('/api/sync-module/' + encodeURIComponent(moduleName), { method: 'POST' });
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'Sync failed');
+        }
+        const data = await res.json();
+        if (status) {
+            status.style.color = 'var(--success)';
+            status.textContent = 'Synced ' + data.synced + ' ' + moduleName + ' records!';
+        }
+        btn.innerHTML = '✓';
+        setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 2000);
+        // Refresh the map data
+        window.fetchData();
+    } catch (e) {
+        console.error(e);
+        if (status) {
+            status.style.color = 'var(--error)';
+            status.textContent = 'Failed to sync ' + moduleName;
+        }
+        btn.innerHTML = '✗';
+        setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 3000);
+    }
+};
 
 window.toggleModuleVisibility = function(moduleName, makeHidden) {
     // makeHidden=true means we want to HIDE it (eye was visible, user clicked to hide)
