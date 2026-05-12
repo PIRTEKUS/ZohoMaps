@@ -421,15 +421,15 @@ p {
     background: #000; /* Placeholder for loading */
 }
 
-/* Mobile panel toggle button (floating FAB) */
+/* Mobile panel toggle FAB — positioned inside the map area, top-right */
 .mobile-panel-toggle {
     display: none; /* hidden on desktop */
-    position: fixed;
-    bottom: 80px;
+    position: absolute;
+    top: 16px;
     right: 16px;
-    z-index: 150;
-    width: 48px;
-    height: 48px;
+    z-index: 20;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     background: rgba(30, 41, 59, 0.95);
     border: 1px solid var(--glass-border);
@@ -443,9 +443,10 @@ p {
     transition: transform 0.2s, background 0.2s;
     -webkit-tap-highlight-color: transparent;
 }
-.mobile-panel-toggle:hover {
+.mobile-panel-toggle:hover, .mobile-panel-toggle.panel-open {
     transform: scale(1.08);
-    background: rgba(30,41,59,1);
+    background: var(--primary);
+    border-color: var(--primary);
 }
 .panel-badge {
     position: absolute;
@@ -466,7 +467,7 @@ p {
 .mobile-drag-handle {
     display: none;
     justify-content: center;
-    padding: 8px 0 4px;
+    padding: 8px 0 2px;
     flex-shrink: 0;
 }
 .drag-bar {
@@ -474,6 +475,67 @@ p {
     height: 4px;
     border-radius: 2px;
     background: rgba(255,255,255,0.25);
+}
+
+/* ===== Sidebar tab bar (mobile) ===== */
+.sidebar-tabs {
+    display: none; /* hidden on desktop */
+    flex-shrink: 0;
+    flex-direction: row;
+    border-bottom: 1px solid var(--glass-border);
+    background: rgba(0,0,0,0.2);
+}
+.sidebar-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0.6rem 0.5rem;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 0.2s, border-bottom 0.2s;
+    border-bottom: 2px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+}
+.sidebar-tab.active {
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
+}
+.tab-badge {
+    background: var(--primary);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ===== Sidebar panels ===== */
+.sidebar-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Route stops scrollable area */
+.route-stops-scroll {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0.75rem 1rem 0;
 }
 
 /* ========================
@@ -915,13 +977,16 @@ input:checked + .slider:before {
         transform: translateY(0);
     }
 
-    /* Show drag handle on mobile */
-    .mobile-drag-handle {
+    /* Show FAB on mobile (it's inside the map container now) */
+    .mobile-panel-toggle {
         display: flex;
     }
-
-    /* Show FAB toggle on mobile */
-    .mobile-panel-toggle {
+    /* Show tab bar */
+    .sidebar-tabs {
+        display: flex;
+    }
+    /* Show drag handle */
+    .mobile-drag-handle {
         display: flex;
     }
 

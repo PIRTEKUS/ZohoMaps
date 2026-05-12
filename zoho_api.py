@@ -34,7 +34,8 @@ def get_matching_redirect_uri(request_host_url: str) -> str:
 def get_authorization_url(redirect_uri: str = None):
     uri = redirect_uri or ZOHO_REDIRECT_URI
     params = {
-        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ',
+        # AaaServer.profile.Read allows /oauth/user/info fallback for team users
+        'scope': 'ZohoCRM.modules.all,ZohoCRM.settings.all,ZohoCRM.users.READ,AaaServer.profile.Read',
         'client_id': ZOHO_CLIENT_ID,
         'response_type': 'code',
         'access_type': 'offline',
@@ -125,7 +126,8 @@ def fetch_user_info(access_token):
     """
     Fetch current user info.
     Primary: CRM /users API (admins + orgs that grant ZohoCRM.users.READ).
-    Fallback: Zoho Accounts OAuth profile endpoint — works for ALL Zoho users.
+    Fallback: Zoho Accounts OAuth profile endpoint — works for ALL Zoho users
+              (requires AaaServer.profile.Read scope in the OAuth grant).
     Returns a normalised dict with a 'users' list to keep app.py logic unchanged.
     """
     headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
@@ -135,37 +137,33 @@ def fetch_user_info(access_token):
     try:
         resp = requests.get(crm_url, headers=headers, timeout=8)
         data = resp.json()
-        # If it worked and returned users, return as-is
         if data.get('status') != 'error' and 'users' in data:
             return data
-    except Exception:
-        pass
+        print(f"[zoho_api] CRM users API failed: {data.get('code')} - trying accounts fallback")
+    except Exception as e:
+        print(f"[zoho_api] CRM users API exception: {e} - trying accounts fallback")
 
-    # --- Fallback: Zoho Accounts OAuth profile (works for all users) ---
-    # Endpoint: {accounts_url}/oauth/user/info
+    # --- Fallback: Zoho Accounts OAuth profile ---
     profile_url = f"{ZOHO_ACCOUNTS_URL}/oauth/user/info"
     try:
         resp = requests.get(profile_url, headers=headers, timeout=8)
+        print(f"[zoho_api] Accounts profile response [{resp.status_code}]: {resp.text[:300]}")
         profile = resp.json()
-        # Accounts profile shape: { "ZAUID": "...", "Display_Name": "...",
-        #   "First_Name": "...", "Last_Name": "...", "Email": "..." }
         if 'Email' in profile or 'Display_Name' in profile:
             full_name = profile.get('Display_Name') or (
                 f"{profile.get('First_Name', '')} {profile.get('Last_Name', '')}".strip()
             )
             user_id = profile.get('ZAUID') or profile.get('Email', 'unknown')
-            # Normalise to same shape expected by app.py
             return {
                 'users': [{
                     'id': str(user_id),
                     'full_name': full_name,
                     'last_name': profile.get('Last_Name', ''),
-                    # Team users via this endpoint are treated as standard
                     'profile': {'name': 'Standard', 'id': 'standard'}
                 }]
             }
-    except Exception:
-        pass
+        print(f"[zoho_api] Accounts profile missing expected fields: {list(profile.keys())}")
+    except Exception as e:
+        print(f"[zoho_api] Accounts profile exception: {e}")
 
-    # Complete failure
     return {'code': 'NO_PERMISSION', 'message': 'Could not fetch user info from any endpoint', 'status': 'error'}

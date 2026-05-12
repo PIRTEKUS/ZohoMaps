@@ -276,7 +276,7 @@ function updateLegend(data) {
         item.innerHTML = `
             <button class="legend-eye-btn ${isVisible ? 'visible' : 'hidden'}" 
                     id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
-                    onclick="window.toggleModuleVisibility('${safeModule}', ${!isVisible})"
+                    onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})"
                     title="${isVisible ? 'Hide' : 'Show'} ${mod}">
                 ${isVisible ? eyeVisible : eyeHidden}
             </button>
@@ -400,29 +400,24 @@ function optimizeRoute(stops, userLat, userLng) {
 }
 
 window.renderRoutePlanner = function () {
-    const container = document.getElementById('route-planner-container');
-    const list = document.getElementById('route-stops-list');
-    const stats = document.getElementById('route-stats');
+    // New tab-based HTML uses #panel-route, #route-stops-list, #route-stats
+    const routePanel = document.getElementById('panel-route');
+    const list       = document.getElementById('route-stops-list');
+    const stats      = document.getElementById('route-stats');
 
-    // Update mobile badge
-    const badge = document.getElementById('panel-badge');
-    if (badge) {
-        if (window.routeStops.length > 0) {
-            badge.textContent = window.routeStops.length;
-            badge.style.display = 'flex';
-        } else {
-            badge.style.display = 'none';
-        }
+    // Update tab badge (works on both desktop and mobile)
+    if (typeof window.updateRouteBadge === 'function') {
+        window.updateRouteBadge(window.routeStops.length);
     }
 
     if (window.routeStops.length === 0) {
-        container.style.display = 'none';
+        // Nothing to show — switch back to legend tab on mobile
+        if (routePanel) routePanel.style.display = 'none';
         return;
     }
 
-    container.style.display = 'flex';
-    container.style.flexDirection = 'column';
     stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10) — will auto-optimize`;
+
 
     list.innerHTML = '';
     window.routeStops.forEach((stop, idx) => {
