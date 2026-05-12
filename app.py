@@ -389,6 +389,12 @@ def do_sync_module(user_id, access_token, module_name, config):
     if 'fields' in field_metadata:
         for f in field_metadata['fields']:
             field_label_map[f['api_name']] = f['display_label']
+        # Automatically cache fields for team user fallback
+        try:
+            fields_to_cache = [{'api_name': f['api_name'], 'display_label': f['display_label']} for f in field_metadata['fields']]
+            database.set_global_setting(f'cached_fields_{module_name}', json.dumps(fields_to_cache))
+        except Exception as e:
+            log_debug(f"Failed to cache fields for {module_name}: {e}")
     else:
         # Team users lack permission to fetch fields, so fallback to the admin's globally cached fields
         cached = database.get_global_setting(f'cached_fields_{module_name}', '')

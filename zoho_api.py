@@ -82,6 +82,8 @@ def fetch_module_records(module_name, access_token, fields=None, page=1):
     response = requests.get(url, headers=headers, params=params)
     if response.status_code == 204:
         return {'data': []} # No content
+    if response.status_code != 200:
+        print(f"[ZOHO API ERROR] fetch_module_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
     return response.json()
 
 def fetch_module_metadata(access_token):
