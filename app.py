@@ -168,7 +168,7 @@ def check_token_refresh():
 
 @app.route('/')
 def index():
-    if 'access_token' not in session:
+    if 'access_token' not in session or not session.get('user_id'):
         return redirect(url_for('login'))
     
     # Priority: Manual Global Setting > Session Cache
@@ -390,6 +390,16 @@ def do_sync_module(user_id, access_token, module_name, config):
         for f in field_metadata['fields']:
             field_label_map[f['api_name']] = f['display_label']
     else:
+        # Team users lack permission to fetch fields, so fallback to the admin's globally cached fields
+        cached = database.get_global_setting(f'cached_fields_{module_name}', '')
+        if cached:
+            try:
+                cached_fields = json.loads(cached)
+                for f in cached_fields:
+                    field_label_map[f['api_name']] = f['display_label']
+            except:
+                pass
+        
         log_debug(f"Warning: No 'fields' key in metadata for {module_name}. Response keys: {list(field_metadata.keys())}")
         if 'code' in field_metadata:
             log_debug(f"Metadata error: {field_metadata.get('code')} - {field_metadata.get('message')}")
@@ -402,7 +412,11 @@ def do_sync_module(user_id, access_token, module_name, config):
     
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
-        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page)
+        
+        # Do not pass fetch_fields_list. If the team user's profile restricts FLS to ANY of the 
+        # fields in fetch_fields_list, Zoho CRM rejects the ENTIRE request with NO_PERMISSION.
+        # By omitting fields, Zoho returns all fields the user *is* allowed to see.
+        data = zoho_api.fetch_module_records(module_name, access_token, fields=None, page=page)
         
         if 'data' not in data or not data['data']:
             break
