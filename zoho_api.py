@@ -122,10 +122,50 @@ def search_records(module_name, criteria, access_token, fields=None):
     return {'data': []}
 
 def fetch_user_info(access_token):
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {access_token}'
-    }
-    # Fetch current user
-    url = f"{ZOHO_API_URL}/crm/v3/users?type=CurrentUser"
-    response = requests.get(url, headers=headers)
-    return response.json()
+    """
+    Fetch current user info.
+    Primary: CRM /users API (admins + orgs that grant ZohoCRM.users.READ).
+    Fallback: Zoho Accounts OAuth profile endpoint — works for ALL Zoho users.
+    Returns a normalised dict with a 'users' list to keep app.py logic unchanged.
+    """
+    headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
+
+    # --- Primary: CRM Users API ---
+    crm_url = f"{ZOHO_API_URL}/crm/v3/users?type=CurrentUser"
+    try:
+        resp = requests.get(crm_url, headers=headers, timeout=8)
+        data = resp.json()
+        # If it worked and returned users, return as-is
+        if data.get('status') != 'error' and 'users' in data:
+            return data
+    except Exception:
+        pass
+
+    # --- Fallback: Zoho Accounts OAuth profile (works for all users) ---
+    # Endpoint: {accounts_url}/oauth/user/info
+    profile_url = f"{ZOHO_ACCOUNTS_URL}/oauth/user/info"
+    try:
+        resp = requests.get(profile_url, headers=headers, timeout=8)
+        profile = resp.json()
+        # Accounts profile shape: { "ZAUID": "...", "Display_Name": "...",
+        #   "First_Name": "...", "Last_Name": "...", "Email": "..." }
+        if 'Email' in profile or 'Display_Name' in profile:
+            full_name = profile.get('Display_Name') or (
+                f"{profile.get('First_Name', '')} {profile.get('Last_Name', '')}".strip()
+            )
+            user_id = profile.get('ZAUID') or profile.get('Email', 'unknown')
+            # Normalise to same shape expected by app.py
+            return {
+                'users': [{
+                    'id': str(user_id),
+                    'full_name': full_name,
+                    'last_name': profile.get('Last_Name', ''),
+                    # Team users via this endpoint are treated as standard
+                    'profile': {'name': 'Standard', 'id': 'standard'}
+                }]
+            }
+    except Exception:
+        pass
+
+    # Complete failure
+    return {'code': 'NO_PERMISSION', 'message': 'Could not fetch user info from any endpoint', 'status': 'error'}
