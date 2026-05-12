@@ -91,14 +91,16 @@ def clear_server_logs():
 @app.before_request
 def check_token_refresh():
     if 'access_token' in session and 'expires_at' in session:
-        if time.time() > session['expires_at'] - 300: # Refresh if within 5 mins of expiry
+
+        # 1. Refresh token if near expiry
+        if time.time() > session['expires_at'] - 300:
             if 'refresh_token' in session:
                 token_data = zoho_api.refresh_access_token(session['refresh_token'])
                 if 'access_token' in token_data:
                     session['access_token'] = token_data['access_token']
                     session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
-        
-        # Fetch user info if missing OR to refresh permissions
+
+        # 2. Fetch user info if missing
         if 'user_id' not in session or 'is_admin' not in session:
             try:
                 user_info = zoho_api.fetch_user_info(session['access_token'])
@@ -106,54 +108,46 @@ def check_token_refresh():
                     user = user_info['users'][0]
                     session['user_id'] = user['id']
                     session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
-                    
-                    # Robust Admin Check
                     profile = user.get('profile', {})
                     profile_name = profile.get('name', '')
-                    profile_id = profile.get('id', '')
                     session['is_admin'] = (profile_name.lower() in ['administrator', 'admin'])
-                    
                     log_debug(f"LOGIN INFO: Name={session['user_name']}, Profile={profile_name}, IsAdmin={session['is_admin']}, ID={session['user_id']}")
-                    
-                    # Auto-detect Domain/Org if not already in session
-                    if 'org_id' not in session or 'domain_name' not in session:
-                        org_fetched = False
-                        try:
-                            org_info = zoho_api.fetch_org_metadata(session['access_token'])
-                            if 'org' in org_info and len(org_info['org']) > 0:
-                                org = org_info['org'][0]
-                                log_debug(f"DEBUG: Full Org Data: {json.dumps(org)}")
-                                
-                                session['org_id'] = org.get('zgid') or org.get('zoid') or org.get('id')
-                                session['domain_name'] = org.get('domain_name', '')
-                                org_fetched = True
-                                
-                                log_debug(f"AUTO-DETECTED: OrgID={session['org_id']}, Domain={session['domain_name']}")
-                                
-                                # ── Auto-save to global DB so team users can use it too ──
-                                if session['org_id'] and not database.get_global_setting('crmplus_orgid', ''):
-                                    database.set_global_setting('crmplus_orgid', str(session['org_id']))
-                                    log_debug(f"Saved OrgID to global settings: {session['org_id']}")
-                                if session['domain_name'] and not database.get_global_setting('crmplus_domain', ''):
-                                    database.set_global_setting('crmplus_domain', session['domain_name'])
-                                    log_debug(f"Saved Domain to global settings: {session['domain_name']}")
-                        except Exception as org_err:
-                            log_debug(f"DEBUG: Org API failed ({str(org_err)}) — will try global settings fallback")
-                        
-                        # ── Fallback: load org info from global DB (saved by admin) ──
-                        if not org_fetched:
-                            stored_org_id = database.get_global_setting('crmplus_orgid', '')
-                            stored_domain = database.get_global_setting('crmplus_domain', '')
-                            if stored_org_id:
-                                session['org_id'] = stored_org_id
-                                log_debug(f"Loaded OrgID from global settings for team user: {stored_org_id}")
-                            if stored_domain:
-                                session['domain_name'] = stored_domain
-                                log_debug(f"Loaded Domain from global settings for team user: {stored_domain}")
-
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
-                pass
+
+        # 3. Detect org/domain — runs INDEPENDENTLY for every user when missing from session
+        if 'org_id' not in session or 'domain_name' not in session:
+            org_fetched = False
+            try:
+                org_info = zoho_api.fetch_org_metadata(session['access_token'])
+                if 'org' in org_info and len(org_info['org']) > 0:
+                    org = org_info['org'][0]
+                    log_debug(f"DEBUG: Full Org Data: {json.dumps(org)}")
+                    session['org_id'] = org.get('zgid') or org.get('zoid') or org.get('id')
+                    session['domain_name'] = org.get('domain_name', '')
+                    org_fetched = True
+                    log_debug(f"AUTO-DETECTED: OrgID={session['org_id']}, Domain={session['domain_name']}")
+                    # Auto-save to global DB so team users can use it
+                    if session['org_id'] and not database.get_global_setting('crmplus_orgid', ''):
+                        database.set_global_setting('crmplus_orgid', str(session['org_id']))
+                        log_debug(f"Saved OrgID to global settings: {session['org_id']}")
+                    if session['domain_name'] and not database.get_global_setting('crmplus_domain', ''):
+                        database.set_global_setting('crmplus_domain', session['domain_name'])
+                        log_debug(f"Saved Domain to global settings: {session['domain_name']}")
+            except Exception as org_err:
+                log_debug(f"DEBUG: Org API failed ({str(org_err)}) — trying global settings fallback")
+
+            # Fallback: load from global DB (written by admin session)
+            if not org_fetched:
+                stored_org_id = database.get_global_setting('crmplus_orgid', '')
+                stored_domain  = database.get_global_setting('crmplus_domain', '')
+                if stored_org_id:
+                    session['org_id'] = stored_org_id
+                    log_debug(f"Loaded OrgID from global settings: {stored_org_id}")
+                if stored_domain:
+                    session['domain_name'] = stored_domain
+                    log_debug(f"Loaded Domain from global settings: {stored_domain}")
+
 
 @app.route('/')
 def index():
@@ -237,7 +231,17 @@ def get_modules():
     metadata = zoho_api.fetch_module_metadata(session['access_token'])
     if 'modules' in metadata:
         modules = [{'api_name': m['api_name'], 'plural_label': m['plural_label']} for m in metadata['modules']]
+        # Cache in DB so team users (who lack ZohoCRM.settings.all) can use it
+        database.set_global_setting('cached_modules', json.dumps(modules))
         return jsonify(modules)
+    
+    # Fallback: serve cached module list written by an admin session
+    cached = database.get_global_setting('cached_modules', '')
+    if cached:
+        log_debug("Serving cached module list for user without settings permission")
+        return jsonify(json.loads(cached))
+    
+    log_debug(f"Module fetch failed: {metadata.get('code', '?')} - {metadata.get('message', '?')}")
     return jsonify({'error': 'Failed to fetch modules'}), 500
 
 @app.route('/api/fields/<module_name>')
@@ -248,7 +252,17 @@ def get_fields(module_name):
     metadata = zoho_api.fetch_module_fields(module_name, session['access_token'])
     if 'fields' in metadata:
         fields = [{'api_name': f['api_name'], 'display_label': f['display_label']} for f in metadata['fields']]
+        # Cache per-module fields so team users can use them too
+        database.set_global_setting(f'cached_fields_{module_name}', json.dumps(fields))
         return jsonify(fields)
+    
+    # Fallback: serve cached fields
+    cached = database.get_global_setting(f'cached_fields_{module_name}', '')
+    if cached:
+        log_debug(f"Serving cached fields for {module_name} (no settings permission)")
+        return jsonify(json.loads(cached))
+    
+    log_debug(f"Fields fetch failed for {module_name}: {metadata.get('code','?')}")
     return jsonify({'error': 'Failed to fetch fields'}), 500
 
 @app.route('/api/settings/config', methods=['POST'])
