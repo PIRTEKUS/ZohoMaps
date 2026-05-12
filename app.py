@@ -117,22 +117,40 @@ def check_token_refresh():
                     
                     # Auto-detect Domain/Org if not already in session
                     if 'org_id' not in session or 'domain_name' not in session:
+                        org_fetched = False
                         try:
-                            # Use v6 as per user provided documentation
                             org_info = zoho_api.fetch_org_metadata(session['access_token'])
                             if 'org' in org_info and len(org_info['org']) > 0:
                                 org = org_info['org'][0]
-                                # Log everything so we can find 'pirtekus' and '897316137'
                                 log_debug(f"DEBUG: Full Org Data: {json.dumps(org)}")
                                 
-                                # Try multiple ID fields
                                 session['org_id'] = org.get('zgid') or org.get('zoid') or org.get('id')
                                 session['domain_name'] = org.get('domain_name', '')
+                                org_fetched = True
                                 
                                 log_debug(f"AUTO-DETECTED: OrgID={session['org_id']}, Domain={session['domain_name']}")
+                                
+                                # ── Auto-save to global DB so team users can use it too ──
+                                if session['org_id'] and not database.get_global_setting('crmplus_orgid', ''):
+                                    database.set_global_setting('crmplus_orgid', str(session['org_id']))
+                                    log_debug(f"Saved OrgID to global settings: {session['org_id']}")
+                                if session['domain_name'] and not database.get_global_setting('crmplus_domain', ''):
+                                    database.set_global_setting('crmplus_domain', session['domain_name'])
+                                    log_debug(f"Saved Domain to global settings: {session['domain_name']}")
                         except Exception as org_err:
-                            log_debug(f"DEBUG: Org detect failed: {str(org_err)}")
-                            pass
+                            log_debug(f"DEBUG: Org API failed ({str(org_err)}) — will try global settings fallback")
+                        
+                        # ── Fallback: load org info from global DB (saved by admin) ──
+                        if not org_fetched:
+                            stored_org_id = database.get_global_setting('crmplus_orgid', '')
+                            stored_domain = database.get_global_setting('crmplus_domain', '')
+                            if stored_org_id:
+                                session['org_id'] = stored_org_id
+                                log_debug(f"Loaded OrgID from global settings for team user: {stored_org_id}")
+                            if stored_domain:
+                                session['domain_name'] = stored_domain
+                                log_debug(f"Loaded Domain from global settings for team user: {stored_domain}")
+
             except Exception as e:
                 log_debug(f"DEBUG: Failed to fetch user info: {str(e)}")
                 pass
