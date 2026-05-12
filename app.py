@@ -180,7 +180,9 @@ def index():
     log_debug(f"User: {session.get('user_name')} ({'Administrator' if session.get('is_admin') else 'Standard User'})")
     log_debug(f"CRM Plus Config: Domain={domain_name}, OrgID={org_id} ({'Manual Override' if is_manual else 'Auto-Detected'})")
     
-    show_console = database.get_global_setting('show_console', 'false') == 'true'
+    # show_console is a per-user session setting — admins can toggle it in Settings;
+    # it is intentionally NOT a global setting so team users never see the console.
+    show_console = session.get('show_console', False) and session.get('is_admin', False)
     return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console)
 
 @app.route('/login')
@@ -318,9 +320,23 @@ def delete_config(module_name):
 def save_global_setting():
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
     data = request.json
-    database.set_global_setting(data['key'], data['value'])
+    key = data.get('key', '')
+    value = data.get('value', '')
+
+    # show_console is a per-user (session) setting, NOT a global DB setting.
+    # Storing it globally would enable the console for ALL users, including
+    # team users who should never see internal debug output.
+    if key == 'show_console':
+        session['show_console'] = (value == 'true')
+        return jsonify({'success': True})
+
+    # All other keys (crmplus_domain, crmplus_orgid, etc.) are admin-only globals
+    database.set_global_setting(key, value)
     return jsonify({'success': True})
+
 
 
 
@@ -492,10 +508,24 @@ def sync_module(module_name):
 
 def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng):
     """
-    Background sync for records specifically in the current map viewport.
-    Only works for modules with Latitude/Longitude fields mapped in Zoho.
+    Background sync for records in the current map viewport.
+
+    DATA PRIVACY RULES — DO NOT CHANGE WITHOUT REVIEW:
+    ────────────────────────────────────────────────────────────
+    1. Records are fetched using the CALLER'S OWN access_token.
+       Zoho enforces field-level and record-level CRM permissions on
+       their side — the API will only return records the user can see.
+    2. Records are ALWAYS saved under the caller's own user_id.
+       Never save another user's records under a different user_id.
+    3. get_effective_configs is used here ONLY to determine WHICH
+       MODULES to sync (display configuration / field mappings).
+       It does NOT grant access to another user's DATA.
+    ────────────────────────────────────────────────────────────
     """
-    configs = database.get_all_module_configs(user_id)
+    # get_effective_configs returns the user's own configs merged with any
+    # shared module configurations (field mappings, colors, etc.).
+    # This tells us WHAT to sync — not WHOSE data to show.
+    configs = database.get_effective_configs(user_id)
     total_new = 0
     
     for config in configs:
@@ -589,8 +619,20 @@ def get_map_data():
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
     
-    records = database.get_records_in_bounds(session.get('user_id'), min_lat, max_lat, min_lng, max_lng)
+    # =========================================================================
+    # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
+    # user's own user_id. We never mix records across users, regardless of
+    # shared configurations or admin status. Shared configs define DISPLAY
+    # settings only (which modules/fields to show, colors, icons). They do
+    # NOT grant access to another user's synced record data.
+    # If this line is changed to include other user_ids, it WILL expose
+    # one user's CRM data to another user. Do not change without full review.
+    # =========================================================================
+    records = database.get_records_in_bounds(
+        session.get('user_id'), min_lat, max_lat, min_lng, max_lng
+    )
     
+
     log_debug(f"Found {len(records)} records in bounds.")
     
     # Get module labels and org info for display

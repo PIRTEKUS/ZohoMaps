@@ -241,49 +241,49 @@ def save_module_records_batch(user_id, records):
 
 def get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng):
     """
-    Returns records for this user AND records from shared config owners
-    so team users see the same data as admins without needing their own sync.
+    Returns map records for exactly ONE user_id within the given lat/lng bounds.
+
+    ╔══════════════════════════════════════════════════════════════════════╗
+    ║  DATA PRIVACY — DO NOT MODIFY WITHOUT A FULL SECURITY REVIEW        ║
+    ║                                                                      ║
+    ║  Records in module_records are stored per-user. Mixing user_ids     ║
+    ║  here would expose one user's CRM data to another user.             ║
+    ║                                                                      ║
+    ║  The query MUST remain `WHERE user_id = ?` (single user only).      ║
+    ║  Shared configs (is_shared=1) control DISPLAY CONFIGURATION only    ║
+    ║  (which modules/fields/colors to show) — NOT data access rights.    ║
+    ║                                                                      ║
+    ║  Data access is enforced at two levels:                             ║
+    ║    1. Zoho CRM API — only returns records the token owner can see.  ║
+    ║    2. This query   — only reads records stored for that user_id.    ║
+    ╚══════════════════════════════════════════════════════════════════════╝
     """
     conn = get_db_connection()
-    
-    # Collect all relevant user_ids: own + shared config owners
-    shared_owners = conn.execute(
-        'SELECT DISTINCT user_id FROM module_config WHERE is_shared = 1 AND user_id != ?',
-        (str(user_id),)
-    ).fetchall()
-    user_ids = [str(user_id)] + [r['user_id'] for r in shared_owners]
-    placeholders = ','.join('?' * len(user_ids))
-    
     if min_lng > max_lng:
-        query = f'''
-            SELECT * FROM module_records 
-            WHERE user_id IN ({placeholders})
-            AND lat >= ? AND lat <= ? 
+        query = '''
+            SELECT * FROM module_records
+            WHERE user_id = ? AND lat >= ? AND lat <= ?
             AND (lng >= ? OR lng <= ?)
             LIMIT 5000
         '''
-        rows = conn.execute(query, user_ids + [min_lat, max_lat, min_lng, max_lng]).fetchall()
+        rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
     else:
-        query = f'''
-            SELECT * FROM module_records 
-            WHERE user_id IN ({placeholders})
-            AND lat >= ? AND lat <= ? 
+        query = '''
+            SELECT * FROM module_records
+            WHERE user_id = ? AND lat >= ? AND lat <= ?
             AND lng >= ? AND lng <= ?
             LIMIT 5000
         '''
-        rows = conn.execute(query, user_ids + [min_lat, max_lat, min_lng, max_lng]).fetchall()
+        rows = conn.execute(query, (str(user_id), min_lat, max_lat, min_lng, max_lng)).fetchall()
     conn.close()
-    
+
     results = []
-    seen = set()  # de-duplicate by (id, module_name)
     for row in rows:
-        key = (row['id'], row['module_name'])
-        if key not in seen:
-            seen.add(key)
-            r = dict(row)
-            r['record_data'] = json.loads(r['record_data'])
-            results.append(r)
+        r = dict(row)
+        r['record_data'] = json.loads(r['record_data'])
+        results.append(r)
     return results
+
 
 def clear_module_records(user_id, module_name):
     conn = get_db_connection()

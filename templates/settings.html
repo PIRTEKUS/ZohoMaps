@@ -8,12 +8,15 @@
     </div>
 
     <div class="settings-grid">
-        <!-- Global Settings -->
+        {% if is_admin %}
+        <!-- ADMIN-ONLY: Global Application Settings (org/domain/console) -->
+        <!-- Team users are redirected away from /settings, but this guard
+             is kept as a defence-in-depth measure. -->
         <div class="settings-card glass" style="grid-column: 1 / -1;">
-            <h2>Global Application Settings</h2>
+            <h2>Global Application Settings <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
                 <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
-                    <label style="margin:0;">Show Debug Console on Map View</label>
+                    <label style="margin:0;">Show Debug Console on Map View <small style="color:#94a3b8;">(your session only)</small></label>
                     <label class="switch">
                         <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
                         <span class="slider round"></span>
@@ -34,6 +37,7 @@
             </div>
             <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
         </div>
+        {% endif %}
 
         <!-- Add New Config Form -->
         <div class="settings-card glass">
