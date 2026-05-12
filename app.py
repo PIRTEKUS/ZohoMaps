@@ -214,7 +214,8 @@ def callback():
                 user = user_info['users'][0]
                 session['user_id'] = user['id']
                 session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
-                log_debug(f"User logged in: {session['user_name']} ({session['user_id']})")
+                session['is_admin'] = user.get('profile', {}).get('name') == 'Administrator'
+                log_debug(f"User logged in: {session['user_name']} ({session['user_id']}) - Admin: {session.get('is_admin')}")
                 
             return redirect(url_for('index'))
     return "Error in Zoho Authentication", 400
@@ -419,11 +420,13 @@ def do_sync_module(user_id, access_token, module_name, config):
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
         
-        # Do not pass fetch_fields_list. If the team user's profile restricts FLS to ANY of the 
-        # fields in fetch_fields_list, Zoho CRM rejects the ENTIRE request with NO_PERMISSION.
-        # By omitting fields, Zoho returns all fields the user *is* allowed to see.
-        data = zoho_api.fetch_module_records(module_name, access_token, fields=None, page=page)
+        # We restore fetch_fields_list because omitting it seems to cause Zoho to return 0 records or an error for everyone.
+        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page)
         
+        if 'code' in data and data.get('status') == 'error':
+            log_debug(f"API Error fetching {module_name}: {data.get('code')} - {data.get('message')}")
+            break
+            
         if 'data' not in data or not data['data']:
             break
             
