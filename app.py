@@ -21,12 +21,13 @@ database.init_db()
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 
 # Derive CRM base URL from API URL for record links
-# Use crmplus.zoho.com as requested for CRM Plus/Zoho One environments
-ZOHO_CRM_URL = "https://crmplus.zoho.com"
-if "zohoapis.eu" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.eu"
-elif "zohoapis.com.au" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.com.au"
-elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.in"
-elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_CRM_URL = "https://crmplus.zoho.jp"
+# Derive Zoho base TLD from API URL for record links
+ZOHO_TLD = "zoho.com"
+if "zohoapis.eu" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.eu"
+elif "zohoapis.com.au" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.com.au"
+elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.in"
+elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.jp"
+
 
 def log_debug(msg):
     print(msg)
@@ -847,19 +848,25 @@ def get_map_data():
     for r in records:
         cfg = configs.get(r['module_name'], {})
         
-        # Build robust link for CRM Plus / CX App
+        # Build robust link for CRM or CRM Plus
         link_module = module_url_map.get(r['module_name'], r['module_name'])
+        
+        # If the Zoho API returned the OrgID as the domain name (which it does for standard CRM), ignore it.
+        # We only want to use CRM Plus format if they actually have a custom domain name (like 'pirtekus').
+        is_crm_plus = bool(domain_name and domain_name.lower() != 'unknown' and str(domain_name) != str(org_id))
+        
         if org_id:
             # Prefix org_id with 'org' if it's purely numeric
             safe_org_id = f"org{org_id}" if str(org_id).isdigit() else org_id
             
-            if domain_name:
+            if is_crm_plus:
                 # Modern CRM Plus / CX App format: /pirtekus/index.do/cxapp/crm/org897316137/tab/Leads/...
-                zoho_link = f"{ZOHO_CRM_URL}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
+                zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
             else:
-                zoho_link = f"{ZOHO_CRM_URL}/{safe_org_id}/crm/tab/{link_module}/{r['id']}"
+                # Standard Zoho CRM format: /crm/org897316137/tab/Leads/...
+                zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
         else:
-            zoho_link = f"{ZOHO_CRM_URL}/crm/tab/{link_module}/{r['id']}"
+            zoho_link = f"https://crm.{ZOHO_TLD}/crm/tab/{link_module}/{r['id']}"
 
         map_points.append({
             'id': r['id'],

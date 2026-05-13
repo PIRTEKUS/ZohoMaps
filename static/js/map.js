@@ -238,10 +238,10 @@ function plotData(data) {
             const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.module)}/${item.id}`;
             
             content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM (Web)</button>
-                ${isMobile ? `<button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2;" onclick="activeInfoWindow.close(); window.location.href='${zohoAppLink}'">Open in Zoho CRM App</button>` : ''}
+                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM (Web)</button>
+                ${isMobile ? `<button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2;" onclick="window.activeInfoWindow.close(); window.location.href='${zohoAppLink}'">Open in Zoho CRM App</button>` : ''}
             </div>`;
 
             content += `</div></div>`;
