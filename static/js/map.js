@@ -224,9 +224,41 @@ function plotData(data) {
         bounds.extend(position);
 
         marker.addListener('click', () => {
-            let content = `<div class="info-window"><h3>${item.name}</h3><p><strong>Module:</strong> ${item.module}</p><div class="info-details">`;
-            for (let [k, v] of Object.entries(item.record_data)) {
-                if (v) content += `<div><strong>${k}:</strong> ${v}</div>`;
+            let content = `<div class="info-window"><h3>${item.name}</h3><p style="margin-bottom: 8px;"><strong>Module:</strong> ${item.module}</p><div class="info-details">`;
+            
+            // Location Section
+            const addressKeys = ['Address', 'City', 'State', 'Zip', 'Country', 'Latitude', 'Longitude'];
+            let addressHtml = '';
+            addressKeys.forEach(k => {
+                if (item.record_data[k]) {
+                    addressHtml += `<div style="margin-bottom: 2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
+                }
+            });
+            
+            if (addressHtml) {
+                content += `<div style="background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;">
+                                <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Location</div>
+                                ${addressHtml}
+                            </div>`;
+            }
+
+            // Additional Info Section
+            const additionalKeys = Object.keys(item.record_data)
+                .filter(k => !addressKeys.includes(k))
+                .sort(); // Sort alphabetically
+                
+            let additionalHtml = '';
+            additionalKeys.forEach(k => {
+                if (item.record_data[k]) {
+                    additionalHtml += `<div style="margin-bottom: 2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
+                }
+            });
+
+            if (additionalHtml) {
+                content += `<div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 12px;">
+                                <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Additional Info</div>
+                                ${additionalHtml}
+                            </div>`;
             }
 
             // Add route action buttons — onclick handlers also close the info window
