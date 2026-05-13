@@ -425,6 +425,145 @@ def _get_admin_access_token():
         log_debug(f"Admin token refresh exception: {e}")
     return None
 
+def do_sync_single_record(user_id, access_token, module_name, record_id, config):
+    log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
+    
+    fields = config['field_mappings']
+    fetch_fields = set()
+    for k, v in fields.items():
+        if k == 'additional_fields' and isinstance(v, list):
+            fetch_fields.update([f for f in v if f])
+        elif isinstance(v, str) and v:
+            fetch_fields.add(v)
+            
+    title_field = fields.get('title_field')
+    name_field = title_field if title_field else ('Account_Name' if module_name == 'Accounts' else ('Full_Name' if module_name in ['Leads', 'Contacts'] else 'Name'))
+            
+    fetch_fields.add(name_field)
+    fetch_fields.add('id')
+    fetch_fields_list = list(fetch_fields)
+        
+    field_metadata = zoho_api.fetch_module_fields(module_name, access_token)
+    field_label_map = {}
+    if 'fields' in field_metadata:
+        for f in field_metadata['fields']:
+            field_label_map[f['api_name']] = f['display_label']
+    else:
+        cached = database.get_global_setting(f'cached_fields_{module_name}', '')
+        if cached:
+            try:
+                for f in json.loads(cached):
+                    field_label_map[f['api_name']] = f['display_label']
+            except: pass
+
+    data = zoho_api.fetch_single_record(module_name, record_id, access_token, fetch_fields_list)
+    
+    if 'code' in data and data.get('status') == 'error':
+        error_code = data.get('code')
+        if error_code == 'NO_PERMISSION':
+            log_debug(f"NO_PERMISSION for single record {record_id}. Trying admin fallback...")
+            admin_token = _get_admin_access_token()
+            if admin_token and user_id:
+                criteria = f"((Owner.id:equals:{user_id})and(id:equals:{record_id}))"
+                owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list)
+                if 'data' in owner_data and owner_data['data']:
+                    data = owner_data
+                else:
+                    log_debug("Admin fallback returned 0 records.")
+                    return False
+        else:
+            log_debug(f"API Error fetching single record: {error_code}")
+            return False
+
+    records_list = data.get('data', [])
+    if not records_list:
+        return False
+        
+    record = records_list[0]
+    
+    lat, lng = None, None
+    name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
+    name = str(extract_val(name_raw))
+    
+    lat_field = fields.get('latitude')
+    lng_field = fields.get('longitude')
+    if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+        try:
+            lat = float(record[lat_field])
+            lng = float(record[lng_field])
+        except (ValueError, TypeError):
+            pass
+    
+    if lat is None or lng is None:
+        address_parts = []
+        for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+            val = extract_val(record.get(fields.get(k)))
+            if val:
+                address_parts.append(str(val))
+        
+        full_address = ", ".join(address_parts)
+        if full_address:
+            lat, lng = geocode_address(full_address)
+    
+    if lat is not None and lng is not None:
+        record_data = {}
+        lat_val = record.get(fields.get('latitude'))
+        lng_val = record.get(fields.get('longitude'))
+        if lat_val: record_data['Latitude'] = str(lat_val)
+        if lng_val: record_data['Longitude'] = str(lng_val)
+
+        addr1 = extract_val(record.get(fields.get('address1')))
+        addr2 = extract_val(record.get(fields.get('address2')))
+        full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+        if full_addr: record_data['Address'] = full_addr
+        
+        for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
+            val = extract_val(record.get(fields.get(k)))
+            if val is not None and val != "": record_data[label] = str(val)
+
+        for k in fetch_fields_list:
+            if k in ['id', name_field] or k in fields.values():
+                continue
+            val = record.get(k)
+            if val is not None and val != "":
+                label = field_label_map.get(k, k.replace('_', ' '))
+                record_data[label] = str(extract_val(val))
+                
+        database.save_module_records_batch(user_id, [(
+            record.get('id'),
+            module_name,
+            name,
+            lat,
+            lng,
+            config['marker_color'],
+            record_data
+        )])
+        return True
+    else:
+        return False
+
+@app.route('/api/sync-record/<module_name>/<record_id>', methods=['POST'])
+def sync_single_record(module_name, record_id):
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    configs = database.get_effective_configs(session.get('user_id'))
+    config = next((c for c in configs if c['module_name'] == module_name), None)
+    if not config:
+        return jsonify({'error': 'Module not configured'}), 404
+        
+    try:
+        success = do_sync_single_record(session.get('user_id'), session['access_token'], module_name, record_id, config)
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'error': 'Failed to sync record (not found or no valid location)'}), 400
+    except Exception as e:
+        log_debug(f"Sync error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 def do_sync_module(user_id, access_token, module_name, config):
     """Core logic to fetch, geocode, and save records for a single module."""

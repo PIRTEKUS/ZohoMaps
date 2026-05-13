@@ -99,6 +99,17 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
         print(f"[ZOHO API ERROR] fetch_module_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
     return response.json()
 
+def fetch_single_record(module_name, record_id, access_token, fields=None):
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    url = f"{ZOHO_API_URL}/crm/v3/{module_name}/{record_id}"
+    params = {}
+    if fields:
+        params['fields'] = ",".join(fields)
+    response = requests.get(url, headers=headers, params=params)
+    return response.json()
+
 def fetch_module_metadata(access_token):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'

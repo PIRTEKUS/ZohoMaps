@@ -240,7 +240,11 @@ function plotData(data) {
             content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
                 <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
                 <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open in Zoho CRM (Web)</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open Web</button>
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b; display: flex; justify-content: center; align-items: center; gap: 4px;" onclick="window.syncSingleRecord('${item.module}', '${item.id}', this)">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>
+                    Sync
+                </button>
                 ${isMobile ? `<button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2;" onclick="window.activeInfoWindow.close(); window.location.href='${zohoAppLink}'">Open in Zoho CRM App</button>` : ''}
             </div>`;
 
@@ -249,7 +253,7 @@ function plotData(data) {
             window.activeInfoWindow.setContent(content);
             window.activeInfoWindow.open(map, marker);
         });
-
+        
         markers.push(marker);
     });
 
@@ -576,3 +580,42 @@ document.addEventListener('DOMContentLoaded', () => {
         initMap();
     }
 });
+
+// Sync a single record directly from the marker popup
+window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
+    const originalText = btnElement.innerHTML;
+    btnElement.disabled = true;
+    btnElement.innerHTML = '<span class="pulse-dot" style="margin:0; width:6px; height:6px;"></span> Syncing...';
+    
+    try {
+        const res = await fetch(`/api/sync-record/${moduleName}/${recordId}`, { method: 'POST' });
+        const data = await res.json();
+        
+        if (res.ok && data.success) {
+            btnElement.style.color = '#10b981';
+            btnElement.innerHTML = 'Synced!';
+            // Reload the map data behind the scenes to update the popup next time it opens
+            setTimeout(() => {
+                if(window.activeInfoWindow) window.activeInfoWindow.close();
+                fetchData();
+            }, 1000);
+        } else {
+            btnElement.style.color = '#ef4444';
+            btnElement.innerHTML = 'Failed';
+            setTimeout(() => {
+                btnElement.disabled = false;
+                btnElement.innerHTML = originalText;
+                btnElement.style.color = '';
+            }, 2000);
+        }
+    } catch(e) {
+        console.error("Error syncing single record:", e);
+        btnElement.style.color = '#ef4444';
+        btnElement.innerHTML = 'Error';
+        setTimeout(() => {
+            btnElement.disabled = false;
+            btnElement.innerHTML = originalText;
+            btnElement.style.color = '';
+        }, 2000);
+    }
+};
