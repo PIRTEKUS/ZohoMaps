@@ -539,6 +539,16 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
             config['marker_color'],
             record_data
         )])
+        
+        log_debug(f"--- Raw Zoho API Data for {name} ({record_id}) ---")
+        for k in fetch_fields_list:
+            log_debug(f"RAW {k}: {record.get(k)}")
+
+        log_debug(f"--- Extracted Record Data for {name} ({record_id}) ---")
+        for k, v in record_data.items():
+            log_debug(f"{k}: {v}")
+        log_debug(f"--------------------------------------------------")
+        
         log_debug(f"Successfully synced and saved single record: {name} ({record_id})")
         return True
     else:
