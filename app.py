@@ -477,6 +477,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
 
     records_list = data.get('data', [])
     if not records_list:
+        log_debug(f"Single sync failed: No records returned for {module_name} {record_id}. Data: {data}")
         return False
         
     record = records_list[0]
@@ -538,8 +539,10 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
             config['marker_color'],
             record_data
         )])
+        log_debug(f"Successfully synced and saved single record: {name} ({record_id})")
         return True
     else:
+        log_debug(f"Single sync failed: No valid location found for {name} ({record_id}). Record data: {record}")
         return False
 
 @app.route('/api/sync-record/<module_name>/<record_id>', methods=['POST'])
@@ -555,8 +558,10 @@ def sync_single_record(module_name, record_id):
     try:
         success = do_sync_single_record(session.get('user_id'), session['access_token'], module_name, record_id, config)
         if success:
+            log_debug(f"API /api/sync-record/{module_name}/{record_id} success.")
             return jsonify({'success': True})
         else:
+            log_debug(f"API /api/sync-record/{module_name}/{record_id} failed.")
             return jsonify({'error': 'Failed to sync record (not found or no valid location)'}), 400
     except Exception as e:
         log_debug(f"Sync error: {str(e)}")
