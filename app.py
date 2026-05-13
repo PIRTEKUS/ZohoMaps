@@ -1017,6 +1017,7 @@ def get_map_data():
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
+            'api_module_name': r['module_name'],
             'zoho_link': zoho_link,
             'name': r['name'],
             'lat': r['lat'],

@@ -235,13 +235,13 @@ function plotData(data) {
             // Detect if user is on a mobile device for the "Open in App" link
             const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
             // Zoho CRM mobile deep link scheme: zohocrm://crm/[module]/[id]
-            const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.module)}/${item.id}`;
+            const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.api_module_name || item.module)}/${item.id}`;
             
             content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
                 <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
                 <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
                 <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open Web</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b; display: flex; justify-content: center; align-items: center; gap: 4px;" onclick="window.syncSingleRecord('${item.module}', '${item.id}', this)">
+                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b; display: flex; justify-content: center; align-items: center; gap: 4px;" onclick="window.syncSingleRecord('${item.api_module_name || item.module}', '${item.id}', this)">
                     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>
                     Sync
                 </button>
