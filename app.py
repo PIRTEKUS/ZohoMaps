@@ -522,7 +522,7 @@ def do_sync_module(user_id, access_token, module_name, config):
                         log_debug(f"Using admin token to fetch {module_name} records owned by {user_id}")
                         # Build owner criteria: only records assigned to this user
                         criteria = f"(Owner.id:equals:{user_id})"
-                        owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list)
+                        owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list, page=page, page_token=page_token)
                         if 'data' in owner_data and owner_data['data']:
                             data = owner_data
                             log_debug(f"Admin fallback returned {len(owner_data['data'])} records for {module_name} owned by {user_id}")
@@ -585,7 +585,7 @@ def do_sync_module(user_id, access_token, module_name, config):
                 
                 for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
                     val = extract_val(record.get(fields.get(k)))
-                    if val: record_data[label] = str(val)
+                    if val is not None and val != "": record_data[label] = str(val)
 
 
                 # 2. Add additional fields
@@ -595,7 +595,7 @@ def do_sync_module(user_id, access_token, module_name, config):
                         continue
                     
                     val = record.get(k)
-                    if val:
+                    if val is not None and val != "":
                         label = field_label_map.get(k, k.replace('_', ' '))
                         record_data[label] = str(extract_val(val))
                         

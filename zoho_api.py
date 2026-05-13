@@ -129,12 +129,17 @@ def fetch_org_metadata_v3(access_token):
     response = requests.get(url, headers=headers, timeout=8)
     return response.json()
 
-def search_records(module_name, criteria, access_token, fields=None):
+def search_records(module_name, criteria, access_token, fields=None, page=1, page_token=None):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
     url = f"{ZOHO_API_URL}/crm/v3/{module_name}/search"
-    params = {'criteria': criteria}
+    params = {'criteria': criteria, 'per_page': 200}
+    if page_token:
+        params['page_token'] = page_token
+    else:
+        params['page'] = page
+        
     if fields:
         params['fields'] = ",".join(fields)
     response = requests.get(url, headers=headers, params=params)
