@@ -477,9 +477,9 @@ p {
     background: rgba(255,255,255,0.25);
 }
 
-/* ===== Sidebar tab bar (mobile) ===== */
+/* ===== Sidebar tab bar (mobile & desktop) ===== */
 .sidebar-tabs {
-    display: none; /* hidden on desktop */
+    display: flex;
     flex-shrink: 0;
     flex-direction: row;
     border-bottom: 1px solid var(--glass-border);

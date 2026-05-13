@@ -853,7 +853,7 @@ def get_map_data():
         
         # If the Zoho API returned the OrgID as the domain name (which it does for standard CRM), ignore it.
         # We only want to use CRM Plus format if they actually have a custom domain name (like 'pirtekus').
-        is_crm_plus = bool(domain_name and domain_name.lower() != 'unknown' and str(domain_name) != str(org_id))
+        is_crm_plus = bool(domain_name and domain_name.lower() != 'unknown' and str(domain_name) != str(org_id) and str(domain_name) != f"org{org_id}")
         
         if org_id:
             # Prefix org_id with 'org' if it's purely numeric
