@@ -548,11 +548,13 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
 @app.route('/api/sync-record/<module_name>/<record_id>', methods=['POST'])
 def sync_single_record(module_name, record_id):
     if 'access_token' not in session:
+        log_debug("Sync record failed: Unauthorized (no access_token in session)")
         return jsonify({'error': 'Unauthorized'}), 401
     
     configs = database.get_effective_configs(session.get('user_id'))
     config = next((c for c in configs if c['module_name'] == module_name), None)
     if not config:
+        log_debug(f"Sync record failed: Module {module_name} not configured for user. Available: {[c['module_name'] for c in configs]}")
         return jsonify({'error': 'Module not configured'}), 404
         
     try:
