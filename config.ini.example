@@ -12,5 +12,9 @@ api_url = https://www.zohoapis.com
 maps_api_key = YOUR_GOOGLE_MAPS_API_KEY
 
 [APP]
-secret_key = super_secret_random_key_change_in_production
+# REQUIRED: Generate a random key with: python3 -c "import secrets; print(secrets.token_hex(32))"
+# The app will refuse to start if this is left as the placeholder or is blank.
+secret_key = REPLACE_WITH_RANDOM_KEY_SEE_COMMENT_ABOVE
+# SQLite (local dev): sqlite:///database.db
+# PostgreSQL (production): postgresql://user:password@localhost/zohomap
 database_uri = sqlite:///database.db
