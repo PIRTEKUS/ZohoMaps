@@ -27,7 +27,7 @@ sudo apt-get update && sudo apt-get install -y libpq-dev python3-dev gcc
 echo "[3/4] Installing/updating requirements..."
 pip install -r requirements.txt
 
-# 3.5 Generate SSL cert if needed for HTTPS
+# 3.5 Generate SSL cert if needed for HTTP
 echo "[3.5/4] Checking for SSL certificates..."
 if [ ! -f "cert.pem" ] || [ ! -f "key.pem" ]; then
     echo "Generating self-signed SSL certificate for HTTPS..."
