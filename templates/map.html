@@ -166,11 +166,24 @@
         }
     })();
 
+    let _pausePolling = false; // Paused briefly after clear so the message isn't overwritten
+
     async function clearLogs() {
+        const cb = document.getElementById('console-body');
+        cb.innerHTML = '<div style="color:#94a3b8;">Clearing...</div>';
         try {
             const res = await fetch('/api/logs/clear', {method:'POST'});
-            if(res.ok) document.getElementById('console-body').innerHTML = '<div>Logs cleared.</div>';
-        } catch(e) { console.error(e); }
+            if (res.ok) {
+                cb.innerHTML = '<div style="color:#10b981;">✓ Logs cleared.</div>';
+                _pausePolling = true;
+                setTimeout(() => { _pausePolling = false; }, 4000); // Resume after 4s
+            } else {
+                const err = await res.json().catch(() => ({}));
+                cb.innerHTML = `<div style="color:#ef4444;">✗ Clear failed (HTTP ${res.status}): ${err.error || 'Unknown error'}</div>`;
+            }
+        } catch(e) {
+            cb.innerHTML = `<div style="color:#ef4444;">✗ Network error: ${e.message}</div>`;
+        }
     }
     function copyLogs() {
         const body = document.getElementById('console-body');
@@ -194,6 +207,7 @@
     function pollLogs() {
         const el = document.getElementById('debug-console');
         if (!el || el.style.display === 'none') return; // Don't poll when hidden
+        if (_pausePolling) return; // Paused after a clear
         fetch('/api/logs').then(r=>r.json()).then(data=>{
             if(data.logs && data.logs.length > 0){
                 const cb = document.getElementById('console-body');
