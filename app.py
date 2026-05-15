@@ -476,6 +476,7 @@ def save_global_setting():
     # team users who should never see internal debug output.
     if key == 'show_console':
         session['show_console'] = (value == 'true')
+        session.modified = True  # Force Flask to commit the session cookie
         return jsonify({'success': True})
 
     # All other keys (crmplus_domain, crmplus_orgid, etc.) are admin-only globals

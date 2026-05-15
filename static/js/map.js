@@ -40,6 +40,9 @@ async function initMap() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
                 };
+                // Trigger resize first so the map knows its true dimensions
+                // (sidebar may shift the visible area after initial render)
+                google.maps.event.trigger(map, 'resize');
                 map.setCenter(pos);
                 map.setZoom(8); // Approx 200 miles across
                 google.maps.event.addListenerOnce(map, 'idle', loadMapData);
