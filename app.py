@@ -1040,4 +1040,8 @@ def get_map_data():
     return jsonify(map_points)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    ssl_args = {}
+    if os.path.exists('cert.pem') and os.path.exists('key.pem'):
+        ssl_args['ssl_context'] = ('cert.pem', 'key.pem')
+        print("Starting with HTTPS enabled using local certificates.")
+    app.run(host='0.0.0.0', port=5000, debug=True, **ssl_args)

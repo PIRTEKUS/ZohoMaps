@@ -23,7 +23,14 @@ fi
 echo "[3/4] Installing/updating requirements..."
 pip install -r requirements.txt
 
-# 3.5 Fix permissions
+# 3.5 Generate SSL cert if needed for HTTPS
+echo "[3.5/4] Checking for SSL certificates..."
+if [ ! -f "cert.pem" ] || [ ! -f "key.pem" ]; then
+    echo "Generating self-signed SSL certificate for HTTPS..."
+    openssl req -x509 -newkey rsa:4096 -nodes -out cert.pem -keyout key.pem -days 3650 -subj "/CN=zohomap"
+fi
+
+# 3.8 Fix permissions
 echo "Fixing permissions for www-data..."
 sudo chown -R www-data:www-data /var/www/zohomap
 
