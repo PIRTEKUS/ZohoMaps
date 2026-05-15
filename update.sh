@@ -8,8 +8,8 @@ echo "=========================================="
 cd /var/www/zohomap || { echo "Error: /var/www/zohomap directory not found"; exit 1; }
 
 # 1. Pull latest code from GitHub
-echo "[1/4] Pulling latest changes from GitHub..."
-git pull origin main
+echo "[1/4] Pulling latest changes from GitHub (may prompt for sudo)..."
+sudo git pull origin main
 
 # 2. Activate virtual environment
 echo "[2/4] Activating Python virtual environment..."
