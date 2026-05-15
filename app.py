@@ -286,7 +286,12 @@ def index():
     except Exception:
         pass
     
-    return render_template('map.html', google_maps_api_key=GOOGLE_MAPS_API_KEY, show_console=show_console, configs=effective_configs)
+    is_admin = session.get('is_admin', False)
+    return render_template('map.html',
+        google_maps_api_key=GOOGLE_MAPS_API_KEY,
+        configs=effective_configs,
+        is_admin=is_admin
+    )
 
 @app.route('/login')
 def login():

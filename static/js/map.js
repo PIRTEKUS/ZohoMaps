@@ -40,18 +40,22 @@ async function initMap() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
                 };
-                // Trigger resize first so the map knows its true dimensions
-                // (sidebar may shift the visible area after initial render)
-                google.maps.event.trigger(map, 'resize');
-                map.setCenter(pos);
-                map.setZoom(8); // Approx 200 miles across
-                google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+                // Delay slightly so the flex layout (sidebar + map area) is fully
+                // painted before we ask Google Maps to center. Without this delay,
+                // Maps calculates center based on window width, not the narrower
+                // map area beside the sidebar, shifting the pin to the lower-right.
+                setTimeout(() => {
+                    google.maps.event.trigger(map, 'resize');
+                    map.setCenter(pos);
+                    map.setZoom(10); // City-level zoom for field technicians
+                    google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+                }, 150);
             },
             () => {
                 // Browser geolocation failed or denied, try IP-based fallback
                 tryIPFallback();
             },
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
         );
     } else {
         tryIPFallback();
