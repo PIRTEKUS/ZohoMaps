@@ -1,12 +1,15 @@
 import requests
+import os
 from configparser import ConfigParser
 from urllib.parse import urlencode
 
 config = ConfigParser()
 config.read('config.ini')
 
-ZOHO_CLIENT_ID = config['ZOHO'].get('client_id')
-ZOHO_CLIENT_SECRET = config['ZOHO'].get('client_secret')
+# Read secrets from environment variables first (injected by systemd).
+# Fall back to config.ini for backward-compatibility during development.
+ZOHO_CLIENT_ID = os.environ.get('ZOHO_CLIENT_ID') or config['ZOHO'].get('client_id', '')
+ZOHO_CLIENT_SECRET = os.environ.get('ZOHO_CLIENT_SECRET') or config['ZOHO'].get('client_secret', '')
 
 # Support comma-separated list of redirect URIs (e.g. IP + DNS)
 _raw_redirect_uris = config['ZOHO'].get('redirect_uri', '')

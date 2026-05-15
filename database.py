@@ -1,10 +1,12 @@
 import sqlite3
 import json
+import os
 from configparser import ConfigParser
 
 config = ConfigParser()
 config.read('config.ini')
-DB_URI = config['APP']['database_uri']
+# Env var (injected by systemd) takes priority over config.ini
+DB_URI = os.environ.get('DATABASE_URI') or config['APP'].get('database_uri', 'sqlite:///database.db')
 
 IS_POSTGRES = DB_URI.startswith('postgres')
 if IS_POSTGRES:

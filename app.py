@@ -19,13 +19,14 @@ config = ConfigParser()
 config.read('config.ini')
 
 # ── Secret key validation ────────────────────────────────────────────────────
-_secret_key = config['APP'].get('secret_key', '')
-_DEFAULT_KEYS = {'', 'dev_key', 'super_secret_random_key_change_in_production'}
+# Env var (injected by systemd) takes priority over config.ini
+_secret_key = os.environ.get('APP_SECRET_KEY') or config['APP'].get('secret_key', '')
+_DEFAULT_KEYS = {'', 'dev_key', 'super_secret_random_key_change_in_production', 'REPLACE_WITH_RANDOM_KEY_SEE_COMMENT_ABOVE'}
 if _secret_key in _DEFAULT_KEYS:
     raise RuntimeError(
         "FATAL: secret_key is not set or is using the default/placeholder value. "
         "Generate a random key with: python3 -c \"import secrets; print(secrets.token_hex(32))\" "
-        "and set it in config.ini before starting."
+        "and set it via APP_SECRET_KEY in the systemd service or in config.ini before starting."
     )
 
 # ── Token encryption key ─────────────────────────────────────────────────────
@@ -77,7 +78,7 @@ limiter = Limiter(
     default_limits=["500 per hour"],
     storage_uri="memory://"  # Switch to redis:// on AWS for multi-instance safety
 )
-GOOGLE_MAPS_API_KEY = config['GOOGLE'].get('maps_api_key')
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY') or config['GOOGLE'].get('maps_api_key', '')
 
 # Initialize Database
 database.init_db()
