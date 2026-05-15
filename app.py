@@ -8,10 +8,13 @@ import time
 import datetime
 import os
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 config = ConfigParser()
 config.read('config.ini')
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.secret_key = config['APP'].get('secret_key', 'dev_key')
 GOOGLE_MAPS_API_KEY = config['GOOGLE'].get('maps_api_key')
 
@@ -1040,8 +1043,4 @@ def get_map_data():
     return jsonify(map_points)
 
 if __name__ == '__main__':
-    ssl_args = {}
-    if os.path.exists('cert.pem') and os.path.exists('key.pem'):
-        ssl_args['ssl_context'] = ('cert.pem', 'key.pem')
-        print("Starting with HTTPS enabled using local certificates.")
-    app.run(host='0.0.0.0', port=5000, debug=True, **ssl_args)
+    app.run(host='0.0.0.0', port=5000, debug=True)
