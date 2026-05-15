@@ -12,7 +12,6 @@ from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_wtf.csrf import CSRFProtect, generate_csrf
 from cryptography.fernet import Fernet
 
 config = ConfigParser()
@@ -58,18 +57,6 @@ app.secret_key = _secret_key
 
 # ── Session lifetime ─────────────────────────────────────────────────────────
 app.permanent_session_lifetime = timedelta(hours=8)
-
-# ── CSRF protection ──────────────────────────────────────────────────────────
-csrf = CSRFProtect(app)
-# Exempt JSON API endpoints — they are protected by session + rate limiting.
-# CSRF tokens are not practical for mobile/field devices hitting pure JSON APIs.
-csrf.exempt('sync_module')
-csrf.exempt('sync_all_modules')
-csrf.exempt('sync_single_record')
-csrf.exempt('save_config')
-csrf.exempt('delete_config')
-csrf.exempt('save_global_setting')
-csrf.exempt('clear_server_logs')
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 limiter = Limiter(
