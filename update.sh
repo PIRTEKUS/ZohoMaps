@@ -19,6 +19,10 @@ else
     echo "Warning: venv not found. Ensure you created it as per README."
 fi
 
+# 2.5 Install OS Dependencies
+echo "[2.5/4] Installing required system packages (may prompt for sudo password)..."
+sudo apt-get update && sudo apt-get install -y libpq-dev python3-dev gcc
+
 # 3. Install dependencies
 echo "[3/4] Installing/updating requirements..."
 pip install -r requirements.txt
