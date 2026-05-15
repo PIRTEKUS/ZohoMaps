@@ -8,12 +8,20 @@ DB_URI = config['APP']['database_uri']
 
 IS_POSTGRES = DB_URI.startswith('postgres')
 if IS_POSTGRES:
-    import psycopg2
-    import psycopg2.extras
+    import pg8000.dbapi
+    from urllib.parse import urlparse
 
 def get_db_connection():
     if IS_POSTGRES:
-        conn = psycopg2.connect(DB_URI)
+        parsed = urlparse(DB_URI)
+        conn = pg8000.dbapi.connect(
+            user=parsed.username,
+            password=parsed.password,
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            database=parsed.path.lstrip('/')
+        )
+        conn.autocommit = True
         return conn
     else:
         conn = sqlite3.connect(DB_URI.replace('sqlite:///', ''), timeout=30.0) # Increase timeout
@@ -42,17 +50,27 @@ def exec_query(conn, query, params=(), fetchone=False, fetchall=False):
                 query += ' ON CONFLICT(address) DO UPDATE SET lat=EXCLUDED.lat, lng=EXCLUDED.lng'
 
     if IS_POSTGRES:
-        c = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        c = conn.cursor()
     else:
         c = conn.cursor()
         
     c.execute(query, params)
     
-    if fetchone:
-        return c.fetchone()
-    if fetchall:
-        return c.fetchall()
-    return c
+    if IS_POSTGRES:
+        if c.description:
+            columns = [col[0] for col in c.description]
+            if fetchone:
+                row = c.fetchone()
+                return dict(zip(columns, row)) if row else None
+            if fetchall:
+                return [dict(zip(columns, row)) for row in c.fetchall()]
+        return c
+    else:
+        if fetchone:
+            return c.fetchone()
+        if fetchall:
+            return c.fetchall()
+        return c
 
 def init_db():
     conn = get_db_connection()
