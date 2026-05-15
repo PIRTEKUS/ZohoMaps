@@ -37,6 +37,8 @@ fi
 # 3.8 Fix permissions
 echo "Fixing permissions for www-data..."
 sudo chown -R www-data:www-data /var/www/zohomap
+# Re-apply execute permissions on shell scripts so they can still be run with sudo
+sudo chmod +x /var/www/zohomap/*.sh
 
 # 4. Restart the service
 echo "[4/4] Restarting ZohoMap service (may prompt for sudo password)..."
