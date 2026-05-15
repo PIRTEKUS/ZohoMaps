@@ -67,7 +67,7 @@ WorkingDirectory=/var/www/zohomap
 Environment="PATH=/var/www/zohomap/venv/bin"
 Environment="FLASK_ENV=production"
 Environment="TOKEN_ENCRYPTION_KEY=${FERNET_KEY}"
-ExecStart=/var/www/zohomap/venv/bin/gunicorn --workers 4 --worker-class gevent --worker-connections 100 --timeout 120 --bind unix:zohomap.sock -m 007 app:app
+ExecStart=/var/www/zohomap/venv/bin/gunicorn --workers 4 --worker-class gthread --threads 8 --timeout 120 --bind unix:zohomap.sock -m 007 app:app
 
 [Install]
 WantedBy=multi-user.target
