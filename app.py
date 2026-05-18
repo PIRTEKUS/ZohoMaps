@@ -507,10 +507,27 @@ def preview_record(module_name):
 
 
 def _get_admin_access_token():
-    """Get a fresh admin access token from the cached (encrypted) refresh token.
-    Used ONLY as a server-side fallback when team users cannot call the CRM API
-    due to their CRM Profile having API Access disabled.
-    The admin token is NEVER exposed to the frontend or sent to the client."""
+    """Get a fresh admin access token using the best available refresh token.
+
+    Priority order:
+      1. ZOHO_REFRESH_TOKEN env var (set in systemd service — permanent, no browser login needed)
+      2. DB-stored encrypted refresh token (set when an admin user logs in via OAuth)
+
+    The access token is NEVER exposed to the frontend or sent to the client.
+    """
+    # ── Priority 1: env-var refresh token (server config, no human login needed) ──
+    env_refresh = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
+    if env_refresh:
+        try:
+            token_data = zoho_api.refresh_access_token(env_refresh)
+            if 'access_token' in token_data:
+                return token_data['access_token']
+            log_debug(f"[admin_token] ZOHO_REFRESH_TOKEN exchange failed: {token_data.get('error')} — "
+                      "check the token is valid and has the correct scopes.")
+        except Exception as e:
+            log_debug(f"[admin_token] ZOHO_REFRESH_TOKEN exception: {e}")
+
+    # ── Priority 2: DB-stored encrypted token (set when admin logs in via browser) ──
     encrypted = database.get_global_setting('admin_refresh_token', '')
     if not encrypted:
         return None
