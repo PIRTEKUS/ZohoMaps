@@ -925,6 +925,11 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     page_token = None
     more_records = True
 
+    # Server-console diagnostic (visible in journalctl / gunicorn stdout)
+    token_type = 'ADMIN' if access_token != session.get('access_token') else 'USER_SESSION'
+    print(f"[SYNC DIAG] module={module_name} user={user_id} is_admin={is_admin} "
+          f"franchise_criteria={franchise_criteria!r}")
+
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
 
@@ -935,7 +940,11 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
         else:
             data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list,
                                                  page=page, page_token=page_token)
-        
+
+        print(f"[SYNC DIAG] module={module_name} page={page} "
+              f"data_keys={list(data.keys())} "
+              f"record_count={len(data.get('data', []))} "
+              f"error={data.get('code') if 'code' in data else 'none'}")
         if 'code' in data and data.get('status') == 'error':
             error_code = data.get('code')
             log_debug(f"API Error fetching {module_name}: {error_code} - {data.get('message')}")
