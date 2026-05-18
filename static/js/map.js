@@ -20,18 +20,12 @@ async function initMap() {
         if (window.activeInfoWindow) window.activeInfoWindow.close();
     });
 
-    // Setup Search Button
-    const searchBtn = document.getElementById('search-area-btn');
+    // Show search button when map is panned/zoomed
+    map.addListener('dragend', () => { if (window.showSearchButton) window.showSearchButton(); });
+    map.addListener('zoom_changed', () => { if (window.showSearchButton) window.showSearchButton(); });
 
-    // Show button when map is panned/zoomed
-    map.addListener('dragend', () => { searchBtn.style.display = 'block'; });
-    map.addListener('zoom_changed', () => { searchBtn.style.display = 'block'; });
-
-    searchBtn.addEventListener('click', () => {
-        searchBtn.style.display = 'none';
-        loadMapData();
-    });
-
+    // Also keep direct click on the button (handled in map.html as searchArea())
+    window.fetchData = loadMapData;
     // Try HTML5 geolocation
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -82,8 +76,6 @@ async function tryIPFallback() {
 }
 
 async function loadMapData() {
-    document.getElementById('legend-stats').innerHTML = `<span class="pulse-dot"></span> Loading area data...`;
-
     try {
         const bounds = map.getBounds();
         if (!bounds) {
@@ -130,15 +122,13 @@ async function loadMapData() {
         window.lastMapData = data;
 
         const filtered = filterDuplicates(data);
-        window.lastMapData = filtered; // Store filtered for legend/re-plots
-
-        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${filtered.length} records in area</span>`;
+        window.lastMapData = filtered;
 
         plotData(filtered);
         updateLegend(filtered);
+        if (window.updateRecordList) window.updateRecordList(filtered);
     } catch (e) {
         console.error(e);
-        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--error)">Error loading data</span>`;
     }
 }
 
@@ -378,72 +368,48 @@ function plotData(data) {
 window.hiddenModules = window.hiddenModules || new Set();
 
 function updateLegend(data) {
-    const legend = document.getElementById('legend-container');
+    const legend = document.getElementById('cat-list');
+    if (!legend) return;
     legend.innerHTML = '';
 
-    // Count visible records per module
     const moduleCounts = {};
-    data.forEach(item => {
-        moduleCounts[item.module] = (moduleCounts[item.module] || 0) + 1;
-    });
+    data.forEach(item => { moduleCounts[item.module] = (moduleCounts[item.module] || 0) + 1; });
 
-    // Ensure window.configuredModules exists, or fallback to the data we have
     let configuredModules = window.configuredModules || [];
-    
-    // Build a color/icon lookup that matches BOTH the api_name AND the display label
-    // (item.module from the server is already the display label/plural_label)
     const moduleColorByLabel = {};
     for (let cfg of configuredModules) {
-        // Map api_name key
         moduleColorByLabel[cfg.module_name] = cfg.marker_color;
-        // Also map the display label if stored
         if (cfg.module_label) moduleColorByLabel[cfg.module_label] = cfg.marker_color;
     }
-    // Also pick colors from the actual data (stored in record color)
-    data.forEach(item => {
-        if (item.color && !moduleColorByLabel[item.module]) {
-            moduleColorByLabel[item.module] = item.color;
-        }
-    });
+    data.forEach(item => { if (item.color && !moduleColorByLabel[item.module]) moduleColorByLabel[item.module] = item.color; });
 
     if (configuredModules.length === 0) {
-        configuredModules = Object.keys(moduleCounts).map(mod => ({
-            module_name: mod, 
-            marker_color: moduleColorByLabel[mod] || '#4f46e5'
-        }));
+        configuredModules = Object.keys(moduleCounts).map(mod => ({ module_name: mod, marker_color: moduleColorByLabel[mod] || '#4f46e5' }));
     }
 
-    // Eye icon toggle instead of checkbox, plus Sync buttons
+    const eyeVisible = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    const eyeHidden  = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
+
     for (let config of configuredModules) {
         const mod = config.module_name;
-        // Color: use config setting, then fall back to what's in the data
         const color = config.marker_color || moduleColorByLabel[mod] || '#4f46e5';
-        // Count: check both api_name and display label
         const count = moduleCounts[mod] || moduleCounts[config.module_label] || 0;
-
-        
-        const item = document.createElement('div');
-        item.className = 'legend-item';
-        
         const isVisible = !(window.hiddenModules && window.hiddenModules.has(mod));
-        const eyeVisible = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
-        const eyeHidden = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
         const safeModule = mod.replace(/'/g, "\\'");
-        
-        item.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 8px; flex-grow: 1;">
-                <button class="legend-eye-btn ${isVisible ? 'visible' : 'hidden'}" 
-                        id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
-                        onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})"
-                        title="${isVisible ? 'Hide' : 'Show'} ${mod}">
-                    ${isVisible ? eyeVisible : eyeHidden}
-                </button>
-                <span class="color-dot" style="background-color: ${color}"></span>
-                <span class="legend-name" style="flex-grow: 1;">${mod} <span class="legend-count" style="margin-left: 4px;">(${count})</span></span>
-                <button class="btn-primary sync-mod-btn" onclick="syncSingleModule('${safeModule}', this)" style="padding: 2px 6px; font-size: 0.75rem; border-radius: 4px;" title="Sync ${mod} Data">Sync</button>
-            </div>
+
+        const row = document.createElement('div');
+        row.className = 'cat-row';
+        row.innerHTML = `
+            <span class="cat-dot" style="background:${color};"></span>
+            <span class="cat-label">${mod}</span>
+            <span class="cat-count">${count}</span>
+            <button class="cat-eye" id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
+                    onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})" title="${isVisible ? 'Hide' : 'Show'} ${mod}">
+                ${isVisible ? eyeVisible : eyeHidden}
+            </button>
+            <button class="cat-sync" onclick="syncSingleModule('${safeModule}', this)">Sync</button>
         `;
-        legend.appendChild(item);
+        legend.appendChild(row);
     }
 }
 
@@ -597,43 +563,32 @@ function optimizeRoute(stops, userLat, userLng) {
 }
 
 window.renderRoutePlanner = function () {
-    // New tab-based HTML uses #panel-route, #route-stops-list, #route-stats
-    const routePanel = document.getElementById('panel-route');
-    const list       = document.getElementById('route-stops-list');
-    const stats      = document.getElementById('route-stats');
+    const list  = document.getElementById('route-stops-list');
+    const stats = document.getElementById('route-stats');
 
-    // Update tab badge (works on both desktop and mobile)
-    if (typeof window.updateRouteBadge === 'function') {
-        window.updateRouteBadge(window.routeStops.length);
-    }
+    if (typeof window.updateRouteBadge === 'function') window.updateRouteBadge(window.routeStops.length);
 
-    if (window.routeStops.length === 0) {
-        // Nothing to show — switch back to legend tab on mobile
-        if (routePanel) routePanel.style.display = 'none';
-        return;
-    }
+    if (!list) return;
 
-    stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} (Max 10) — will auto-optimize`;
+    if (window.routeStops.length === 0) { list.innerHTML = ''; if (stats) stats.textContent = '0 stops'; return; }
 
+    if (stats) stats.textContent = `${window.routeStops.length} stop${window.routeStops.length === 1 ? '' : 's'} · auto-optimize`;
 
     list.innerHTML = '';
     window.routeStops.forEach((stop, idx) => {
         const el = document.createElement('div');
         el.className = 'route-stop-item';
-
-        // Build pin options
         let pinOptions = `<option value="">Auto</option>`;
         for (let p = 1; p <= window.routeStops.length; p++) {
             pinOptions += `<option value="${p}" ${stop.pinnedPos === p ? 'selected' : ''}>Stop #${p}</option>`;
         }
-
         el.innerHTML = `
             <div class="route-stop-name" title="${stop.name}">
                 <span style="color:var(--primary);font-weight:600;">${idx + 1}.</span> ${stop.name}
-                <div style="margin-top:4px;">
-                    <label style="font-size:0.7rem;color:#94a3b8;">Force position: </label>
+                <div style="margin-top:3px;">
+                    <label style="font-size:.68rem;color:#94a3b8;">Position: </label>
                     <select class="pin-select" onchange="window.setPinnedPos(${idx}, this.value)"
-                        style="font-size:0.72rem;padding:1px 4px;border-radius:4px;background:rgba(15,23,42,0.8);border:1px solid rgba(255,255,255,0.15);color:#fff;width:auto;">
+                        style="font-size:.7rem;padding:1px 4px;border-radius:4px;background:rgba(15,23,42,.8);border:1px solid rgba(255,255,255,.15);color:#fff;width:auto;">
                         ${pinOptions}
                     </select>
                 </div>

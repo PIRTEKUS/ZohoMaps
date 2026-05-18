@@ -1,124 +1,262 @@
 {% extends "base.html" %}
 
 {% block head %}
-<!-- polyfill.io removed — deprecated and blocked on iOS/Safari -->
-<script>
-    const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";
-</script>
+<script>const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";</script>
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
-<script type="module" src="{{ url_for('static', filename='js/map.js') }}"></script>
+<style>
+/* ── Full-screen map layout ───────────────────────────────────────────── */
+.map-full { position:relative; flex:1; overflow:hidden; min-height:0; }
+#map { width:100%; height:100%; }
+
+/* ── Floating control bar ─────────────────────────────────────────────── */
+.map-controls {
+    position:absolute; top:12px; left:12px; right:12px; z-index:15;
+    display:flex; gap:8px; align-items:flex-start; pointer-events:none;
+}
+.map-controls > * { pointer-events:all; }
+
+.ctrl-btn {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:0.45rem 0.9rem; border:none; border-radius:20px;
+    font-size:0.82rem; font-weight:600; cursor:pointer; white-space:nowrap;
+    backdrop-filter:blur(12px); transition:transform .15s, box-shadow .15s;
+    box-shadow:0 2px 8px rgba(0,0,0,.35);
+}
+.ctrl-btn:hover { transform:translateY(-1px); box-shadow:0 4px 14px rgba(0,0,0,.45); }
+.ctrl-btn.dark    { background:rgba(15,23,42,.9);  color:#e2e8f0; }
+.ctrl-btn.primary { background:rgba(79,70,229,.92); color:#fff; }
+.ctrl-btn.success { background:rgba(16,185,129,.92); color:#fff; }
+
+/* ── Category dropdown ────────────────────────────────────────────────── */
+.cat-wrap { position:relative; }
+#cat-dropdown {
+    position:absolute; top:calc(100% + 6px); left:0;
+    min-width:260px; background:rgba(10,15,28,.97);
+    border:1px solid rgba(255,255,255,.12); border-radius:14px;
+    box-shadow:0 8px 32px rgba(0,0,0,.55); backdrop-filter:blur(20px);
+    padding:.5rem 0; z-index:60; display:none;
+}
+#cat-dropdown.open { display:block; }
+.cat-row {
+    display:flex; align-items:center; gap:8px;
+    padding:.42rem 1rem; transition:background .1s; cursor:default;
+}
+.cat-row:hover { background:rgba(255,255,255,.05); }
+.cat-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+.cat-label { flex:1; font-size:.83rem; color:#e2e8f0; }
+.cat-count { font-size:.72rem; color:#475569; min-width:24px; text-align:right; }
+.cat-eye {
+    width:28px; height:28px; border:none; background:transparent;
+    cursor:pointer; color:#94a3b8; display:flex; align-items:center;
+    justify-content:center; border-radius:6px; transition:background .1s, color .1s;
+}
+.cat-eye:hover { background:rgba(255,255,255,.09); color:#e2e8f0; }
+.cat-sync {
+    font-size:.68rem; padding:2px 7px; border:1px solid rgba(99,102,241,.5);
+    background:rgba(99,102,241,.15); color:#a5b4fc; border-radius:10px;
+    cursor:pointer; transition:background .12s;
+}
+.cat-sync:hover { background:rgba(99,102,241,.35); }
+.cat-divider { height:1px; background:rgba(255,255,255,.07); margin:.35rem 0; }
+
+/* ── Route badge ──────────────────────────────────────────────────────── */
+#route-badge { display:none; position:relative; }
+.rbadge-count {
+    position:absolute; top:-7px; right:-7px;
+    background:#ef4444; color:#fff; border-radius:50%;
+    width:18px; height:18px; font-size:.62rem; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+}
+
+/* ── Record list drawer ───────────────────────────────────────────────── */
+#list-drawer {
+    position:absolute; top:0; bottom:0; left:0;
+    width:min(380px,100vw); z-index:30;
+    background:rgba(10,15,28,.97); backdrop-filter:blur(20px);
+    border-right:1px solid rgba(255,255,255,.09);
+    display:flex; flex-direction:column;
+    transform:translateX(-100%);
+    transition:transform .27s cubic-bezier(.4,0,.2,1);
+    box-shadow:4px 0 24px rgba(0,0,0,.45);
+}
+#list-drawer.open { transform:translateX(0); }
+
+.drawer-head {
+    display:flex; align-items:center; gap:10px;
+    padding:.85rem 1rem .65rem; border-bottom:1px solid rgba(255,255,255,.08);
+    flex-shrink:0;
+}
+.drawer-head h3 { margin:0; flex:1; font-size:.93rem; color:#e2e8f0; }
+.drawer-close {
+    background:none; border:none; cursor:pointer; color:#64748b;
+    display:flex; align-items:center; gap:4px; font-size:.8rem; padding:0;
+}
+.drawer-search {
+    padding:.5rem .75rem; flex-shrink:0;
+}
+.drawer-search input {
+    width:100%; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1);
+    border-radius:8px; padding:.4rem .7rem; color:#e2e8f0; font-size:.82rem;
+}
+.drawer-search input::placeholder { color:#475569; }
+
+.record-scroll { flex:1; overflow-y:auto; padding:.4rem .5rem; }
+.record-card {
+    display:flex; gap:9px; padding:.6rem .7rem; border-radius:9px;
+    cursor:pointer; margin-bottom:3px; border:1px solid transparent;
+    transition:background .12s, border-color .12s;
+}
+.record-card:hover { background:rgba(255,255,255,.05); border-color:rgba(255,255,255,.1); }
+.record-card.active { background:rgba(79,70,229,.18); border-color:rgba(99,102,241,.5); }
+.rc-bar { width:4px; border-radius:4px; flex-shrink:0; align-self:stretch; }
+.rc-body { flex:1; min-width:0; }
+.rc-name { font-size:.83rem; font-weight:600; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rc-module { font-size:.7rem; color:#475569; margin-bottom:1px; }
+.rc-fields { font-size:.73rem; color:#94a3b8; }
+
+/* ── Route panel ──────────────────────────────────────────────────────── */
+#route-panel {
+    position:absolute; bottom:20px; right:16px;
+    width:min(310px,calc(100vw - 32px)); z-index:25;
+    background:rgba(10,15,28,.97); backdrop-filter:blur(20px);
+    border:1px solid rgba(255,255,255,.1); border-radius:16px;
+    box-shadow:0 8px 32px rgba(0,0,0,.55);
+    display:none; flex-direction:column;
+}
+#route-panel.open { display:flex; }
+.rp-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:.7rem 1rem .5rem; border-bottom:1px solid rgba(255,255,255,.08);
+}
+.rp-title { font-size:.88rem; font-weight:600; color:#e2e8f0; }
+.rp-close { background:none; border:none; cursor:pointer; color:#64748b; padding:2px; display:flex; }
+.rp-stops { padding:.4rem .5rem; max-height:230px; overflow-y:auto; }
+.rp-foot { padding:.4rem .6rem .65rem; display:flex; gap:8px; }
+
+/* ── Search this area ─────────────────────────────────────────────────── */
+#search-area-btn {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:15; display:none;
+}
+
+/* ── Sync status toast ────────────────────────────────────────────────── */
+#sync-toast {
+    position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+    z-index:20; font-size:.75rem; color:#10b981;
+    background:rgba(10,15,28,.9); padding:4px 14px; border-radius:12px;
+    display:none; backdrop-filter:blur(8px); white-space:nowrap;
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────────── */
+@media (max-width:600px) {
+    .map-controls { top:8px; left:8px; right:8px; flex-wrap:wrap; }
+    .ctrl-btn { padding:.38rem .7rem; font-size:.76rem; }
+    #route-panel { bottom:0; right:0; left:0; width:100%; border-radius:16px 16px 0 0; }
+    #search-area-btn { top:60px; }
+}
+</style>
 {% endblock %}
 
 {% block content %}
-<div class="map-wrapper glass">
-    <!-- ===== SIDEBAR (desktop left panel / mobile bottom drawer) ===== -->
-    <div class="map-sidebar" id="map-sidebar">
+<div class="map-full">
 
-        <!-- Mobile: drag handle -->
-        <div class="mobile-drag-handle">
-            <div class="drag-bar"></div>
-        </div>
+    <div id="map"></div>
 
-        <!-- Mobile: tab bar -->
-        <div class="sidebar-tabs" id="sidebar-tabs">
-            <button class="sidebar-tab active" id="tab-legend" onclick="switchTab('legend')">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path></svg>
-                Data Legend
-            </button>
-            <button class="sidebar-tab" id="tab-route" onclick="switchTab('route')">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"></path></svg>
-                Route
-                <span class="tab-badge" id="tab-route-badge" style="display:none;">0</span>
-            </button>
-        </div>
-
-        <!-- ===== PANEL: Legend ===== -->
-        <div class="sidebar-panel" id="panel-legend">
-            <div class="sidebar-header">
-                <div style="display:flex; justify-content:space-between; align-items:center; width:100%;">
-                    <h2>Data Legend</h2>
-                    <button class="btn-icon" id="sync-all-btn" onclick="syncAllMyData()" title="Sync My Data" style="padding: 0.4rem 0.6rem; background: var(--primary); color: white; border-radius: 6px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>
-                    </button>
-                </div>
-                <div class="legend-stats" id="legend-stats" style="margin-top: 0.25rem;">
-                    <span class="pulse-dot"></span> Loading data...
-                </div>
-                <div id="sync-all-status" style="font-size: 0.75rem; color: #10b981; margin-top: 0.25rem; display: none;"></div>
-            </div>
-            <div class="legend-container" id="legend-container">
-                <!-- Legend items injected here -->
-            </div>
-        </div>
-
-
-
-        <!-- ===== PANEL: Route Planner ===== -->
-        <div class="sidebar-panel" id="panel-route" style="display:none;">
-            <div class="sidebar-header" style="padding-bottom:0.5rem;">
-                <div style="display:flex; align-items:center; justify-content:space-between;">
-                    <h2>Route Planner</h2>
-                    <button class="btn-clear-route" id="clear-route-btn" onclick="window.clearRoute()" title="Clear all stops">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3 6 5 6 21 6"></polyline>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                        Clear All
-                    </button>
-                </div>
-                <div style="font-size:0.75rem; color:#94a3b8; margin-top:0.25rem;" id="route-stats">0 stops</div>
-            </div>
-            <div class="route-stops-scroll">
-                <div id="route-stops-list" style="display:flex; flex-direction:column; gap:0.5rem;">
-                    <!-- Route stops injected here -->
-                </div>
-            </div>
-            <div style="padding:0.75rem 1rem 1rem;">
-                <button class="btn-primary" style="width:100%;" onclick="window.generateRoute()">Generate Route</button>
-            </div>
-        </div>
-
-    </div>
-
-    <!-- ===== MAP AREA ===== -->
-    <div style="position:relative; flex:1; display:flex; flex-direction:column;">
-        <!-- Search button (top centre) -->
-        <div id="search-area-container" style="position:absolute; top:16px; left:50%; transform:translateX(-50%); z-index:10;">
-            <button id="search-area-btn" class="btn-primary" style="box-shadow:0 4px 12px rgba(0,0,0,0.3); border-radius:20px; padding:0.5rem 1.5rem; display:none;">
-                Search in this area
-            </button>
-        </div>
-
-        <!-- Mobile panel toggle FAB (top-right of map, below navbar) -->
-        <button class="mobile-panel-toggle" id="mobile-panel-toggle" onclick="toggleMobilePanel()" aria-label="Toggle data panel">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="7" height="7" rx="1"></rect>
-                <rect x="14" y="3" width="7" height="7" rx="1"></rect>
-                <rect x="3" y="14" width="7" height="7" rx="1"></rect>
-                <rect x="14" y="14" width="7" height="7" rx="1"></rect>
-            </svg>
+    <!-- ── Floating controls ── -->
+    <div class="map-controls">
+        <!-- Show list -->
+        <button class="ctrl-btn dark" id="show-list-btn" onclick="toggleListDrawer()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            Show list
         </button>
 
-        <div id="map" class="map-container" style="height:100%; width:100%;"></div>
+        <!-- Category filter -->
+        <div class="cat-wrap">
+            <button class="ctrl-btn dark" id="cat-btn" onclick="toggleCatDropdown(event)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2V12.46L22 3z"/></svg>
+                Category
+                <svg id="cat-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div id="cat-dropdown">
+                <div class="cat-row" style="padding-bottom:.3rem;">
+                    <span style="font-size:.72rem; color:#475569; text-transform:uppercase; letter-spacing:.06em;">Modules</span>
+                    <span style="flex:1;"></span>
+                    <button class="cat-sync" onclick="syncAllMyData()">Sync All</button>
+                </div>
+                <div id="cat-list"><!-- populated by updateLegend --></div>
+                <div class="cat-divider"></div>
+                <div class="cat-row" onclick="resetAllVisibility()" style="cursor:pointer;">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#94a3b8" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="cat-label" style="color:#94a3b8; font-size:.8rem;">Show All</span>
+                </div>
+            </div>
+        </div>
 
-        {% if is_admin %}
-        <!-- Admin console toggle FAB (bottom-right of map) -->
-        <button id="console-toggle-fab"
-                onclick="toggleConsoleVisibility()"
-                title="Toggle Server Log Console"
-                style="position:absolute; bottom:20px; right:16px; z-index:20;
-                       width:40px; height:40px; border-radius:50%; border:none; cursor:pointer;
-                       background:rgba(15,23,42,0.85); color:#94a3b8;
-                       display:flex; align-items:center; justify-content:center;
-                       box-shadow:0 2px 8px rgba(0,0,0,0.4); backdrop-filter:blur(8px);
-                       transition: background 0.2s, color 0.2s;">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>
-            </svg>
-        </button>
-        {% endif %}
+        <!-- Route badge (hidden until first stop added) -->
+        <div id="route-badge" class="ctrl-btn success" onclick="toggleRoutePanel()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h8m0-7-2 7 2 7"/></svg>
+            Route
+            <span class="rbadge-count" id="route-badge-count">0</span>
+        </div>
     </div>
-</div>
+
+    <!-- Search this area button (centred, shown after pan/zoom) -->
+    <button class="ctrl-btn primary" id="search-area-btn" onclick="searchArea()">Search in this area</button>
+
+    <!-- ── Record list drawer ── -->
+    <div id="list-drawer">
+        <div class="drawer-head">
+            <button class="drawer-close" onclick="toggleListDrawer()">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                Hide
+            </button>
+            <h3>Records <span id="list-count" style="color:#475569; font-weight:400; font-size:.8rem;"></span></h3>
+        </div>
+        <div class="drawer-search">
+            <input type="text" id="list-search" placeholder="Filter records…" oninput="filterRecordList(this.value)">
+        </div>
+        <div class="record-scroll" id="record-scroll">
+            <div style="padding:1rem; color:#475569; font-size:.85rem; text-align:center;">Loading…</div>
+        </div>
+    </div>
+
+    <!-- ── Route panel (bottom-right floating card) ── -->
+    <div id="route-panel">
+        <div class="rp-head">
+            <span class="rp-title">Route Planner</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+                <span id="route-stats" style="font-size:.74rem; color:#64748b;">0 stops</span>
+                <button class="rp-close" onclick="toggleRoutePanel()">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="rp-stops" id="route-stops-list"></div>
+        <div class="rp-foot">
+            <button class="btn-primary" style="flex:1; font-size:.8rem; padding:.4rem;" onclick="window.generateRoute()">Generate Route</button>
+            <button style="font-size:.8rem; padding:.4rem .75rem; background:rgba(255,255,255,.1); border:none; border-radius:8px; color:#94a3b8; cursor:pointer;" onclick="window.clearRoute()">Clear</button>
+        </div>
+    </div>
+
+    <!-- ── Sync status toast ── -->
+    <div id="sync-toast"></div>
+
+    <!-- ── Admin console FAB ── -->
+    {% if is_admin %}
+    <button id="console-toggle-fab" onclick="toggleConsoleVisibility()" title="Toggle Server Log"
+            style="position:absolute; bottom:20px; left:16px; z-index:20;
+                   width:36px; height:36px; border-radius:50%; border:none; cursor:pointer;
+                   background:rgba(15,23,42,.88); color:#94a3b8;
+                   display:flex; align-items:center; justify-content:center;
+                   box-shadow:0 2px 8px rgba(0,0,0,.4); backdrop-filter:blur(8px);
+                   transition:background .2s, color .2s;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+        </svg>
+    </button>
+    {% endif %}
+
+</div><!-- end .map-full -->
 
 {% if is_admin %}
 <div class="debug-console" id="debug-console" style="display:none;">
@@ -142,32 +280,22 @@
     <div class="console-body" id="console-body"><div>Connected to logs...</div></div>
 </div>
 <script>
-    // ── Admin console toggle (localStorage-persisted) ─────────────────────────
     const CONSOLE_KEY = 'zohomap_console_visible';
-
     function toggleConsoleVisibility() {
         const el = document.getElementById('debug-console');
         const fab = document.getElementById('console-toggle-fab');
         const isNowVisible = el.style.display === 'none';
         el.style.display = isNowVisible ? 'block' : 'none';
-        // Update FAB colour to indicate active state
         if (fab) {
-            fab.style.background = isNowVisible ? 'rgba(79,70,229,0.9)' : 'rgba(15,23,42,0.85)';
+            fab.style.background = isNowVisible ? 'rgba(79,70,229,.9)' : 'rgba(15,23,42,.88)';
             fab.style.color = isNowVisible ? '#fff' : '#94a3b8';
         }
         localStorage.setItem(CONSOLE_KEY, isNowVisible ? '1' : '0');
         if (isNowVisible) pollLogs();
     }
+    (function() { if (localStorage.getItem(CONSOLE_KEY) === '1') toggleConsoleVisibility(); })();
 
-    // Restore last preference on page load
-    (function() {
-        if (localStorage.getItem(CONSOLE_KEY) === '1') {
-            toggleConsoleVisibility();
-        }
-    })();
-
-    let _pausePolling = false; // Paused briefly after clear so the message isn't overwritten
-
+    let _pausePolling = false;
     async function clearLogs() {
         const cb = document.getElementById('console-body');
         cb.innerHTML = '<div style="color:#94a3b8;">Clearing...</div>';
@@ -176,38 +304,22 @@
             if (res.ok) {
                 cb.innerHTML = '<div style="color:#10b981;">✓ Logs cleared.</div>';
                 _pausePolling = true;
-                setTimeout(() => { _pausePolling = false; }, 4000); // Resume after 4s
+                setTimeout(() => { _pausePolling = false; }, 4000);
             } else {
                 const err = await res.json().catch(() => ({}));
                 cb.innerHTML = `<div style="color:#ef4444;">✗ Clear failed (HTTP ${res.status}): ${err.error || 'Unknown error'}</div>`;
             }
-        } catch(e) {
-            cb.innerHTML = `<div style="color:#ef4444;">✗ Network error: ${e.message}</div>`;
-        }
+        } catch(e) { cb.innerHTML = `<div style="color:#ef4444;">✗ Network error: ${e.message}</div>`; }
     }
     function copyLogs() {
         const body = document.getElementById('console-body');
         const text = Array.from(body.querySelectorAll('div')).map(d => d.textContent).join('\n');
-        const btn = document.querySelector('.console-copy-btn');
-        const original = btn.innerHTML;
-        const showFeedback = () => {
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--success)" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
-            setTimeout(() => btn.innerHTML = original, 2000);
-        };
-        if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(text).then(showFeedback);
-        } else {
-            const ta = document.createElement('textarea');
-            ta.value = text; ta.style.position='fixed'; ta.style.left='-9999px';
-            document.body.appendChild(ta); ta.focus(); ta.select();
-            try { if(document.execCommand('copy')) showFeedback(); } catch(e) {}
-            document.body.removeChild(ta);
-        }
+        if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text);
+        else { const ta=document.createElement('textarea'); ta.value=text; ta.style.position='fixed'; ta.style.left='-9999px'; document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
     }
     function pollLogs() {
         const el = document.getElementById('debug-console');
-        if (!el || el.style.display === 'none') return; // Don't poll when hidden
-        if (_pausePolling) return; // Paused after a clear
+        if (!el || el.style.display === 'none' || _pausePolling) return;
         fetch('/api/logs').then(r=>r.json()).then(data=>{
             if(data.logs && data.logs.length > 0){
                 const cb = document.getElementById('console-body');
@@ -215,98 +327,158 @@
                 data.logs.forEach(line=>{ const d=document.createElement('div'); d.textContent=line; cb.appendChild(d); });
                 cb.scrollTop=cb.scrollHeight;
             }
-        }).catch(e=>console.error(e));
+        }).catch(()=>{});
     }
     setInterval(pollLogs, 2000);
 </script>
 {% endif %}
 
 <script>
-// ===== Mobile sidebar tab system =====
-window._activeTab = 'legend';
+// ── Overlay UI controllers ────────────────────────────────────────────────
 
-function switchTab(tab) {
-    window._activeTab = tab;
-    document.getElementById('panel-legend').style.display = tab === 'legend' ? 'flex' : 'none';
-    document.getElementById('panel-route').style.display  = tab === 'route'  ? 'flex' : 'none';
-    document.getElementById('tab-legend').classList.toggle('active', tab === 'legend');
-    document.getElementById('tab-route').classList.toggle('active', tab === 'route');
+// Category dropdown
+function toggleCatDropdown(e) {
+    e.stopPropagation();
+    const dd = document.getElementById('cat-dropdown');
+    const caret = document.getElementById('cat-caret');
+    const open = dd.classList.toggle('open');
+    if (caret) caret.style.transform = open ? 'rotate(180deg)' : '';
+}
+document.addEventListener('click', () => {
+    document.getElementById('cat-dropdown')?.classList.remove('open');
+    const caret = document.getElementById('cat-caret');
+    if (caret) caret.style.transform = '';
+});
+
+function resetAllVisibility() {
+    window.hiddenModules = new Set();
+    if (window.lastMapData) { window.plotData(window.lastMapData); window.updateLegend(window.lastMapData); }
+    document.getElementById('cat-dropdown')?.classList.remove('open');
 }
 
-// Update route tab badge from map.js
+// Record list drawer
+let _listData = [];
+function toggleListDrawer() {
+    const drawer = document.getElementById('list-drawer');
+    const isOpen = drawer.classList.toggle('open');
+    document.getElementById('show-list-btn').innerHTML = isOpen
+        ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Hide list'
+        : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Show list';
+}
+
+window.updateRecordList = function(data) {
+    _listData = data;
+    renderRecordList(data);
+};
+
+function renderRecordList(data) {
+    const scroll = document.getElementById('record-scroll');
+    const countEl = document.getElementById('list-count');
+    if (!scroll) return;
+    countEl.textContent = `(${data.length})`;
+    if (data.length === 0) {
+        scroll.innerHTML = '<div style="padding:1.5rem; color:#475569; font-size:.85rem; text-align:center;">No records in this area</div>';
+        return;
+    }
+    scroll.innerHTML = '';
+    data.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'record-card';
+        // First 2 non-hidden fields for the card preview
+        const fields = Object.entries(item.record_data || {})
+            .filter(([k]) => !k.startsWith('_') && k !== 'Latitude' && k !== 'Longitude' && k !== 'Address')
+            .slice(0, 2)
+            .map(([k,v]) => `<span>${k}: ${v}</span>`)
+            .join(' · ');
+        card.innerHTML = `
+            <div class="rc-bar" style="background:${item.color};"></div>
+            <div class="rc-body">
+                <div class="rc-module">${item.module}</div>
+                <div class="rc-name">${item.name}</div>
+                ${fields ? `<div class="rc-fields">${fields}</div>` : ''}
+            </div>`;
+        card.addEventListener('click', () => {
+            if (window.map) window.map.panTo({lat: item.lat, lng: item.lng});
+            document.querySelectorAll('.record-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            // Close drawer on mobile
+            if (window.innerWidth <= 600) toggleListDrawer();
+        });
+        scroll.appendChild(card);
+    });
+}
+
+function filterRecordList(query) {
+    if (!query) { renderRecordList(_listData); return; }
+    const q = query.toLowerCase();
+    renderRecordList(_listData.filter(d =>
+        d.name.toLowerCase().includes(q) || d.module.toLowerCase().includes(q)
+    ));
+}
+
+// Route panel
+function toggleRoutePanel() {
+    document.getElementById('route-panel').classList.toggle('open');
+}
+
+// updateRouteBadge — called from map.js renderRoutePlanner
 window.updateRouteBadge = function(count) {
-    const badge = document.getElementById('tab-route-badge');
-    if (!badge) return;
+    const badge = document.getElementById('route-badge');
+    const countEl = document.getElementById('route-badge-count');
+    const panel = document.getElementById('route-panel');
     if (count > 0) {
-        badge.textContent = count;
         badge.style.display = 'inline-flex';
-        // Auto-switch to route tab when stops are added on mobile
-        if (window.innerWidth <= 768 && count === 1) {
-            const sidebar = document.getElementById('map-sidebar');
-            if (sidebar.classList.contains('mobile-open')) switchTab('route');
-        }
+        countEl.textContent = count;
+        // Auto-open route panel on first stop
+        if (count === 1) panel.classList.add('open');
     } else {
         badge.style.display = 'none';
-        if (window._activeTab === 'route') switchTab('legend');
+        panel.classList.remove('open');
     }
 };
 
-// ===== Mobile panel toggle =====
-function toggleMobilePanel() {
-    const sidebar = document.getElementById('map-sidebar');
-    const fab = document.getElementById('mobile-panel-toggle');
-    sidebar.classList.toggle('mobile-open');
-    fab.classList.toggle('panel-open');
+// Search this area button
+function searchArea() {
+    const btn = document.getElementById('search-area-btn');
+    btn.style.display = 'none';
+    if (window.fetchData) window.fetchData();
 }
 
-// Close panel when tapping map area on mobile
-document.addEventListener('click', function(e) {
-    const sidebar = document.getElementById('map-sidebar');
-    const fab = document.getElementById('mobile-panel-toggle');
-    if (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open')) {
-        if (!sidebar.contains(e.target) && !fab.contains(e.target)) {
-            sidebar.classList.remove('mobile-open');
-            fab.classList.remove('panel-open');
-        }
-    }
-});
+// Re-wire search button display — map.js calls this when the map is panned
+window.showSearchButton = function() {
+    const btn = document.getElementById('search-area-btn');
+    if (btn) btn.style.display = 'inline-flex';
+};
 
-// Full sync for team users
+// Sync all data
 window.syncAllMyData = async function() {
-    const btn = document.getElementById('sync-all-btn');
-    const status = document.getElementById('sync-all-status');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="pulse-dot"></span> Syncing Data...';
-    status.style.display = 'block';
-    status.textContent = 'This may take a minute if there are many records...';
-    
+    const toast = document.getElementById('sync-toast');
+    toast.style.display = 'block';
+    toast.style.color = '#94a3b8';
+    toast.textContent = 'Syncing all data…';
     try {
         const res = await fetch('/api/sync-all', { method: 'POST' });
         const data = await res.json();
         if (res.ok) {
-            status.style.color = '#10b981';
-            status.textContent = `Successfully synced ${data.total_synced} records!`;
-            setTimeout(() => window.location.reload(), 1500);
+            toast.style.color = '#10b981';
+            toast.textContent = `✓ Synced ${data.total_synced} records`;
+            setTimeout(() => { toast.style.display = 'none'; window.location.reload(); }, 1800);
         } else {
-            status.style.color = '#ef4444';
-            status.textContent = `Error: ${data.error || 'Sync failed'}`;
-            btn.disabled = false;
-            btn.innerHTML = 'Sync My Data';
+            toast.style.color = '#ef4444';
+            toast.textContent = `✗ ${data.error || 'Sync failed'}`;
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
         }
-    } catch (e) {
-        status.style.color = '#ef4444';
-        status.textContent = 'Network error during sync.';
-        btn.disabled = false;
-        btn.innerHTML = 'Sync My Data';
+    } catch(e) {
+        toast.style.color = '#ef4444';
+        toast.textContent = '✗ Network error';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
     }
 };
-
 </script>
 
-    <script>
-        const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";
-        window.configuredModules = {{ configs | tojson | safe }};
-    </script>
-    <script src="{{ url_for('static', filename='js/map.js') }}"></script>
-    <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
+<script>
+    window.configuredModules = {{ configs | tojson | safe }};
+</script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
 {% endblock %}
