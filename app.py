@@ -337,7 +337,7 @@ def callback():
                                     if u.get('email', '').lower() == user_email.lower():
                                         session['user_id'] = u['id']
                                         session['user_email'] = user_email
-                                         log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
+                                        log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
                                         break
                     except Exception as e:
                         log_debug(f"Could not resolve team user CRM ID: {e}")
