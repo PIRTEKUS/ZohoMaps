@@ -1526,6 +1526,67 @@ def admin_test_franchise_lookup():
 
     return jsonify({'user_id': requested_uid, 'franchises': result, 'raw_sample': raw_sample})
 
+@app.route('/admin/refresh-token-setup')
+def admin_refresh_token_setup():
+    """Show the current admin refresh token so it can be stored permanently in the
+    systemd service file as ZOHO_REFRESH_TOKEN — eliminating the need for admin logins."""
+    if not session.get('is_admin', False):
+        return "Unauthorized — admin login required.", 403
+
+    refresh_token = session.get('refresh_token', '')
+    db_encrypted  = database.get_global_setting('admin_refresh_token', '')
+    db_token      = decrypt_token(db_encrypted) if db_encrypted else ''
+    env_token     = os.environ.get('ZOHO_REFRESH_TOKEN', '')
+
+    html = f"""<!DOCTYPE html><html><head><title>Refresh Token Setup</title>
+<style>
+  body{{font-family:monospace;max-width:860px;margin:40px auto;padding:20px;background:#111;color:#eee}}
+  h1{{color:#f90}}
+  .box{{background:#1e1e1e;border:1px solid #444;padding:16px;border-radius:6px;margin:16px 0;word-break:break-all}}
+  .ok{{color:#4f4}}  .warn{{color:#fa0}}  .bad{{color:#f44}}
+  code{{background:#2a2a2a;padding:2px 6px;border-radius:4px}}
+  pre{{background:#1a1a1a;padding:16px;border-radius:6px;overflow-x:auto;white-space:pre-wrap}}
+  button{{background:#f90;color:#000;border:none;padding:8px 16px;cursor:pointer;border-radius:4px;font-weight:bold}}
+</style></head><body>
+<h1>🔑 ZohoMap — Permanent Refresh Token Setup</h1>
+<p>Once you add <code>ZOHO_REFRESH_TOKEN</code> to the systemd service file, the server will
+never require an admin browser login again.</p>
+
+<h2>1. Your Current Session Refresh Token</h2>
+<div class="box {'ok' if refresh_token else 'bad'}">
+{'<span class="ok">✅ Found — copy this value:</span><br><br>' + refresh_token if refresh_token
+ else '<span class="bad">❌ Not available in this session — log out and log back in as admin.</span>'}
+</div>
+
+<h2>2. DB-Stored Refresh Token</h2>
+<div class="box {'ok' if db_token else 'bad'}">
+{'<span class="ok">✅ Found:</span><br><br>' + db_token if db_token
+ else '<span class="bad">❌ None stored in DB.</span>'}
+</div>
+
+<h2>3. Env-Var Token Status</h2>
+<div class="box {'ok' if env_token else 'warn'}">
+{'<span class="ok">✅ ZOHO_REFRESH_TOKEN is already set in systemd (' + str(len(env_token)) + ' chars).</span>'
+ if env_token else '<span class="warn">⚠️ ZOHO_REFRESH_TOKEN not yet in systemd service file.</span>'}
+</div>
+
+<h2>4. How to Make It Permanent</h2>
+<pre>
+# On the Ubuntu server:
+sudo nano /etc/systemd/system/zohomap.service
+
+# Add this line inside the [Service] block:
+Environment="ZOHO_REFRESH_TOKEN=PASTE_YOUR_REFRESH_TOKEN_HERE"
+
+# Then reload and restart:
+sudo systemctl daemon-reload
+sudo systemctl restart zohomap
+</pre>
+
+<p><a href="/admin/crm-explorer" style="color:#f90">← Back to CRM Explorer</a></p>
+</body></html>"""
+    return html
+
 if __name__ == '__main__':
     # NEVER run with debug=True in production — it exposes an interactive shell.
     is_debug = os.environ.get('FLASK_ENV', 'production') == 'development'
