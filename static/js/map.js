@@ -228,8 +228,8 @@ function plotData(data) {
         window.activeInfoWindow = new google.maps.InfoWindow();
     }
 
-    // Reset marker lookup
-    window.markersById = window.markersById || {};
+    // Always reset marker lookup so stale markers from previous loads don't linger
+    window.markersById = {};
 
     const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
 
@@ -619,37 +619,26 @@ document.addEventListener('DOMContentLoaded', () => {
 window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
     const originalText = btnElement.innerHTML;
     btnElement.disabled = true;
-    btnElement.innerHTML = '<span class="pulse-dot" style="margin:0; width:6px; height:6px;"></span> Syncing...';
-    
+    btnElement.innerHTML = '<span class="pulse-dot" style="margin:0;width:6px;height:6px;"></span> Syncing...';
     try {
         const res = await fetch(`/api/sync-record/${moduleName}/${recordId}`, { method: 'POST' });
         const data = await res.json();
-        
         if (res.ok && data.success) {
             btnElement.style.color = '#10b981';
-            btnElement.innerHTML = 'Synced!';
-            // Reload the map data behind the scenes to update the popup next time it opens
+            btnElement.innerHTML = '✓ Synced!';
             setTimeout(() => {
-                if(window.activeInfoWindow) window.activeInfoWindow.close();
-                fetchData();
-            }, 1000);
+                if (window.activeInfoWindow) window.activeInfoWindow.close();
+                // Refresh map + list
+                if (window.fetchData) window.fetchData();
+            }, 1200);
         } else {
             btnElement.style.color = '#ef4444';
-            btnElement.innerHTML = 'Failed';
-            setTimeout(() => {
-                btnElement.disabled = false;
-                btnElement.innerHTML = originalText;
-                btnElement.style.color = '';
-            }, 2000);
+            btnElement.innerHTML = '✗ Failed';
+            setTimeout(() => { btnElement.disabled = false; btnElement.innerHTML = originalText; btnElement.style.color = ''; }, 2500);
         }
     } catch(e) {
-        console.error("Error syncing single record:", e);
         btnElement.style.color = '#ef4444';
-        btnElement.innerHTML = 'Error';
-        setTimeout(() => {
-            btnElement.disabled = false;
-            btnElement.innerHTML = originalText;
-            btnElement.style.color = '';
-        }, 2000);
+        btnElement.innerHTML = '✗ Error';
+        setTimeout(() => { btnElement.disabled = false; btnElement.innerHTML = originalText; btnElement.style.color = ''; }, 2500);
     }
 };
