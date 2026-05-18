@@ -103,15 +103,20 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
     return response.json()
 
 def fetch_single_record(module_name, record_id, access_token, fields=None):
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {access_token}'
-    }
+    headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
     url = f"{ZOHO_API_URL}/crm/v3/{module_name}/{record_id}"
     params = {}
     if fields:
         params['fields'] = ",".join(fields)
     response = requests.get(url, headers=headers, params=params)
-    return response.json()
+    if not response.content:
+        return {'status': 'error', 'code': 'EMPTY_RESPONSE',
+                'message': f'Zoho returned HTTP {response.status_code} with empty body for {module_name}/{record_id}'}
+    try:
+        return response.json()
+    except Exception as e:
+        return {'status': 'error', 'code': 'INVALID_JSON',
+                'message': f'Zoho returned HTTP {response.status_code}: {response.text[:200]}'}
 
 def fetch_module_metadata(access_token):
     headers = {
@@ -122,13 +127,16 @@ def fetch_module_metadata(access_token):
     return response.json()
 
 def fetch_module_fields(module_name, access_token):
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {access_token}'
-    }
+    headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
     url = f"{ZOHO_API_URL}/crm/v3/settings/fields"
     params = {'module': module_name}
     response = requests.get(url, headers=headers, params=params)
-    return response.json()
+    if not response.content:
+        return {}
+    try:
+        return response.json()
+    except Exception:
+        return {}
 
 def fetch_org_metadata(access_token):
     headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}

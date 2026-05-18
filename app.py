@@ -548,8 +548,10 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
     
     if 'code' in data and data.get('status') == 'error':
         error_code = data.get('code')
-        if error_code == 'NO_PERMISSION':
-            log_debug(f"NO_PERMISSION for single record {record_id}. Trying admin fallback...")
+        error_msg  = data.get('message', '')
+        log_debug(f"Zoho API error for {module_name}/{record_id}: [{error_code}] {error_msg}")
+        if error_code in ('NO_PERMISSION', 'EMPTY_RESPONSE', 'INVALID_JSON'):
+            log_debug(f"Attempting admin token fallback for {record_id}...")
             admin_token = _get_admin_access_token()
             if admin_token and user_id:
                 criteria = f"((Owner.id:equals:{user_id})and(id:equals:{record_id}))"
@@ -557,15 +559,17 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
                 if 'data' in owner_data and owner_data['data']:
                     data = owner_data
                 else:
-                    log_debug("Admin fallback returned 0 records.")
+                    log_debug(f"Admin fallback returned 0 records for {module_name}/{record_id}.")
                     return False
+            else:
+                log_debug("No admin token available for fallback.")
+                return False
         else:
-            log_debug(f"API Error fetching single record: {error_code}")
             return False
 
     records_list = data.get('data', [])
     if not records_list:
-        log_debug(f"Single sync failed: No records returned for {module_name} {record_id}. Data: {data}")
+        log_debug(f"Single sync failed: No records returned for {module_name} {record_id}. Raw response: {data}")
         return False
         
     record = records_list[0]
