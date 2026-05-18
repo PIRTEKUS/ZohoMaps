@@ -456,17 +456,20 @@ window.syncSingleModule = async function(moduleName, btn) {
     }
 };
 
+window.hiddenModules = window.hiddenModules || new Set();
+
 window.toggleModuleVisibility = function(moduleName, makeHidden) {
-    // makeHidden=true means we want to HIDE it (eye was visible, user clicked to hide)
+    if (!window.hiddenModules) window.hiddenModules = new Set();
+    // makeHidden=true means eye was visible → user wants to hide it
     if (makeHidden) {
         window.hiddenModules.add(moduleName);
     } else {
         window.hiddenModules.delete(moduleName);
     }
-    // Re-plot data to apply visibility changes
     if (window.lastMapData) {
         plotData(window.lastMapData);
         updateLegend(window.lastMapData);
+        if (window.updateRecordList) window.updateRecordList(window.lastMapData);
     }
 };
 
