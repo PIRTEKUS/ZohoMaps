@@ -331,46 +331,43 @@ window.buildPopupContent = function(item) {
 
 // Open the map marker for a record from the list drawer
 window.focusMapMarker = function(id) {
-    const sid = String(id); // coerce to string — IDs may be numeric in JSON
+    const sid = String(id);
     console.log('[focusMapMarker] called | id:', sid,
                 '| markersById entries:', window.markersById ? Object.keys(window.markersById).length : 'undefined');
 
     // Primary path — marker is in the current viewport lookup
     const entry = window.markersById && (window.markersById[sid] || window.markersById[id]);
     if (entry) {
-        console.log('[focusMapMarker] marker found in markersById, opening popup');
+        console.log('[focusMapMarker] marker found, opening popup');
         const { marker, item } = entry;
-        window.map.panTo({ lat: item.lat, lng: item.lng });
-        if (window.map.getZoom() < 14) window.map.setZoom(14);
+        map.panTo({ lat: item.lat, lng: item.lng });
+        if (map.getZoom() < 14) map.setZoom(14);
         if (!window.activeInfoWindow) window.activeInfoWindow = new google.maps.InfoWindow();
         window.activeInfoWindow.setContent(window.buildPopupContent(item));
-        window.activeInfoWindow.open(window.map, marker);
+        window.activeInfoWindow.open(map, marker);
         return;
     }
 
-    // Fallback — marker not in viewport (clustered, hidden module, or outside current area)
+    // Fallback — marker outside current viewport
     console.warn('[focusMapMarker] id not in markersById, searching lastMapData …');
     const fallback = window.lastMapData && window.lastMapData.find(d => String(d.id) === sid);
     if (fallback) {
-        console.log('[focusMapMarker] fallback item found:', fallback.name, '| panning to', fallback.lat, fallback.lng);
-        window.map.panTo({ lat: fallback.lat, lng: fallback.lng });
-        window.map.setZoom(15); // zoom in so the marker becomes visible
-        // Wait for idle then re-try with real marker (will now be in markersById after reload)
-        google.maps.event.addListenerOnce(window.map, 'idle', function() {
-            console.log('[focusMapMarker] map idle after pan — re-trying markersById');
+        console.log('[focusMapMarker] fallback found:', fallback.name);
+        map.panTo({ lat: fallback.lat, lng: fallback.lng });
+        map.setZoom(15);
+        google.maps.event.addListenerOnce(map, 'idle', function() {
             const retry = window.markersById && (window.markersById[sid] || window.markersById[id]);
             if (!window.activeInfoWindow) window.activeInfoWindow = new google.maps.InfoWindow();
             window.activeInfoWindow.setContent(window.buildPopupContent(fallback));
             if (retry) {
-                window.activeInfoWindow.open(window.map, retry.marker);
+                window.activeInfoWindow.open(map, retry.marker);
             } else {
-                // Open at position with no anchor
                 window.activeInfoWindow.setPosition({ lat: fallback.lat, lng: fallback.lng });
-                window.activeInfoWindow.open(window.map);
+                window.activeInfoWindow.open(map);
             }
         });
     } else {
-        console.error('[focusMapMarker] record not found in lastMapData either. id=', sid);
+        console.error('[focusMapMarker] record not found anywhere. id=', sid);
     }
 };
 
