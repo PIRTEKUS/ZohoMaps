@@ -171,6 +171,28 @@ def search_records(module_name, criteria, access_token, fields=None, page=1, pag
         print(f"[ZOHO API ERROR] search_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
     return {'data': []}
 
+def coql_query(select_query, access_token):
+    """Execute a COQL (CRM Object Query Language) query.
+    Unlike the search/list endpoints, COQL returns multiuserlookup field values.
+    Endpoint: POST /crm/v5/coql
+    Returns the parsed JSON response, or {'data': []} on error.
+    """
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}',
+        'Content-Type': 'application/json'
+    }
+    url = f"{ZOHO_API_URL}/crm/v5/coql"
+    try:
+        response = requests.post(url, headers=headers,
+                                 json={'select_query': select_query}, timeout=15)
+        if response.status_code == 200 and response.content:
+            return response.json()
+        if response.status_code not in (200, 204):
+            print(f"[ZOHO COQL ERROR] Status {response.status_code}: {response.text[:300]}")
+    except Exception as e:
+        print(f"[ZOHO COQL EXCEPTION] {e}")
+    return {'data': []}
+
 def fetch_user_info(access_token):
     """
     Fetch current user info.

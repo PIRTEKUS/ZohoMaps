@@ -517,7 +517,7 @@ def _require_admin_token(context='sync'):
     """Return admin access token for server-side API calls.
     All data syncs use the admin token so user profile API restrictions
     do not limit which modules/records can be fetched.
-    Falls back to the user session token if no admin token is stored yet."""
+    Falls back to user session token if no admin token is stored yet."""
     token = _get_admin_access_token()
     if token:
         return token
@@ -527,9 +527,8 @@ def _require_admin_token(context='sync'):
 
 
 def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
-    """Return franchise memberships for a user by fetching ALL Franchise records
-    and filtering client-side. This is necessary because Zoho search/criteria
-    API does not support 'includes' on multiuserlookup fields.
+    """Return franchise memberships for a user via COQL (the only Zoho endpoint
+    that returns multiuserlookup field values). Falls back to territory assignments.
 
     Returns a dict: {'ids': [...], 'names': [...], 'pirtek_ids': [...], 'debug': [...]}
     """
@@ -552,79 +551,65 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     debug_log = []
     found = {}
 
-    # ── Attempt 1: fetch ALL franchise records (paginated) and filter client-side
-    try:
-        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
-        base = zoho_api.ZOHO_API_URL
-        page = 1
-        while True:
-            resp = requests.get(
-                f'{base}/crm/v3/Franchises',
-                headers=headers,
-                params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Admin_User,Franchise_Standard_Users',
-                        'per_page': 200, 'page': page},
-                timeout=15
-            )
-            if not resp.ok or not resp.content:
-                debug_log.append(f'Page {page}: HTTP {resp.status_code} — stopped')
-                break
-            rdata = resp.json()
-            recs = rdata.get('data', [])
-            debug_log.append(f'Page {page}: {len(recs)} franchise records fetched')
+    # ── Strategy 1: COQL — only endpoint that returns multiuserlookup field values
+    # Query franchises where this user is listed in Franchise_Standard_Users OR Franchise_Admin_User
+    for coql in [
+        f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Standard_Users = '{user_id}'",
+        f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Admin_User = '{user_id}'"
+    ]:
+        try:
+            result = zoho_api.coql_query(coql, admin_token)
+            recs = result.get('data', [])
+            debug_log.append(f'COQL "{coql[:60]}…": {len(recs)} hits')
             for rec in recs:
                 fid = str(rec.get('id', ''))
-                if not fid:
-                    continue
-
-                # Check Franchise_Admin_User (single user lookup)
-                admin_user = rec.get('Franchise_Admin_User') or {}
-                admin_uid = str(admin_user.get('id', '')) if isinstance(admin_user, dict) else str(admin_user)
-
-                # Check Franchise_Standard_Users (multiuserlookup — list of user objects)
-                std_users = rec.get('Franchise_Standard_Users') or []
-                if isinstance(std_users, dict):
-                    std_users = [std_users]
-                std_uids = [str(u.get('id', '')) if isinstance(u, dict) else str(u) for u in std_users]
-
-                if admin_uid == str(user_id) or str(user_id) in std_uids:
+                if fid and fid not in found:
                     found[fid] = {
                         'id': fid,
                         'name': rec.get('Name', ''),
-                        'pirtek_id': rec.get('Pirtek_Franchise_ID', '')
+                        'pirtek_id': rec.get('Pirtek_Franchise_ID', '') or ''
                     }
+        except Exception as e:
+            debug_log.append(f'COQL error: {e}')
 
-            info = rdata.get('info', {})
-            if not info.get('more_records', False):
-                break
-            page += 1
-    except Exception as e:
-        debug_log.append(f'Fetch-all error: {e}')
-
-    # ── Attempt 2: criteria search with 'equals' for admin user field (fast path)
+    # ── Strategy 2: Territory-based fallback
+    # If COQL finds nothing, derive franchise list from the user's territory assignments.
+    # Territory names in this org match Franchise names (e.g. "Colorado Springs" → franchise "Colorado Springs").
     if not found:
         try:
-            crit = f'(Franchise_Admin_User:equals:{user_id})'
-            data2 = zoho_api.search_records('Franchises', crit, admin_token,
-                                            fields=['id', 'Name', 'Pirtek_Franchise_ID'])
-            for rec in data2.get('data', []):
-                fid = str(rec.get('id', ''))
-                if fid and fid not in found:
-                    found[fid] = {'id': fid, 'name': rec.get('Name', ''), 'pirtek_id': rec.get('Pirtek_Franchise_ID', '')}
-            debug_log.append(f'Criteria search (admin user): {len(data2.get("data",[]))} hits')
+            headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+            resp = requests.get(
+                f'{zoho_api.ZOHO_API_URL}/crm/v3/users/{user_id}',
+                headers=headers, timeout=10
+            )
+            if resp.ok and resp.content:
+                udata = resp.json()
+                user_obj = udata.get('users', [{}])[0] if 'users' in udata else udata.get('user', {})
+                territories = user_obj.get('territories', [])
+                debug_log.append(f'Territory fallback: user has {len(territories)} territories: {[t.get("name") for t in territories]}')
+                for t in territories:
+                    tid = str(t.get('id', ''))
+                    tname = t.get('name', '')
+                    if tid and tname not in ('PIRTEK USA', 'Head Office'):
+                        # Use territory ID as a proxy franchise identifier
+                        found[f'territory_{tid}'] = {
+                            'id': f'territory_{tid}',
+                            'name': tname,
+                            'pirtek_id': ''
+                        }
         except Exception as e:
-            debug_log.append(f'Criteria search error: {e}')
+            debug_log.append(f'Territory fallback error: {e}')
 
     results = {
-        'ids':       [v['id']         for v in found.values()],
-        'names':     [v['name']       for v in found.values()],
-        'pirtek_ids':[v['pirtek_id']  for v in found.values()],
+        'ids':       [v['id']        for v in found.values()],
+        'names':     [v['name']      for v in found.values()],
+        'pirtek_ids':[v['pirtek_id'] for v in found.values()],
         'debug':     debug_log,
         'ts':        time.time()
     }
 
     database.set_global_setting(cache_key, json.dumps(results))
     log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
-    return results
 
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
