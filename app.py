@@ -513,6 +513,21 @@ def _get_admin_access_token():
         log_debug(f"Admin token refresh exception: {e}")
     return None
 
+def _require_admin_token(context='sync'):
+    """Return admin access token for server-side API calls.
+    All data syncs use the admin token so user profile API restrictions
+    do not limit which modules/records can be fetched.
+    Falls back to the user's session token if no admin token is available yet
+    (e.g. first-run before any admin has logged in)."""
+    token = _get_admin_access_token()
+    if token:
+        return token
+    # Fallback: warn and use user token (degraded mode)
+    log_debug(f"[{context}] WARNING: No admin token available — using user session token (degraded mode). "
+              "An admin user must log in at least once to store the admin refresh token.")
+    from flask import session as _s
+    return _s.get('access_token')
+
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
     
@@ -667,9 +682,14 @@ def sync_single_record(module_name, record_id):
     if not config:
         log_debug(f"Sync record failed: Module {module_name} not configured for user. Available: {[c['module_name'] for c in configs]}")
         return jsonify({'error': 'Module not configured'}), 404
-        
+
+    # Always use admin token so per-user API profile restrictions don't block the fetch
+    sync_token = _require_admin_token(f'sync-record/{module_name}')
+    if not sync_token:
+        return jsonify({'error': 'Server not configured: no admin token available'}), 503
+
     try:
-        success = do_sync_single_record(session.get('user_id'), session['access_token'], module_name, record_id, config)
+        success = do_sync_single_record(session.get('user_id'), sync_token, module_name, record_id, config)
         if success:
             log_debug(f"API /api/sync-record/{module_name}/{record_id} success.")
             return jsonify({'success': True})
@@ -909,9 +929,14 @@ def sync_module(module_name):
     config = next((c for c in configs if c['module_name'] == module_name), None)
     if not config:
         return jsonify({'error': 'Module not configured'}), 404
-        
+
+    # Always use admin token for module sync
+    sync_token = _require_admin_token(f'sync-module/{module_name}')
+    if not sync_token:
+        return jsonify({'error': 'Server not configured: no admin token available'}), 503
+
     try:
-        count = do_sync_module(session.get('user_id'), session['access_token'], module_name, config)
+        count = do_sync_module(session.get('user_id'), sync_token, module_name, config)
         return jsonify({'success': True, 'synced': count})
     except Exception as e:
         log_debug(f"Sync error for {module_name}: {str(e)}")
@@ -927,19 +952,24 @@ def sync_all_modules():
     configs = database.get_effective_configs(session.get('user_id'))
     if not configs:
         return jsonify({'error': 'No modules configured to sync'}), 404
-        
+
+    # Always use admin token for all syncs
+    sync_token = _require_admin_token('sync-all')
+    if not sync_token:
+        return jsonify({'error': 'Server not configured: no admin token available'}), 503
+
     results = {}
     total_synced = 0
-    
+
     for config in configs:
         module_name = config['module_name']
         try:
-            count = do_sync_module(session.get('user_id'), session['access_token'], module_name, config)
+            count = do_sync_module(session.get('user_id'), sync_token, module_name, config)
             results[module_name] = {'success': True, 'synced': count}
             total_synced += count
         except Exception as e:
             results[module_name] = {'error': str(e)}
-            
+
     return jsonify({'success': True, 'total_synced': total_synced, 'details': results})
 
 
