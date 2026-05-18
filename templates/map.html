@@ -24,7 +24,9 @@ main.container { padding: 0 !important; overflow: hidden; }
 .map-controls {
     position:absolute; top:12px; left:12px; right:12px; z-index:15;
     display:flex; gap:8px; align-items:flex-start; pointer-events:none;
+    transition: left 0.27s cubic-bezier(.4,0,.2,1);
 }
+.map-controls.drawer-open { left: calc(380px + 16px); }
 .map-controls > * { pointer-events:all; }
 
 .ctrl-btn {
@@ -162,6 +164,7 @@ main.container { padding: 0 !important; overflow: hidden; }
 /* ── Mobile ───────────────────────────────────────────────────────────── */
 @media (max-width:600px) {
     .map-controls { top:8px; left:8px; right:8px; flex-wrap:wrap; }
+    .map-controls.drawer-open { left: 8px; } /* full-width drawer on mobile — don't shift */
     .ctrl-btn { padding:.38rem .7rem; font-size:.76rem; }
     #route-panel { bottom:0; right:0; left:0; width:100%; border-radius:16px 16px 0 0; }
     #search-area-btn { top:60px; }
@@ -383,7 +386,9 @@ function _milesBetween(lat1, lng1, lat2, lng2) {
 
 function toggleListDrawer() {
     const drawer = document.getElementById('list-drawer');
+    const controls = document.querySelector('.map-controls');
     const isOpen = drawer.classList.toggle('open');
+    if (controls) controls.classList.toggle('drawer-open', isOpen);
     document.getElementById('show-list-btn').innerHTML = isOpen
         ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Hide list'
         : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg> Show list';
