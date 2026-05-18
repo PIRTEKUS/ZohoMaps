@@ -370,6 +370,17 @@ function resetAllVisibility() {
 
 // Record list drawer
 let _listData = [];
+
+function _geoDistRad(lat1, lng1, lat2, lng2) {
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+    return 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); // radians
+}
+function _milesBetween(lat1, lng1, lat2, lng2) {
+    return _geoDistRad(lat1, lng1, lat2, lng2) * 3958.8; // earth radius in miles
+}
+
 function toggleListDrawer() {
     const drawer = document.getElementById('list-drawer');
     const isOpen = drawer.classList.toggle('open');
@@ -380,8 +391,19 @@ function toggleListDrawer() {
 
 window.updateRecordList = function(data) {
     _listData = data;
-    renderRecordList(data);
+    _renderSortedList();
 };
+
+function _renderSortedList() {
+    const sorted = [..._listData];
+    if (window.userLat != null && window.userLng != null) {
+        sorted.sort((a, b) =>
+            _geoDistRad(a.lat, a.lng, window.userLat, window.userLng) -
+            _geoDistRad(b.lat, b.lng, window.userLat, window.userLng)
+        );
+    }
+    renderRecordList(sorted);
+}
 
 function renderRecordList(data) {
     const scroll = document.getElementById('record-scroll');
@@ -393,40 +415,127 @@ function renderRecordList(data) {
         return;
     }
     scroll.innerHTML = '';
+
     data.forEach(item => {
-        const card = document.createElement('div');
-        card.className = 'record-card';
-        // First 2 non-hidden fields for the card preview
-        const fields = Object.entries(item.record_data || {})
+        const wrapper = document.createElement('div');
+        wrapper.style.marginBottom = '3px';
+
+        // Distance label
+        let distLabel = '';
+        if (window.userLat != null && window.userLng != null) {
+            const mi = _milesBetween(item.lat, item.lng, window.userLat, window.userLng);
+            distLabel = mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
+        }
+
+        // Preview fields (first 2 non-system fields)
+        const previewFields = Object.entries(item.record_data || {})
             .filter(([k]) => !k.startsWith('_') && k !== 'Latitude' && k !== 'Longitude' && k !== 'Address')
             .slice(0, 2)
-            .map(([k,v]) => `<span>${k}: ${v}</span>`)
-            .join(' · ');
+            .map(([k, v]) => `<span style="color:#64748b;">${k}:</span> ${v}`)
+            .join(' &middot; ');
+
+        // Card (collapsed header)
+        const card = document.createElement('div');
+        card.className = 'record-card';
+        card.style.cursor = 'pointer';
         card.innerHTML = `
             <div class="rc-bar" style="background:${item.color};"></div>
-            <div class="rc-body">
-                <div class="rc-module">${item.module}</div>
+            <div class="rc-body" style="min-width:0;">
+                <div class="rc-module">${item.module}${distLabel ? ` &middot; <span style="color:#6366f1;font-weight:600;">${distLabel}</span>` : ''}</div>
                 <div class="rc-name">${item.name}</div>
-                ${fields ? `<div class="rc-fields">${fields}</div>` : ''}
-            </div>`;
-        card.addEventListener('click', () => {
-            if (window.map) window.map.panTo({lat: item.lat, lng: item.lng});
-            document.querySelectorAll('.record-card').forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-            // Close drawer on mobile
-            if (window.innerWidth <= 600) toggleListDrawer();
+                ${previewFields ? `<div class="rc-fields" style="font-size:.71rem;">${previewFields}</div>` : ''}
+            </div>
+            <svg class="rc-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#475569" stroke-width="2.5" style="flex-shrink:0;transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>`;
+
+        // Detail panel (hidden by default)
+        const detail = document.createElement('div');
+        detail.style.cssText = 'display:none; padding:.65rem .75rem; background:rgba(255,255,255,.04); border-radius:0 0 9px 9px; border:1px solid rgba(255,255,255,.08); border-top:none; margin-top:-2px;';
+        detail.innerHTML = _buildListDetail(item);
+
+        card.addEventListener('click', (e) => {
+            // Don't re-toggle if a button inside the detail was clicked
+            if (e.target.closest('button')) return;
+            const isOpen = detail.style.display !== 'none';
+            // Collapse siblings
+            scroll.querySelectorAll('.rc-detail-panel').forEach(d => d.style.display = 'none');
+            scroll.querySelectorAll('.rc-chevron').forEach(c => c.style.transform = '');
+            scroll.querySelectorAll('.record-card').forEach(c => c.classList.remove('active'));
+            scroll.querySelectorAll('.record-card').forEach(c => c.style.borderRadius = '9px');
+            if (!isOpen) {
+                detail.style.display = 'block';
+                card.querySelector('.rc-chevron').style.transform = 'rotate(180deg)';
+                card.classList.add('active');
+                card.style.borderRadius = '9px 9px 0 0';
+            }
         });
-        scroll.appendChild(card);
+
+        detail.className = 'rc-detail-panel';
+        wrapper.appendChild(card);
+        wrapper.appendChild(detail);
+        scroll.appendChild(wrapper);
     });
 }
 
+function _buildListDetail(item) {
+    const addressKeys = ['Address', 'City', 'State', 'Zip', 'Country', 'Latitude', 'Longitude'];
+    let html = '';
+
+    // Location fields
+    const addrPairs = addressKeys.filter(k => item.record_data[k]);
+    if (addrPairs.length) {
+        html += `<div style="font-size:.68rem;color:#64748b;text-transform:uppercase;font-weight:600;letter-spacing:.05em;margin-bottom:5px;">Location</div>`;
+        addrPairs.forEach(k => {
+            html += `<div style="font-size:.77rem;margin-bottom:2px;color:#cbd5e1;"><span style="color:#94a3b8;">${k}:</span> ${item.record_data[k]}</div>`;
+        });
+    }
+
+    // Additional fields
+    const addPairs = Object.keys(item.record_data)
+        .filter(k => !addressKeys.includes(k) && !k.startsWith('_') && item.record_data[k])
+        .sort();
+    if (addPairs.length) {
+        html += `<div style="font-size:.68rem;color:#64748b;text-transform:uppercase;font-weight:600;letter-spacing:.05em;margin:8px 0 5px;">Details</div>`;
+        addPairs.forEach(k => {
+            html += `<div style="font-size:.77rem;margin-bottom:2px;color:#cbd5e1;"><span style="color:#94a3b8;">${k}:</span> ${item.record_data[k]}</div>`;
+        });
+    }
+
+    // Action buttons
+    const safeName = item.name.replace(/'/g, '&apos;').replace(/"/g, '&quot;');
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.api_module_name || item.module)}/${item.id}`;
+
+    html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:10px;">
+        <button class="btn-primary" style="font-size:.73rem;padding:.35rem;grid-column:span 2;"
+            onclick="window.focusMapMarker('${item.id}'); if(window.innerWidth<=600) toggleListDrawer();">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            Show on Map
+        </button>
+        <button class="btn-secondary" style="font-size:.73rem;padding:.35rem;color:#1e293b;"
+            onclick="window.getDirections(${item.lat},${item.lng})">Directions</button>
+        <button class="btn-secondary" style="font-size:.73rem;padding:.35rem;color:#1e293b;"
+            onclick="window.open('${item.zoho_link}','_blank')">Open in Zoho</button>
+        <button class="btn-secondary" style="font-size:.73rem;padding:.35rem;color:#1e293b;"
+            onclick="window.addToRoute('${item.id}','${safeName}',${item.lat},${item.lng})">Add to Route</button>
+        <button class="btn-secondary" style="font-size:.73rem;padding:.35rem;color:#1e293b;display:flex;align-items:center;justify-content:center;gap:4px;"
+            onclick="window.syncSingleRecord('${item.api_module_name||item.module}','${item.id}',this)">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>
+            Sync
+        </button>
+        ${isMobile ? `<button class="btn-primary" style="font-size:.73rem;padding:.35rem;grid-column:span 2;" onclick="window.location.href='${zohoAppLink}'">Open in App</button>` : ''}
+    </div>`;
+
+    return html;
+}
+
 function filterRecordList(query) {
-    if (!query) { renderRecordList(_listData); return; }
+    if (!query) { _renderSortedList(); return; }
     const q = query.toLowerCase();
     renderRecordList(_listData.filter(d =>
         d.name.toLowerCase().includes(q) || d.module.toLowerCase().includes(q)
     ));
 }
+
 
 // Route panel
 function toggleRoutePanel() {

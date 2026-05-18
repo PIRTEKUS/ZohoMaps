@@ -34,21 +34,17 @@ async function initMap() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude,
                 };
-                // Delay slightly so the flex layout (sidebar + map area) is fully
-                // painted before we ask Google Maps to center. Without this delay,
-                // Maps calculates center based on window width, not the narrower
-                // map area beside the sidebar, shifting the pin to the lower-right.
+                // Store for distance-sort in record list
+                window.userLat = pos.lat;
+                window.userLng = pos.lng;
                 setTimeout(() => {
                     google.maps.event.trigger(map, 'resize');
                     map.setCenter(pos);
-                    map.setZoom(10); // City-level zoom for field technicians
+                    map.setZoom(10);
                     google.maps.event.addListenerOnce(map, 'idle', loadMapData);
                 }, 150);
             },
-            () => {
-                // Browser geolocation failed or denied, try IP-based fallback
-                tryIPFallback();
-            },
+            () => { tryIPFallback(); },
             { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
         );
     } else {
@@ -58,19 +54,17 @@ async function initMap() {
 
 async function tryIPFallback() {
     try {
-        console.log("Browser geolocation failed. Attempting IP-based location fallback...");
         const res = await fetch('https://ipapi.co/json/');
         const data = await res.json();
         if (data.latitude && data.longitude) {
-            const pos = { lat: data.latitude, lng: data.longitude };
-            map.setCenter(pos);
+            window.userLat = data.latitude;
+            window.userLng = data.longitude;
+            map.setCenter({ lat: data.latitude, lng: data.longitude });
             map.setZoom(8);
-            console.log("IP-based location success:", pos);
         }
     } catch (e) {
-        console.error("IP-based fallback failed:", e);
+        console.error('IP fallback failed:', e);
     } finally {
-        // Load data regardless of success
         google.maps.event.addListenerOnce(map, 'idle', loadMapData);
     }
 }
@@ -228,18 +222,16 @@ function plotData(data) {
     }
 
     const bounds = new google.maps.LatLngBounds();
-    
-    // Reuse a single InfoWindow so only one popup is open at a time
+
+    // Reuse a single InfoWindow
     if (!window.activeInfoWindow) {
         window.activeInfoWindow = new google.maps.InfoWindow();
     }
-    
-    // Filter visible data first
+
+    // Reset marker lookup
+    window.markersById = window.markersById || {};
+
     const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
-    
-    if (visibleData.length >= 1000) {
-        document.getElementById('legend-stats').innerHTML += ` <span style="color:var(--warning);font-size:0.75rem;">(Limit reached, zoom in for more)</span>`;
-    }
 
     visibleData.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
@@ -285,69 +277,13 @@ function plotData(data) {
         bounds.extend(position);
 
         marker.addListener('click', () => {
-            let content = `<div class="info-window"><h3>${item.name}</h3><p style="margin-bottom: 8px;"><strong>Module:</strong> ${item.module}</p><div class="info-details">`;
-            
-            // Location Section
-            const addressKeys = ['Address', 'City', 'State', 'Zip', 'Country', 'Latitude', 'Longitude'];
-            let addressHtml = '';
-            addressKeys.forEach(k => {
-                if (item.record_data[k]) {
-                    addressHtml += `<div style="margin-bottom: 2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
-                }
-            });
-            
-            if (addressHtml) {
-                content += `<div style="background: rgba(255,255,255,0.05); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 8px;">
-                                <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Location</div>
-                                ${addressHtml}
-                            </div>`;
-            }
-
-            // Additional Info Section
-            const additionalKeys = Object.keys(item.record_data)
-                .filter(k => !addressKeys.includes(k))
-                .sort(); // Sort alphabetically
-                
-            let additionalHtml = '';
-            additionalKeys.forEach(k => {
-                if (item.record_data[k]) {
-                    additionalHtml += `<div style="margin-bottom: 2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
-                }
-            });
-
-            if (additionalHtml) {
-                content += `<div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 12px;">
-                                <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Additional Info</div>
-                                ${additionalHtml}
-                            </div>`;
-            }
-
-            // Add route action buttons — onclick handlers also close the info window
-            const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
-            
-            // Detect if user is on a mobile device for the "Open in App" link
-            const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-            // Zoho CRM mobile deep link scheme: zohocrm://crm/[module]/[id]
-            const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.api_module_name || item.module)}/${item.id}`;
-            
-            content += `<div class="info-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-                <button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem;" onclick="window.activeInfoWindow.close(); window.getDirections(${item.lat}, ${item.lng})">Directions</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.addToRoute('${item.id}', '${safeName}', ${item.lat}, ${item.lng})">Add to Route</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b;" onclick="window.activeInfoWindow.close(); window.open('${item.zoho_link}', '_blank')">Open Web</button>
-                <button class="btn-secondary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 1; color: #1e293b; display: flex; justify-content: center; align-items: center; gap: 4px;" onclick="window.syncSingleRecord('${item.api_module_name || item.module}', '${item.id}', this)">
-                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>
-                    Sync
-                </button>
-                ${isMobile ? `<button class="btn-primary" style="font-size: 0.7rem; padding: 0.25rem; grid-column: span 2;" onclick="window.activeInfoWindow.close(); window.location.href='${zohoAppLink}'">Open in Zoho CRM App</button>` : ''}
-            </div>`;
-
-            content += `</div></div>`;
-
+            const content = window.buildPopupContent(item);
             window.activeInfoWindow.setContent(content);
             window.activeInfoWindow.open(map, marker);
         });
-        
+
         markers.push(marker);
+        window.markersById[item.id] = { marker, item };
     });
 
     // Initialize or Update Clusterer only if visible markers >= 50
@@ -365,7 +301,47 @@ function plotData(data) {
     }
 }
 
-window.hiddenModules = window.hiddenModules || new Set();
+// ── Shared popup content builder ──────────────────────────────────────────────
+window.buildPopupContent = function(item) {
+    const addressKeys = ['Address', 'City', 'State', 'Zip', 'Country', 'Latitude', 'Longitude'];
+    let content = `<div class="info-window"><h3>${item.name}</h3><p style="margin-bottom:8px;"><strong>Module:</strong> ${item.module}</p><div class="info-details">`;
+
+    let addressHtml = '';
+    addressKeys.forEach(k => { if (item.record_data[k]) addressHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`; });
+    if (addressHtml) content += `<div style="background:rgba(255,255,255,0.05);padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px;"><div style="font-size:0.75rem;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Location</div>${addressHtml}</div>`;
+
+    const addKeys = Object.keys(item.record_data).filter(k => !addressKeys.includes(k) && !k.startsWith('_')).sort();
+    let addHtml = '';
+    addKeys.forEach(k => { if (item.record_data[k]) addHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`; });
+    if (addHtml) content += `<div style="background:rgba(255,255,255,0.02);padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);margin-bottom:12px;"><div style="font-size:0.75rem;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Additional Info</div>${addHtml}</div>`;
+
+    const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.api_module_name || item.module)}/${item.id}`;
+
+    content += `<div class="info-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+        <button class="btn-primary" style="font-size:0.7rem;padding:0.25rem;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.getDirections(${item.lat},${item.lng})">Directions</button>
+        <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.addToRoute('${item.id}','${safeName}',${item.lat},${item.lng})">Add to Route</button>
+        <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.open('${item.zoho_link}','_blank')">Open Web</button>
+        <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;display:flex;align-items:center;justify-content:center;gap:4px;" onclick="window.syncSingleRecord('${item.api_module_name||item.module}','${item.id}',this)"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L2 10"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 1 0-2.13 5.88l3.13-3.88"/></svg>Sync</button>
+        ${isMobile ? `<button class="btn-primary" style="font-size:0.7rem;padding:0.25rem;grid-column:span 2;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.location.href='${zohoAppLink}'">Open in Zoho App</button>` : ''}
+    </div></div></div>`;
+    return content;
+};
+
+// Open the map marker for a record from the list drawer
+window.focusMapMarker = function(id) {
+    const entry = window.markersById && window.markersById[id];
+    if (!entry) return;
+    const { marker, item } = entry;
+    window.map.panTo({ lat: item.lat, lng: item.lng });
+    if (window.map.getZoom() < 14) window.map.setZoom(14);
+    const content = window.buildPopupContent(item);
+    if (!window.activeInfoWindow) window.activeInfoWindow = new google.maps.InfoWindow();
+    window.activeInfoWindow.setContent(content);
+    window.activeInfoWindow.open(window.map, marker);
+};
+
 
 function updateLegend(data) {
     const legend = document.getElementById('cat-list');
