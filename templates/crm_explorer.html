@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CRM Explorer — ZohoMap Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;}
+.topbar{background:rgba(15,23,42,.95);border-bottom:1px solid rgba(255,255,255,.08);padding:.8rem 1.5rem;display:flex;align-items:center;gap:1rem;}
+.topbar a{color:#94a3b8;font-size:.85rem;text-decoration:none;}
+.topbar a:hover{color:#e2e8f0;}
+h1{font-size:1.2rem;font-weight:700;color:#e2e8f0;}
+.badge{background:#4f46e5;color:#fff;font-size:.65rem;padding:.2rem .5rem;border-radius:99px;font-weight:600;vertical-align:middle;}
+.layout{display:grid;grid-template-columns:280px 1fr;min-height:calc(100vh - 52px);}
+.sidebar{background:rgba(255,255,255,.03);border-right:1px solid rgba(255,255,255,.07);padding:1rem;overflow-y:auto;}
+.main{padding:1.5rem;overflow-y:auto;}
+.section-title{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:.6rem;margin-top:1.2rem;}
+.section-title:first-child{margin-top:0;}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .9rem;border-radius:8px;border:none;cursor:pointer;font-size:.82rem;font-weight:500;font-family:inherit;transition:.15s;}
+.btn-primary{background:#4f46e5;color:#fff;}.btn-primary:hover{background:#4338ca;}
+.btn-secondary{background:rgba(255,255,255,.08);color:#e2e8f0;}.btn-secondary:hover{background:rgba(255,255,255,.14);}
+.btn-sm{padding:.3rem .65rem;font-size:.75rem;}
+.btn-success{background:#059669;color:#fff;}
+input,select{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;padding:.4rem .75rem;font-size:.83rem;font-family:inherit;width:100%;}
+input:focus,select:focus{outline:none;border-color:#4f46e5;}
+.card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:1rem;margin-bottom:.75rem;}
+.card-title{font-size:.9rem;font-weight:600;margin-bottom:.6rem;display:flex;justify-content:space-between;align-items:center;}
+table{width:100%;border-collapse:collapse;font-size:.8rem;}
+th{text-align:left;padding:.4rem .6rem;color:#64748b;font-weight:600;border-bottom:1px solid rgba(255,255,255,.07);font-size:.72rem;text-transform:uppercase;}
+td{padding:.38rem .6rem;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.03);}
+.tag{display:inline-block;background:rgba(79,70,229,.2);color:#a5b4fc;font-size:.68rem;padding:.15rem .4rem;border-radius:4px;margin:.1rem;}
+.tag-lookup{background:rgba(16,185,129,.2);color:#6ee7b7;}
+.tag-franchise{background:rgba(245,158,11,.3);color:#fcd34d;font-weight:700;}
+.highlight{background:rgba(245,158,11,.12);border-left:3px solid #f59e0b !important;}
+.status{display:flex;align-items:center;gap:.5rem;font-size:.82rem;padding:.5rem .8rem;border-radius:8px;margin-bottom:.75rem;}
+.status.ok{background:rgba(16,185,129,.12);color:#34d399;border:1px solid rgba(16,185,129,.2);}
+.status.warn{background:rgba(245,158,11,.12);color:#fbbf24;border:1px solid rgba(245,158,11,.2);}
+.status.err{background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.2);}
+.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#4f46e5;border-radius:50%;animation:spin .6s linear infinite;display:inline-block;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.module-item{padding:.35rem .6rem;border-radius:6px;cursor:pointer;font-size:.82rem;display:flex;justify-content:space-between;align-items:center;}
+.module-item:hover{background:rgba(255,255,255,.07);}
+.module-item.active{background:rgba(79,70,229,.25);color:#a5b4fc;}
+.search-box{margin-bottom:.6rem;}
+.tabs{display:flex;gap:.25rem;margin-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:.5rem;}
+.tab{padding:.4rem .8rem;border-radius:6px 6px 0 0;cursor:pointer;font-size:.83rem;color:#64748b;}
+.tab.active{color:#e2e8f0;background:rgba(79,70,229,.2);border-bottom:2px solid #4f46e5;}
+.empty{color:#475569;font-size:.82rem;text-align:center;padding:2rem;}
+#copy-btn{position:fixed;bottom:1.5rem;right:1.5rem;z-index:99;}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <a href="/settings">← Settings</a>
+  <h1>CRM Explorer <span class="badge">Admin</span></h1>
+  <span style="color:#64748b;font-size:.8rem;margin-left:auto;">Logged in as {{ user_name }}</span>
+</div>
+
+<div style="padding:.75rem 1.5rem;background:rgba(79,70,229,.08);border-bottom:1px solid rgba(79,70,229,.2);">
+  <span style="font-size:.82rem;color:#a5b4fc;">🔍 Use this tool to find the Franchise field API names, territory structure, and user assignments needed for Phase 2 configuration.</span>
+</div>
+
+<div class="layout">
+<!-- SIDEBAR: Module list -->
+<div class="sidebar">
+  <div class="section-title">CRM Modules</div>
+  <div class="search-box"><input id="mod-search" placeholder="Search modules…" oninput="filterModules(this.value)"></div>
+  <div id="mod-list"><div class="empty"><span class="spinner"></span></div></div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('fields')">📋 Fields</div>
+    <div class="tab" onclick="switchTab('territories')">🗺 Territories</div>
+    <div class="tab" onclick="switchTab('users')">👥 Users</div>
+    <div class="tab" onclick="switchTab('summary')">✅ Summary</div>
+  </div>
+
+  <!-- FIELDS TAB -->
+  <div id="tab-fields">
+    <div id="admin-token-status"></div>
+    <div class="card" style="margin-bottom:1rem;">
+      <div style="font-size:.85rem;color:#94a3b8;">Select a module from the sidebar to view its fields. Fields containing <b style="color:#fcd34d;">franchise</b> in their name or label are highlighted automatically.</div>
+    </div>
+    <div id="fields-content"><div class="empty">← Select a module</div></div>
+  </div>
+
+  <!-- TERRITORIES TAB -->
+  <div id="tab-territories" style="display:none;">
+    <div class="card">
+      <div class="card-title">Territories <button class="btn btn-sm btn-secondary" onclick="loadTerritories()">Reload</button></div>
+      <div id="territories-content"><div class="empty"><span class="spinner"></span></div></div>
+    </div>
+  </div>
+
+  <!-- USERS TAB -->
+  <div id="tab-users" style="display:none;">
+    <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;">
+      <input id="user-search" placeholder="Filter users…" oninput="filterUsers(this.value)" style="max-width:260px;">
+      <button class="btn btn-sm btn-secondary" onclick="loadUsers()">Reload</button>
+    </div>
+    <div id="users-content"><div class="empty"><span class="spinner"></span></div></div>
+  </div>
+
+  <!-- SUMMARY TAB -->
+  <div id="tab-summary" style="display:none;">
+    <div class="card">
+      <div class="card-title">📋 Configuration Summary for Phase 2</div>
+      <div id="summary-content">
+        <div style="color:#94a3b8;font-size:.83rem;">Browse Fields and Territories tabs first, then come back here for the summary.</div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:.5rem;">
+      <div class="card-title">Raw Export (paste to developer)</div>
+      <textarea id="summary-export" readonly style="width:100%;height:180px;background:#0f172a;border:1px solid rgba(255,255,255,.1);border-radius:6px;color:#a5b4fc;font-size:.78rem;padding:.5rem;font-family:monospace;resize:vertical;"></textarea>
+      <button class="btn btn-sm btn-secondary" style="margin-top:.5rem;" onclick="copyExport()">Copy to Clipboard</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+let _allModules = [];
+let _allUsers = [];
+let _fieldCache = {};
+let _franchiseHits = {}; // module_api_name → [field]
+let _territories = [];
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+(async function init() {
+  await loadModules();
+  checkAdminToken();
+  loadTerritories();
+  loadUsers();
+})();
+
+async function checkAdminToken() {
+  const el = document.getElementById('admin-token-status');
+  try {
+    const r = await fetch('/api/admin/crm-modules');
+    if (r.ok) {
+      el.innerHTML = '<div class="status ok">✓ Admin token is active — all CRM data is accessible</div>';
+    } else {
+      const d = await r.json();
+      el.innerHTML = `<div class="status warn">⚠ ${d.error || 'Admin token issue'}</div>`;
+    }
+  } catch(e) {
+    el.innerHTML = `<div class="status err">✗ Network error: ${e.message}</div>`;
+  }
+}
+
+// ── Modules ───────────────────────────────────────────────────────────────────
+async function loadModules() {
+  try {
+    const r = await fetch('/api/admin/crm-modules');
+    const d = await r.json();
+    _allModules = d.modules || [];
+    renderModuleList(_allModules);
+  } catch(e) {
+    document.getElementById('mod-list').innerHTML = `<div class="empty" style="color:#f87171;">Error: ${e.message}</div>`;
+  }
+}
+
+function renderModuleList(mods) {
+  const el = document.getElementById('mod-list');
+  if (!mods.length) { el.innerHTML = '<div class="empty">No modules</div>'; return; }
+  el.innerHTML = mods.map(m => `
+    <div class="module-item" id="mi-${m.api_name}" onclick="selectModule('${m.api_name}','${m.plural_label.replace(/'/g,"\\'")}')">
+      <span>${m.plural_label}</span>
+      <span style="font-size:.68rem;color:#64748b;">${m.api_name}</span>
+    </div>`).join('');
+}
+
+function filterModules(q) {
+  const f = q.toLowerCase();
+  renderModuleList(f ? _allModules.filter(m => m.plural_label.toLowerCase().includes(f) || m.api_name.toLowerCase().includes(f)) : _allModules);
+}
+
+// ── Fields ────────────────────────────────────────────────────────────────────
+async function selectModule(apiName, label) {
+  switchTab('fields');
+  document.querySelectorAll('.module-item').forEach(e => e.classList.remove('active'));
+  const mi = document.getElementById('mi-' + apiName);
+  if (mi) mi.classList.add('active');
+
+  const el = document.getElementById('fields-content');
+  el.innerHTML = `<div class="card"><div class="card-title">${label} <span style="color:#64748b;font-size:.75rem;">${apiName}</span></div><div class="empty"><span class="spinner"></span> Loading fields…</div></div>`;
+
+  if (_fieldCache[apiName]) { renderFields(apiName, label, _fieldCache[apiName]); return; }
+
+  try {
+    const r = await fetch(`/api/admin/crm-fields/${apiName}`);
+    const d = await r.json();
+    _fieldCache[apiName] = d.fields || [];
+    renderFields(apiName, label, _fieldCache[apiName]);
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:#f87171;">Error: ${e.message}</div>`;
+  }
+}
+
+function renderFields(apiName, label, fields) {
+  const el = document.getElementById('fields-content');
+  const franchiseFields = fields.filter(f =>
+    f.api_name.toLowerCase().includes('franchise') ||
+    f.display_label.toLowerCase().includes('franchise')
+  );
+  if (franchiseFields.length) _franchiseHits[apiName] = franchiseFields;
+
+  const lookupFields = fields.filter(f => f.data_type === 'lookup' || f.data_type === 'multiselectlookup');
+
+  let html = `<div class="card">
+    <div class="card-title">${label} — ${fields.length} fields
+      <span style="font-size:.75rem;color:#64748b;">${franchiseFields.length ? `⭐ ${franchiseFields.length} franchise field(s) found` : 'No franchise fields detected'}</span>
+    </div>`;
+
+  if (franchiseFields.length) {
+    html += `<div style="background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:8px;padding:.75rem;margin-bottom:.75rem;">
+      <div style="font-size:.75rem;color:#fcd34d;font-weight:600;margin-bottom:.4rem;">⭐ Franchise-related fields in ${label}:</div>
+      ${franchiseFields.map(f => `
+        <div style="font-size:.82rem;margin-bottom:.25rem;">
+          <code style="background:rgba(0,0,0,.3);padding:.15rem .4rem;border-radius:4px;color:#fcd34d;">${f.api_name}</code>
+          <span style="color:#e2e8f0;margin-left:.4rem;">${f.display_label}</span>
+          <span class="tag tag-lookup">${f.data_type}</span>
+          ${f.lookup && f.lookup.module ? `<span style="color:#94a3b8;font-size:.72rem;">→ links to: <b>${f.lookup.module.api_name || f.lookup.module}</b></span>` : ''}
+        </div>`).join('')}
+    </div>`;
+  }
+
+  if (lookupFields.length) {
+    html += `<div style="margin-bottom:.5rem;font-size:.75rem;color:#94a3b8;">Lookup fields: ${lookupFields.map(f => `<code style="background:rgba(0,0,0,.3);padding:.1rem .3rem;border-radius:3px;color:#6ee7b7;">${f.api_name}</code> → ${f.lookup?.module?.api_name || '?'}`).join(' &nbsp; ')}</div>`;
+  }
+
+  html += `<div style="margin-bottom:.5rem;"><input placeholder="Filter fields…" oninput="filterFields(this.value,'${apiName}','${label.replace(/'/g,"\\'")}')" style="max-width:260px;"></div>
+    <table id="field-table-${apiName}">
+      <thead><tr><th>Display Label</th><th>API Name</th><th>Type</th><th>Lookup Module</th></tr></thead>
+      <tbody>${fields.map(f => {
+        const isFranchise = f.api_name.toLowerCase().includes('franchise') || f.display_label.toLowerCase().includes('franchise');
+        return `<tr class="${isFranchise ? 'highlight' : ''}">
+          <td>${f.display_label}${isFranchise ? ' <span class="tag tag-franchise">FRANCHISE</span>' : ''}</td>
+          <td><code style="font-size:.75rem;color:#a5b4fc;">${f.api_name}</code></td>
+          <td><span class="tag ${f.data_type === 'lookup' ? 'tag-lookup' : ''}">${f.data_type}</span></td>
+          <td style="color:#94a3b8;font-size:.75rem;">${f.lookup && f.lookup.module ? (f.lookup.module.api_name || JSON.stringify(f.lookup.module)) : ''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div>`;
+
+  el.innerHTML = html;
+  updateSummary();
+}
+
+function filterFields(q, apiName, label) {
+  const fields = (_fieldCache[apiName] || []).filter(f =>
+    !q || f.display_label.toLowerCase().includes(q.toLowerCase()) || f.api_name.toLowerCase().includes(q.toLowerCase())
+  );
+  const tbody = document.querySelector(`#field-table-${apiName} tbody`);
+  if (tbody) tbody.innerHTML = fields.map(f => {
+    const isFranchise = f.api_name.toLowerCase().includes('franchise') || f.display_label.toLowerCase().includes('franchise');
+    return `<tr class="${isFranchise ? 'highlight' : ''}">
+      <td>${f.display_label}${isFranchise ? ' <span class="tag tag-franchise">FRANCHISE</span>' : ''}</td>
+      <td><code style="font-size:.75rem;color:#a5b4fc;">${f.api_name}</code></td>
+      <td><span class="tag ${f.data_type === 'lookup' ? 'tag-lookup' : ''}">${f.data_type}</span></td>
+      <td style="color:#94a3b8;font-size:.75rem;">${f.lookup && f.lookup.module ? (f.lookup.module.api_name || '') : ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Territories ───────────────────────────────────────────────────────────────
+async function loadTerritories() {
+  const el = document.getElementById('territories-content');
+  el.innerHTML = '<div class="empty"><span class="spinner"></span> Loading…</div>';
+  try {
+    const r = await fetch('/api/admin/crm-territories');
+    const d = await r.json();
+    _territories = d.territories || d.Territory || [];
+    if (!_territories.length) { el.innerHTML = '<div class="empty">No territories returned</div>'; return; }
+    el.innerHTML = `<table><thead><tr><th>Name</th><th>ID</th><th>Parent</th><th>All Fields</th></tr></thead>
+      <tbody>${_territories.map(t => `<tr>
+        <td><b>${t.name || t.Name || '?'}</b></td>
+        <td style="font-size:.72rem;color:#64748b;">${t.id || t.Id || ''}</td>
+        <td style="font-size:.72rem;color:#94a3b8;">${t.parent_id || t.Parent?.name || ''}</td>
+        <td style="font-size:.72rem;color:#475569;">${Object.entries(t).filter(([k]) => !['id','name','parent_id'].includes(k)).map(([k,v]) => `<span class="tag">${k}: ${JSON.stringify(v).slice(0,40)}</span>`).join(' ')}</td>
+      </tr>`).join('')}</tbody></table>`;
+    updateSummary();
+  } catch(e) {
+    el.innerHTML = `<div class="empty" style="color:#f87171;">${e.message}</div>`;
+  }
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  try {
+    const r = await fetch('/api/admin/crm-users');
+    const d = await r.json();
+    _allUsers = d.users || [];
+    renderUsers(_allUsers);
+  } catch(e) {
+    document.getElementById('users-content').innerHTML = `<div class="empty" style="color:#f87171;">${e.message}</div>`;
+  }
+}
+
+function renderUsers(users) {
+  const el = document.getElementById('users-content');
+  if (!users.length) { el.innerHTML = '<div class="empty">No users</div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Name</th><th>Email</th><th>Profile</th><th>Role</th><th>Territories</th></tr></thead>
+    <tbody>${users.map(u => `<tr>
+      <td>${u.name}</td>
+      <td style="font-size:.75rem;color:#64748b;">${u.email}</td>
+      <td><span class="tag">${u.profile}</span></td>
+      <td style="font-size:.75rem;">${u.role}</td>
+      <td style="font-size:.72rem;color:#94a3b8;">${Array.isArray(u.territories) ? u.territories.map(t => t.name || t.id || JSON.stringify(t)).join(', ') : JSON.stringify(u.territories)}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function filterUsers(q) {
+  const f = q.toLowerCase();
+  renderUsers(f ? _allUsers.filter(u => u.name.toLowerCase().includes(f) || u.email.toLowerCase().includes(f)) : _allUsers);
+}
+
+// ── Summary ───────────────────────────────────────────────────────────────────
+function updateSummary() {
+  const el = document.getElementById('summary-content');
+  const exp = document.getElementById('summary-export');
+
+  const hits = Object.entries(_franchiseHits);
+  let html = '';
+  let exportObj = { franchise_fields_by_module: {}, territories: [], notes: [] };
+
+  if (hits.length) {
+    html += `<div style="margin-bottom:.75rem;"><b style="color:#fcd34d;">Franchise fields found:</b><br>`;
+    hits.forEach(([mod, fields]) => {
+      html += `<div style="margin-top:.4rem;font-size:.82rem;"><b>${mod}</b>: ${fields.map(f => `<code style="background:rgba(0,0,0,.3);padding:.1rem .35rem;border-radius:4px;color:#fcd34d;">${f.api_name}</code> (${f.display_label})`).join(', ')}</div>`;
+      exportObj.franchise_fields_by_module[mod] = fields.map(f => ({api_name: f.api_name, label: f.display_label, type: f.data_type, links_to: f.lookup?.module?.api_name || null}));
+    });
+    html += '</div>';
+  } else {
+    html += '<div style="color:#94a3b8;font-size:.82rem;">Browse modules to find franchise fields — they will appear here automatically.</div>';
+  }
+
+  if (_territories.length) {
+    html += `<div style="margin-top:.75rem;"><b style="color:#6ee7b7;">Territories (${_territories.length}):</b> ${_territories.map(t => t.name || t.Name).join(', ')}</div>`;
+    exportObj.territories = _territories.map(t => ({id: t.id || t.Id, name: t.name || t.Name}));
+  }
+
+  el.innerHTML = html || '<div class="empty">Browse Fields and Territories first</div>';
+  exp.value = JSON.stringify(exportObj, null, 2);
+}
+
+function copyExport() {
+  const ta = document.getElementById('summary-export');
+  ta.select();
+  document.execCommand('copy');
+  const btn = event.target;
+  btn.textContent = '✓ Copied!';
+  setTimeout(() => btn.textContent = 'Copy to Clipboard', 2000);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('[id^="tab-"]').forEach(e => e.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(e => e.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = '';
+  event.target.classList.add('active');
+  if (name === 'summary') updateSummary();
+}
+</script>
+</body>
+</html>

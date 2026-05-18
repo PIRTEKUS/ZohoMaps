@@ -1190,6 +1190,91 @@ def get_map_data():
 
     return jsonify(map_points)
 
+# ── CRM Explorer (admin diagnostic tool) ─────────────────────────────────────
+
+@app.route('/admin/crm-explorer')
+def crm_explorer_page():
+    if not session.get('is_admin', False):
+        return redirect('/')
+    return render_template('crm_explorer.html',
+                           user_name=session.get('user_name', ''),
+                           is_admin=True)
+
+def _admin_crm_get(path, params=None):
+    """Make a GET request to Zoho CRM using the admin token."""
+    token = _get_admin_access_token()
+    if not token:
+        return None, 'No admin token — an admin must log in first'
+    headers = {'Authorization': f'Zoho-oauthtoken {token}'}
+    url = f'{zoho_api.ZOHO_API_URL}{path}'
+    try:
+        resp = requests.get(url, headers=headers, params=params or {}, timeout=15)
+        if not resp.content:
+            return None, f'Empty response (HTTP {resp.status_code})'
+        return resp.json(), None
+    except Exception as e:
+        return None, str(e)
+
+@app.route('/api/admin/crm-modules')
+def admin_crm_modules():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data, err = _admin_crm_get('/crm/v3/settings/modules')
+    if err:
+        return jsonify({'error': err}), 500
+    modules = sorted([
+        {'api_name': m['api_name'],
+         'singular_label': m.get('singular_label', m['api_name']),
+         'plural_label': m.get('plural_label', m['api_name'])}
+        for m in data.get('modules', [])
+    ], key=lambda x: x['plural_label'])
+    return jsonify({'modules': modules})
+
+@app.route('/api/admin/crm-fields/<module_name>')
+def admin_crm_fields(module_name):
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data, err = _admin_crm_get('/crm/v3/settings/fields', {'module': module_name})
+    if err:
+        return jsonify({'error': err}), 500
+    fields = sorted([
+        {'api_name': f['api_name'],
+         'display_label': f.get('display_label', f['api_name']),
+         'data_type': f.get('data_type', ''),
+         'lookup': f.get('lookup', {}) or {},
+         'formula': f.get('formula', {}) or {}}
+        for f in data.get('fields', [])
+    ], key=lambda x: x['display_label'])
+    return jsonify({'module': module_name, 'fields': fields})
+
+@app.route('/api/admin/crm-territories')
+def admin_crm_territories():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data, err = _admin_crm_get('/crm/v3/territories')
+    if err:
+        return jsonify({'error': err}), 500
+    return jsonify(data)
+
+@app.route('/api/admin/crm-users')
+def admin_crm_users():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers'})
+    if err:
+        return jsonify({'error': err}), 500
+    # Normalise: keep only what the explorer needs
+    users = [
+        {'id': u.get('id'),
+         'name': u.get('full_name', u.get('name', '')),
+         'email': u.get('email', ''),
+         'role': u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else '',
+         'profile': u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else '',
+         'territories': u.get('territories', [])}
+        for u in data.get('users', [])
+    ]
+    return jsonify({'users': users})
+
 if __name__ == '__main__':
     # NEVER run with debug=True in production — it exposes an interactive shell.
     is_debug = os.environ.get('FLASK_ENV', 'production') == 'development'
