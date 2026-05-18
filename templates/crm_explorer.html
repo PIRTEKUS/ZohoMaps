@@ -278,9 +278,36 @@ async function loadTerritories() {
   try {
     const r = await fetch('/api/admin/crm-territories');
     const d = await r.json();
-    _territories = d.territories || d.Territory || [];
-    if (!_territories.length) { el.innerHTML = '<div class="empty">No territories returned</div>'; return; }
-    el.innerHTML = `<table><thead><tr><th>Name</th><th>ID</th><th>Parent</th><th>All Fields</th></tr></thead>
+    _territories = d.territories || [];
+
+    // Show source path if successful
+    let sourceHtml = '';
+    if (d.source_path) {
+      sourceHtml = `<div style="font-size:.73rem;color:#34d399;margin-bottom:.5rem;">✓ Data from: <code>${d.source_path}</code></div>`;
+    }
+
+    if (!_territories.length) {
+      // Show the raw diagnostic so we know what each endpoint returned
+      let diagHtml = `<div style="font-size:.82rem;color:#fbbf24;margin-bottom:.75rem;">⚠ No territories returned. Raw API responses from each attempted endpoint:</div>`;
+      if (d.attempts) {
+        Object.entries(d.attempts).forEach(([path, info]) => {
+          const color = info.status === 200 ? '#34d399' : '#f87171';
+          diagHtml += `<div style="margin-bottom:.6rem;background:rgba(0,0,0,.3);border-radius:6px;padding:.6rem;">
+            <div style="font-size:.75rem;margin-bottom:.3rem;"><code style="color:#a5b4fc;">${path}</code> → <span style="color:${color};">HTTP ${info.status}</span></div>
+            <pre style="font-size:.72rem;color:#94a3b8;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;">${info.raw}</pre>
+          </div>`;
+        });
+      }
+      diagHtml += `<div style="margin-top:.75rem;font-size:.8rem;color:#94a3b8;">
+        <b>Note:</b> Zoho CRM Plus territories may not be exposed via the standard REST API.<br>
+        The territory configuration can be found in Zoho CRM → Setup → Users &amp; Control → Territories.<br>
+        Please paste the territory names and any franchise-related fields you see there and I will configure the filter manually.
+      </div>`;
+      el.innerHTML = diagHtml;
+      return;
+    }
+
+    el.innerHTML = sourceHtml + `<table><thead><tr><th>Name</th><th>ID</th><th>Parent</th><th>All Fields</th></tr></thead>
       <tbody>${_territories.map(t => `<tr>
         <td><b>${t.name || t.Name || '?'}</b></td>
         <td style="font-size:.72rem;color:#64748b;">${t.id || t.Id || ''}</td>

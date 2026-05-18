@@ -1251,10 +1251,33 @@ def admin_crm_fields(module_name):
 def admin_crm_territories():
     if not session.get('is_admin', False):
         return jsonify({'error': 'Unauthorized'}), 403
-    data, err = _admin_crm_get('/crm/v3/territories')
-    if err:
-        return jsonify({'error': err}), 500
-    return jsonify(data)
+    token = _get_admin_access_token()
+    if not token:
+        return jsonify({'error': 'No admin token — an admin must log in first'}), 503
+    headers = {'Authorization': f'Zoho-oauthtoken {token}'}
+    base = zoho_api.ZOHO_API_URL
+
+    results = {}
+    # Try several endpoint variations used across Zoho CRM editions
+    for path in ['/crm/v3/territories', '/crm/v2/territories',
+                 '/crm/v3/settings/territories', '/crm/v2/settings/territories']:
+        try:
+            resp = requests.get(f'{base}{path}', headers=headers, timeout=10)
+            raw = resp.text[:2000] if resp.text else '(empty)'
+            results[path] = {'status': resp.status_code, 'raw': raw}
+            if resp.ok and resp.content:
+                try:
+                    data = resp.json()
+                    # Normalise: Zoho may use 'Territory' or 'territories' key
+                    items = data.get('territories') or data.get('Territory') or data.get('data') or []
+                    return jsonify({'territories': items, 'source_path': path, 'raw': data})
+                except Exception:
+                    pass
+        except Exception as e:
+            results[path] = {'status': 'exception', 'raw': str(e)}
+
+    # All attempts failed — return the diagnostic info
+    return jsonify({'territories': [], 'error': 'All territory endpoints failed', 'attempts': results})
 
 @app.route('/api/admin/crm-users')
 def admin_crm_users():
