@@ -618,6 +618,15 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
                 label = field_label_map.get(k, k.replace('_', ' '))
                 record_data[label] = str(extract_val(val))
                 
+        # Store parent link ID for client-side deduplication (raw dict id, not display name)
+        df = fields.get('duplicate_filter', {})
+        if df.get('enabled') and df.get('parent_link_field'):
+            raw_parent = record.get(df['parent_link_field'])
+            if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                record_data['_dup_parent_id'] = raw_parent['id']
+            elif raw_parent:
+                record_data['_dup_parent_id'] = str(raw_parent)
+
         database.save_module_records_batch(user_id, [(
             record.get('id'),
             module_name,
@@ -681,8 +690,18 @@ def do_sync_module(user_id, access_token, module_name, config):
     for k, v in fields.items():
         if k == 'additional_fields' and isinstance(v, list):
             fetch_fields.update([f for f in v if f])
+        elif k == 'duplicate_filter':
+            pass  # handled below
         elif isinstance(v, str) and v:
             fetch_fields.add(v)
+
+    # Auto-include duplicate filter fields so they are stored in record_data
+    df = fields.get('duplicate_filter', {})
+    if df.get('enabled'):
+        for key in ['parent_link_field', 'primary_code_field', 'override_checkbox_field']:
+            v = df.get(key)
+            if v:
+                fetch_fields.add(v)
             
     title_field = fields.get('title_field')
     
@@ -1131,7 +1150,8 @@ def get_map_data():
             'lng': r['lng'],
             'color': r['color'],
             'icon': cfg.get('marker_icon', 'pin'),
-            'record_data': r['record_data']
+            'record_data': r['record_data'],
+            'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter')
         })
 
     return jsonify(map_points)

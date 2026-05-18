@@ -129,14 +129,78 @@ async function loadMapData() {
         const data = await res.json();
         window.lastMapData = data;
 
-        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${data.length} records in area</span>`;
+        const filtered = filterDuplicates(data);
+        window.lastMapData = filtered; // Store filtered for legend/re-plots
 
-        plotData(data);
-        updateLegend(data);
+        document.getElementById('legend-stats').innerHTML = `<span style="color:var(--success)">${filtered.length} records in area</span>`;
+
+        plotData(filtered);
+        updateLegend(filtered);
     } catch (e) {
         console.error(e);
         document.getElementById('legend-stats').innerHTML = `<span style="color:var(--error)">Error loading data</span>`;
     }
+}
+
+/**
+ * Filter duplicate child records that overlap with their parent module's markers.
+ * Logic (per child module with an active duplicate_filter):
+ *   1. Group child records by their parent link ID (_dup_parent_id).
+ *   2. For each parent that is actually on the map:
+ *      a. If any child has override_checkbox = true → hide THAT child (it IS the primary).
+ *      b. Otherwise → hide the child whose primary_code_field = primary_code_value (e.g. "0").
+ */
+function filterDuplicates(data) {
+    // Find modules with an active filter
+    const filterModules = [...new Set(
+        data.filter(p => p.filter_config?.enabled).map(p => p.api_module_name)
+    )];
+    if (filterModules.length === 0) return data;
+
+    const toHide = new Set();
+
+    filterModules.forEach(modName => {
+        const sample = data.find(p => p.api_module_name === modName && p.filter_config?.enabled);
+        const fc = sample.filter_config;
+
+        const parentModName  = fc.parent_module;
+        const primaryLabel   = fc.primary_code_field_label;
+        const primaryValue   = String(fc.primary_code_value ?? '0');
+        const overrideLabel  = fc.override_checkbox_field_label;
+
+        // Index parent records by their Zoho ID
+        const parentById = {};
+        data.filter(p => p.api_module_name === parentModName)
+            .forEach(p => { parentById[p.id] = p; });
+
+        // Group children by parent link ID
+        const childrenByParent = {};
+        data.filter(p => p.api_module_name === modName).forEach(child => {
+            const pid = child.record_data['_dup_parent_id'];
+            if (pid) {
+                if (!childrenByParent[pid]) childrenByParent[pid] = [];
+                childrenByParent[pid].push(child);
+            }
+        });
+
+        // Determine which children to hide per parent
+        Object.entries(childrenByParent).forEach(([parentId, children]) => {
+            if (!parentById[parentId]) return; // Parent not on map — keep all
+
+            // Check for override checkbox (e.g. "Show Address on Map" = true)
+            const withOverride = overrideLabel
+                ? children.filter(c => String(c.record_data[overrideLabel]).toLowerCase() === 'true')
+                : [];
+
+            const toDeduplicate = withOverride.length > 0
+                ? withOverride  // The override-checked one IS the primary duplicate
+                : children.filter(c => String(c.record_data[primaryLabel]) === primaryValue);
+
+            toDeduplicate.forEach(c => toHide.add(c.id));
+        });
+    });
+
+    return data.filter(p => !toHide.has(p.id));
 }
 
 const ICON_PATHS = {
