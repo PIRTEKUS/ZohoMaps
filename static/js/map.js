@@ -474,7 +474,6 @@ window.hiddenModules = window.hiddenModules || new Set();
 
 window.toggleModuleVisibility = function(moduleName, makeHidden) {
     if (!window.hiddenModules) window.hiddenModules = new Set();
-    // makeHidden=true means eye was visible → user wants to hide it
     if (makeHidden) {
         window.hiddenModules.add(moduleName);
     } else {
@@ -483,7 +482,11 @@ window.toggleModuleVisibility = function(moduleName, makeHidden) {
     if (window.lastMapData) {
         plotData(window.lastMapData);
         updateLegend(window.lastMapData);
-        if (window.updateRecordList) window.updateRecordList(window.lastMapData);
+        // Pass only the visible records to the list
+        const visibleForList = window.lastMapData.filter(
+            item => !window.hiddenModules.has(item.module)
+        );
+        if (window.updateRecordList) window.updateRecordList(visibleForList);
     }
 };
 

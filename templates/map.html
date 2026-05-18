@@ -367,7 +367,11 @@ document.addEventListener('click', () => {
 
 function resetAllVisibility() {
     window.hiddenModules = new Set();
-    if (window.lastMapData) { window.plotData(window.lastMapData); window.updateLegend(window.lastMapData); }
+    if (window.lastMapData) {
+        window.plotData(window.lastMapData);
+        window.updateLegend(window.lastMapData);
+        if (window.updateRecordList) window.updateRecordList(window.lastMapData);
+    }
     document.getElementById('cat-dropdown')?.classList.remove('open');
 }
 
