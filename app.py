@@ -1411,8 +1411,27 @@ def admin_test_franchise_lookup():
     admin_token = _get_admin_access_token()
     if not admin_token:
         return jsonify({'error': 'No admin token available — an admin must log in first'}), 503
+
+    # Run the normal lookup
     result = _get_user_franchise_ids(requested_uid, admin_token, force_refresh=True)
-    return jsonify({'user_id': requested_uid, 'franchises': result})
+
+    # Also fetch first 3 raw records so we can inspect the field structure
+    raw_sample = []
+    try:
+        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+        resp = requests.get(
+            f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
+            headers=headers,
+            params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Admin_User,Franchise_Standard_Users',
+                    'per_page': 3, 'page': 1},
+            timeout=10
+        )
+        if resp.ok and resp.content:
+            raw_sample = resp.json().get('data', [])
+    except Exception as e:
+        raw_sample = [{'error': str(e)}]
+
+    return jsonify({'user_id': requested_uid, 'franchises': result, 'raw_sample': raw_sample})
 
 if __name__ == '__main__':
     # NEVER run with debug=True in production — it exposes an interactive shell.
