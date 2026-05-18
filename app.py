@@ -548,18 +548,27 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     """
     import time
     cache_key = f'franchise_ids_{user_id}'
+    _cached_raw = database.get_global_setting(cache_key, '')
+    _cached_data = None
+    if _cached_raw:
+        try:
+            _cached_data = json.loads(_cached_raw)
+        except Exception:
+            pass
 
-    if not force_refresh:
-        cached = database.get_global_setting(cache_key, '')
-        if cached:
-            try:
-                data = json.loads(cached)
-                if time.time() - data.get('ts', 0) < 3600:
-                    return data
-            except Exception:
-                pass
+    # Return fresh cache (< 4h) without hitting the API
+    if not force_refresh and _cached_data:
+        if time.time() - _cached_data.get('ts', 0) < 14400:
+            return _cached_data
 
     if not admin_token:
+        # Admin token unavailable — use stale cache rather than returning nothing
+        if _cached_data:
+            log_debug(f"[franchise_ids] Admin token unavailable — using stale cache for user {user_id}. "
+                      "An admin user must log back in to refresh the token.")
+            return _cached_data
+        log_debug("[franchise_ids] Admin token unavailable AND no cache — franchise filter skipped. "
+                  "An admin must log in to ZohoMap to store the admin refresh token.")
         return None
 
     debug_log = []
@@ -852,18 +861,35 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     if not is_admin:
         admin_token_for_lookup = _get_admin_access_token()
         franchise_info = _get_user_franchise_ids(user_id, admin_token_for_lookup)
-        franchise_ids = (franchise_info or {}).get('ids', [])
         franchise_field = FRANCHISE_FIELD_MAP.get(module_name)
-        if franchise_field and franchise_ids:
-            # Use Zoho 'in' operator for lookup fields: (Field.id:in:id1,id2,...)
-            ids_str = ','.join(franchise_ids)
-            franchise_criteria = f"({franchise_field}.id:in:{ids_str})"
-            log_debug(f"[franchise filter] {module_name}: {franchise_criteria}")
-        elif franchise_field and not franchise_ids:
-            log_debug(f"[franchise filter] User {user_id} has no franchise assignments — returning empty sync")
-            return 0
+
+        if franchise_info is None:
+            # Admin token unavailable and no cache — degrade gracefully
+            log_debug(f"[franchise filter] WARNING: Cannot determine franchises for {user_id}. "
+                      "Admin token is invalid (Access Denied). "
+                      "Log in as admin to ZohoMap to refresh it. Proceeding without franchise filter.")
         else:
-            log_debug(f"[franchise filter] No franchise field mapped for {module_name} — skipping filter")
+            # Only use real Zoho record IDs (territory_ prefixed are fallback placeholders)
+            franchise_ids = [fid for fid in franchise_info.get('ids', [])
+                             if not str(fid).startswith('territory_')]
+            if franchise_field and franchise_ids:
+                ids_str = ','.join(franchise_ids)
+                franchise_criteria = f"({franchise_field}.id:in:{ids_str})"
+                log_debug(f"[franchise filter] {module_name}: "
+                          f"{len(franchise_ids)} franchise(s): {franchise_info.get('names', [])}")
+            elif franchise_field and not franchise_ids:
+                # Check if territory fallback IDs exist (user has territories but no Franchise record link)
+                territory_ids = [fid for fid in franchise_info.get('ids', [])
+                                 if str(fid).startswith('territory_')]
+                if territory_ids:
+                    log_debug(f"[franchise filter] User has territory assignments but no Franchise record "
+                              f"IDs — filter skipped, syncing all accessible records.")
+                else:
+                    log_debug(f"[franchise filter] User {user_id} has no franchise assignments. "
+                              f"Returning empty sync for {module_name}.")
+                    return 0
+            else:
+                log_debug(f"[franchise filter] No franchise field mapped for {module_name} — skipping filter")
     # ─────────────────────────────────────────────────────────────────────────
 
     field_metadata = zoho_api.fetch_module_fields(module_name, access_token)
