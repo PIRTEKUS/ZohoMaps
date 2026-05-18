@@ -517,31 +517,23 @@ def _require_admin_token(context='sync'):
     """Return admin access token for server-side API calls.
     All data syncs use the admin token so user profile API restrictions
     do not limit which modules/records can be fetched.
-    Falls back to the user's session token if no admin token is available yet
-    (e.g. first-run before any admin has logged in)."""
+    Falls back to the user session token if no admin token is stored yet."""
     token = _get_admin_access_token()
     if token:
         return token
-    # Fallback: warn and use user token (degraded mode)
-    log_debug(f"[{context}] WARNING: No admin token available — using user session token (degraded mode). "
-              "An admin user must log in at least once to store the admin refresh token.")
+    log_debug(f"[{context}] WARNING: No admin token — using user session token (degraded mode).")
     from flask import session as _s
     return _s.get('access_token')
 
 
 def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
-    """Return a list of Franchise record IDs that this user belongs to.
+    """Return franchise memberships for a user by fetching ALL Franchise records
+    and filtering client-side. This is necessary because Zoho search/criteria
+    API does not support 'includes' on multiuserlookup fields.
 
-    Queries the Franchises module looking for records where:
-      - Franchise_Standard_Users includes user_id  (multiuserlookup)
-      - OR Franchise_Admin_User equals user_id     (userlookup)
-
-    Results are cached in the DB (key: franchise_ids_{user_id}) for 1 hour
-    to avoid hammering the API on every map load.
-
-    Returns a dict: {'ids': [...], 'names': [...], 'pirtek_ids': [...]}
-    or None if the query fails.
+    Returns a dict: {'ids': [...], 'names': [...], 'pirtek_ids': [...], 'debug': [...]}
     """
+    import time
     cache_key = f'franchise_ids_{user_id}'
 
     if not force_refresh:
@@ -549,8 +541,6 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
         if cached:
             try:
                 data = json.loads(cached)
-                # Basic freshness check — cache has a 'ts' timestamp
-                import time
                 if time.time() - data.get('ts', 0) < 3600:
                     return data
             except Exception:
@@ -559,35 +549,76 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     if not admin_token:
         return None
 
-    results = {'ids': [], 'names': [], 'pirtek_ids': [], 'ts': 0}
-
-    # Search Franchises where this user is a standard user
-    criteria_standard = f"(Franchise_Standard_Users:includes:{user_id})"
-    criteria_admin    = f"(Franchise_Admin_User:equals:{user_id})"
-
+    debug_log = []
     found = {}
-    for criteria in [criteria_standard, criteria_admin]:
-        try:
-            data = zoho_api.search_records(
-                'Franchises', criteria, admin_token,
-                fields=['id', 'Name', 'Pirtek_Franchise_ID']
+
+    # ── Attempt 1: fetch ALL franchise records (paginated) and filter client-side
+    try:
+        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+        base = zoho_api.ZOHO_API_URL
+        page = 1
+        while True:
+            resp = requests.get(
+                f'{base}/crm/v3/Franchises',
+                headers=headers,
+                params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Admin_User,Franchise_Standard_Users',
+                        'per_page': 200, 'page': page},
+                timeout=15
             )
-            for rec in data.get('data', []):
+            if not resp.ok or not resp.content:
+                debug_log.append(f'Page {page}: HTTP {resp.status_code} — stopped')
+                break
+            rdata = resp.json()
+            recs = rdata.get('data', [])
+            debug_log.append(f'Page {page}: {len(recs)} franchise records fetched')
+            for rec in recs:
                 fid = str(rec.get('id', ''))
-                if fid and fid not in found:
+                if not fid:
+                    continue
+
+                # Check Franchise_Admin_User (single user lookup)
+                admin_user = rec.get('Franchise_Admin_User') or {}
+                admin_uid = str(admin_user.get('id', '')) if isinstance(admin_user, dict) else str(admin_user)
+
+                # Check Franchise_Standard_Users (multiuserlookup — list of user objects)
+                std_users = rec.get('Franchise_Standard_Users') or []
+                if isinstance(std_users, dict):
+                    std_users = [std_users]
+                std_uids = [str(u.get('id', '')) if isinstance(u, dict) else str(u) for u in std_users]
+
+                if admin_uid == str(user_id) or str(user_id) in std_uids:
                     found[fid] = {
                         'id': fid,
                         'name': rec.get('Name', ''),
                         'pirtek_id': rec.get('Pirtek_Franchise_ID', '')
                     }
-        except Exception as e:
-            log_debug(f"[franchise_ids] Error querying Franchises with criteria {criteria}: {e}")
 
-    import time
+            info = rdata.get('info', {})
+            if not info.get('more_records', False):
+                break
+            page += 1
+    except Exception as e:
+        debug_log.append(f'Fetch-all error: {e}')
+
+    # ── Attempt 2: criteria search with 'equals' for admin user field (fast path)
+    if not found:
+        try:
+            crit = f'(Franchise_Admin_User:equals:{user_id})'
+            data2 = zoho_api.search_records('Franchises', crit, admin_token,
+                                            fields=['id', 'Name', 'Pirtek_Franchise_ID'])
+            for rec in data2.get('data', []):
+                fid = str(rec.get('id', ''))
+                if fid and fid not in found:
+                    found[fid] = {'id': fid, 'name': rec.get('Name', ''), 'pirtek_id': rec.get('Pirtek_Franchise_ID', '')}
+            debug_log.append(f'Criteria search (admin user): {len(data2.get("data",[]))} hits')
+        except Exception as e:
+            debug_log.append(f'Criteria search error: {e}')
+
     results = {
-        'ids':       [v['id']        for v in found.values()],
-        'names':     [v['name']      for v in found.values()],
-        'pirtek_ids':[v['pirtek_id'] for v in found.values()],
+        'ids':       [v['id']         for v in found.values()],
+        'names':     [v['name']       for v in found.values()],
+        'pirtek_ids':[v['pirtek_id']  for v in found.values()],
+        'debug':     debug_log,
         'ts':        time.time()
     }
 
@@ -1367,15 +1398,21 @@ def admin_crm_users():
 
 @app.route('/api/admin/test-franchise-lookup')
 def admin_test_franchise_lookup():
-    """Test endpoint: look up franchise memberships for the current user (or a specific user_id via ?user_id=)."""
-    if not session.get('is_admin', False):
-        return jsonify({'error': 'Unauthorized'}), 403
-    target_user = request.args.get('user_id', session.get('user_id'))
+    """Test franchise membership lookup for a user.
+    Admins can look up any user_id via ?user_id=.
+    Regular users can only look up their own ID."""
+    if 'access_token' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    is_admin = session.get('is_admin', False)
+    requested_uid = request.args.get('user_id', session.get('user_id'))
+    # Non-admins can only query themselves
+    if not is_admin and requested_uid != session.get('user_id'):
+        requested_uid = session.get('user_id')
     admin_token = _get_admin_access_token()
     if not admin_token:
-        return jsonify({'error': 'No admin token available'}), 503
-    result = _get_user_franchise_ids(target_user, admin_token, force_refresh=True)
-    return jsonify({'user_id': target_user, 'franchises': result})
+        return jsonify({'error': 'No admin token available — an admin must log in first'}), 503
+    result = _get_user_franchise_ids(requested_uid, admin_token, force_refresh=True)
+    return jsonify({'user_id': requested_uid, 'franchises': result})
 
 if __name__ == '__main__':
     # NEVER run with debug=True in production — it exposes an interactive shell.
