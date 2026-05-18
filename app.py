@@ -800,9 +800,10 @@ def sync_single_record(module_name, record_id):
         return jsonify({'error': str(e)}), 500
 
 
-def do_sync_module(user_id, access_token, module_name, config):
-    """Core logic to fetch, geocode, and save records for a single module."""
-    log_debug(f"Starting sync for module: {module_name} for user {user_id}...")
+def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
+    """Core logic to fetch, geocode, and save records for a single module.
+    Non-admin users have records filtered to their assigned franchises."""
+    log_debug(f"Starting sync for module: {module_name} for user {user_id} (admin={is_admin})...")
     database.clear_module_records(user_id, module_name)
     
     fields = config['field_mappings']
@@ -839,8 +840,32 @@ def do_sync_module(user_id, access_token, module_name, config):
     fetch_fields.add('id')
     
     fetch_fields_list = list(fetch_fields)
-        
-    # Get field labels for display
+
+    # ── Franchise filter for non-admin users ──────────────────────────────────
+    # Maps each module to its Franchise lookup field (confirmed from CRM Explorer)
+    FRANCHISE_FIELD_MAP = {
+        'Accounts':          'Franchise',
+        'Leads':             'Select_Your_Franchise1',
+        'Ship_To_Addresses': 'Franchise',
+    }
+    franchise_criteria = None
+    if not is_admin:
+        admin_token_for_lookup = _get_admin_access_token()
+        franchise_info = _get_user_franchise_ids(user_id, admin_token_for_lookup)
+        franchise_ids = (franchise_info or {}).get('ids', [])
+        franchise_field = FRANCHISE_FIELD_MAP.get(module_name)
+        if franchise_field and franchise_ids:
+            # Use Zoho 'in' operator for lookup fields: (Field.id:in:id1,id2,...)
+            ids_str = ','.join(franchise_ids)
+            franchise_criteria = f"({franchise_field}.id:in:{ids_str})"
+            log_debug(f"[franchise filter] {module_name}: {franchise_criteria}")
+        elif franchise_field and not franchise_ids:
+            log_debug(f"[franchise filter] User {user_id} has no franchise assignments — returning empty sync")
+            return 0
+        else:
+            log_debug(f"[franchise filter] No franchise field mapped for {module_name} — skipping filter")
+    # ─────────────────────────────────────────────────────────────────────────
+
     field_metadata = zoho_api.fetch_module_fields(module_name, access_token)
     field_label_map = {}
     if 'fields' in field_metadata:
@@ -873,12 +898,17 @@ def do_sync_module(user_id, access_token, module_name, config):
     page = 1
     page_token = None
     more_records = True
-    
+
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
-        
-        # We restore fetch_fields_list because omitting it seems to cause Zoho to return 0 records or an error for everyone.
-        data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list, page=page, page_token=page_token)
+
+        # Use franchise criteria search for non-admins; full list for admins
+        if franchise_criteria:
+            data = zoho_api.search_records(module_name, franchise_criteria, access_token,
+                                           fields=fetch_fields_list, page=page, page_token=page_token)
+        else:
+            data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list,
+                                                 page=page, page_token=page_token)
         
         if 'code' in data and data.get('status') == 'error':
             error_code = data.get('code')
@@ -903,10 +933,11 @@ def do_sync_module(user_id, access_token, module_name, config):
                     # ─────────────────────────────────────────────────────────────────────
                     admin_token = _get_admin_access_token()
                     if admin_token and user_id:
-                        log_debug(f"Using admin token to fetch {module_name} records owned by {user_id}")
-                        # Build owner criteria: only records assigned to this user
-                        criteria = f"(Owner.id:equals:{user_id})"
-                        owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list, page=page, page_token=page_token)
+                        log_debug(f"Using admin token to fetch {module_name} records for {user_id} (franchise filter)")
+                        # Use franchise criteria if available; otherwise fall back to owner filter
+                        criteria = franchise_criteria or f"(Owner.id:equals:{user_id})"
+                        owner_data = zoho_api.search_records(module_name, criteria, admin_token,
+                                                             fields=fetch_fields_list, page=page, page_token=page_token)
                         if 'data' in owner_data and owner_data['data']:
                             data = owner_data
                             log_debug(f"Admin fallback returned {len(owner_data['data'])} records for {module_name} owned by {user_id}")
@@ -1033,7 +1064,8 @@ def sync_module(module_name):
         return jsonify({'error': 'Server not configured: no admin token available'}), 503
 
     try:
-        count = do_sync_module(session.get('user_id'), sync_token, module_name, config)
+        count = do_sync_module(session.get('user_id'), sync_token, module_name, config,
+                               is_admin=session.get('is_admin', False))
         return jsonify({'success': True, 'synced': count})
     except Exception as e:
         log_debug(f"Sync error for {module_name}: {str(e)}")
@@ -1061,7 +1093,8 @@ def sync_all_modules():
     for config in configs:
         module_name = config['module_name']
         try:
-            count = do_sync_module(session.get('user_id'), sync_token, module_name, config)
+            count = do_sync_module(session.get('user_id'), sync_token, module_name, config,
+                                   is_admin=session.get('is_admin', False))
             results[module_name] = {'success': True, 'synced': count}
             total_synced += count
         except Exception as e:
