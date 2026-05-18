@@ -860,14 +860,24 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     franchise_criteria = None
     if not is_admin:
         admin_token_for_lookup = _get_admin_access_token()
-        franchise_info = _get_user_franchise_ids(user_id, admin_token_for_lookup)
-        franchise_field = FRANCHISE_FIELD_MAP.get(module_name)
+        # Guard: email user_id means admin token was expired at login (numeric ID not resolved)
+        # Skip franchise filter — degrade to owner-based sync until admin re-logs in.
+        if '@' in str(user_id):
+            log_debug(f"[franchise filter] user_id is email ({user_id}) — admin token was expired "
+                      "at login so numeric CRM ID was not resolved. Filter SKIPPED. "
+                      "Admin must log back in to ZohoMap, then team user must re-login.")
+            franchise_info = None  # skip to fallback path
+            franchise_field = None
+        else:
+            franchise_info = _get_user_franchise_ids(user_id, admin_token_for_lookup)
+            franchise_field = FRANCHISE_FIELD_MAP.get(module_name)
 
         if franchise_info is None:
-            # Admin token unavailable and no cache — degrade gracefully
-            log_debug(f"[franchise filter] WARNING: Cannot determine franchises for {user_id}. "
-                      "Admin token is invalid (Access Denied). "
-                      "Log in as admin to ZohoMap to refresh it. Proceeding without franchise filter.")
+            # Admin token unavailable, email-based ID, or no cache — degrade gracefully
+            if '@' not in str(user_id):
+                log_debug(f"[franchise filter] WARNING: Cannot determine franchises for {user_id}. "
+                          "Admin token is invalid (Access Denied). "
+                          "Log in as admin to ZohoMap to refresh it. Proceeding without franchise filter.")
         else:
             # Only use real Zoho record IDs (territory_ prefixed are fallback placeholders)
             franchise_ids = [fid for fid in franchise_info.get('ids', [])
