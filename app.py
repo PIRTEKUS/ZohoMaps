@@ -337,12 +337,26 @@ def callback():
                                     if u.get('email', '').lower() == user_email.lower():
                                         session['user_id'] = u['id']
                                         session['user_email'] = user_email
-                                        log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
+                                         log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
                                         break
                     except Exception as e:
                         log_debug(f"Could not resolve team user CRM ID: {e}")
 
-                
+                # Pre-cache franchise memberships for this user so the first sync is fast.
+                # Run in background thread to avoid slowing down the login redirect.
+                def _prefetch_franchises(uid):
+                    try:
+                        tok = _get_admin_access_token()
+                        if tok:
+                            result = _get_user_franchise_ids(uid, tok, force_refresh=True)
+                            log_debug(f"[login] Franchise pre-cache for {uid}: {result.get('names', [])}")
+                    except Exception as ex:
+                        log_debug(f"[login] Franchise pre-cache failed: {ex}")
+
+                import threading
+                threading.Thread(target=_prefetch_franchises,
+                                 args=(session['user_id'],), daemon=True).start()
+
             return redirect(url_for('index'))
     return "Error in Zoho Authentication", 400
 
