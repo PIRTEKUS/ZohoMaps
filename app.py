@@ -528,6 +528,73 @@ def _require_admin_token(context='sync'):
     from flask import session as _s
     return _s.get('access_token')
 
+
+def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
+    """Return a list of Franchise record IDs that this user belongs to.
+
+    Queries the Franchises module looking for records where:
+      - Franchise_Standard_Users includes user_id  (multiuserlookup)
+      - OR Franchise_Admin_User equals user_id     (userlookup)
+
+    Results are cached in the DB (key: franchise_ids_{user_id}) for 1 hour
+    to avoid hammering the API on every map load.
+
+    Returns a dict: {'ids': [...], 'names': [...], 'pirtek_ids': [...]}
+    or None if the query fails.
+    """
+    cache_key = f'franchise_ids_{user_id}'
+
+    if not force_refresh:
+        cached = database.get_global_setting(cache_key, '')
+        if cached:
+            try:
+                data = json.loads(cached)
+                # Basic freshness check — cache has a 'ts' timestamp
+                import time
+                if time.time() - data.get('ts', 0) < 3600:
+                    return data
+            except Exception:
+                pass
+
+    if not admin_token:
+        return None
+
+    results = {'ids': [], 'names': [], 'pirtek_ids': [], 'ts': 0}
+
+    # Search Franchises where this user is a standard user
+    criteria_standard = f"(Franchise_Standard_Users:includes:{user_id})"
+    criteria_admin    = f"(Franchise_Admin_User:equals:{user_id})"
+
+    found = {}
+    for criteria in [criteria_standard, criteria_admin]:
+        try:
+            data = zoho_api.search_records(
+                'Franchises', criteria, admin_token,
+                fields=['id', 'Name', 'Pirtek_Franchise_ID']
+            )
+            for rec in data.get('data', []):
+                fid = str(rec.get('id', ''))
+                if fid and fid not in found:
+                    found[fid] = {
+                        'id': fid,
+                        'name': rec.get('Name', ''),
+                        'pirtek_id': rec.get('Pirtek_Franchise_ID', '')
+                    }
+        except Exception as e:
+            log_debug(f"[franchise_ids] Error querying Franchises with criteria {criteria}: {e}")
+
+    import time
+    results = {
+        'ids':       [v['id']        for v in found.values()],
+        'names':     [v['name']      for v in found.values()],
+        'pirtek_ids':[v['pirtek_id'] for v in found.values()],
+        'ts':        time.time()
+    }
+
+    database.set_global_setting(cache_key, json.dumps(results))
+    log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
+    return results
+
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
     
@@ -1297,6 +1364,18 @@ def admin_crm_users():
         for u in data.get('users', [])
     ]
     return jsonify({'users': users})
+
+@app.route('/api/admin/test-franchise-lookup')
+def admin_test_franchise_lookup():
+    """Test endpoint: look up franchise memberships for the current user (or a specific user_id via ?user_id=)."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    target_user = request.args.get('user_id', session.get('user_id'))
+    admin_token = _get_admin_access_token()
+    if not admin_token:
+        return jsonify({'error': 'No admin token available'}), 503
+    result = _get_user_franchise_ids(target_user, admin_token, force_refresh=True)
+    return jsonify({'user_id': target_user, 'franchises': result})
 
 if __name__ == '__main__':
     # NEVER run with debug=True in production — it exposes an interactive shell.
