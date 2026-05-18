@@ -396,23 +396,37 @@ function updateLegend(data) {
     const eyeHidden  = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
 
     for (let config of configuredModules) {
-        const mod = config.module_name;
-        const color = config.marker_color || moduleColorByLabel[mod] || '#4f46e5';
-        const count = moduleCounts[mod] || moduleCounts[config.module_label] || 0;
-        const isVisible = !(window.hiddenModules && window.hiddenModules.has(mod));
-        const safeModule = mod.replace(/'/g, "\\'");
+        const apiName = config.module_name;
+
+        // Resolve display label = what item.module holds in server data (must match for the filter to work)
+        // Try: exact api_name key, then module_label, then fuzzy match (underscore vs space)
+        const displayLabel = moduleCounts[apiName] !== undefined
+            ? apiName
+            : (config.module_label && moduleCounts[config.module_label] !== undefined
+                ? config.module_label
+                : (Object.keys(moduleCounts).find(k =>
+                    k.replace(/[_\s]/g, '').toLowerCase() ===
+                    apiName.replace(/[_\s]/g, '').toLowerCase()
+                  ) || apiName));
+
+        const color       = config.marker_color || moduleColorByLabel[displayLabel] || moduleColorByLabel[apiName] || '#4f46e5';
+        const count       = moduleCounts[displayLabel] || 0;
+        // Store displayLabel in hiddenModules so plotData filter matches item.module
+        const isVisible   = !(window.hiddenModules && window.hiddenModules.has(displayLabel));
+        const safeLabel   = displayLabel.replace(/'/g, "\\'");
+        const safeApiName = apiName.replace(/'/g, "\\'");
 
         const row = document.createElement('div');
         row.className = 'cat-row';
         row.innerHTML = `
             <span class="cat-dot" style="background:${color};"></span>
-            <span class="cat-label">${mod}</span>
+            <span class="cat-label">${displayLabel}</span>
             <span class="cat-count">${count}</span>
-            <button class="cat-eye" id="eye-${mod.replace(/[^a-z0-9]/gi,'_')}"
-                    onclick="window.toggleModuleVisibility('${safeModule}', ${isVisible})" title="${isVisible ? 'Hide' : 'Show'} ${mod}">
+            <button class="cat-eye" id="eye-${displayLabel.replace(/[^a-z0-9]/gi,'_')}"
+                    onclick="window.toggleModuleVisibility('${safeLabel}', ${isVisible})" title="${isVisible ? 'Hide' : 'Show'} ${displayLabel}">
                 ${isVisible ? eyeVisible : eyeHidden}
             </button>
-            <button class="cat-sync" onclick="syncSingleModule('${safeModule}', this)">Sync</button>
+            <button class="cat-sync" onclick="syncSingleModule('${safeApiName}', this)">Sync</button>
         `;
         legend.appendChild(row);
     }
