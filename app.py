@@ -72,6 +72,19 @@ limiter = Limiter(
 )
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY') or _google_cfg.get('maps_api_key', '')
 
+# ── App version (git commit hash + date) ─────────────────────────────────────
+import subprocess as _sp
+try:
+    _commit = _sp.check_output(['git', 'rev-parse', '--short', 'HEAD'],
+                               cwd=os.path.dirname(os.path.abspath(__file__)),
+                               stderr=_sp.DEVNULL).decode().strip()
+    _date   = _sp.check_output(['git', 'log', '-1', '--format=%ci', '--date=short'],
+                               cwd=os.path.dirname(os.path.abspath(__file__)),
+                               stderr=_sp.DEVNULL).decode().strip()[:10]
+    APP_VERSION = f'{_commit} ({_date})'
+except Exception:
+    APP_VERSION = 'unknown'
+
 # Initialize Database
 database.init_db()
 
@@ -393,13 +406,14 @@ def settings():
     crm_domain = database.get_global_setting('crmplus_domain', '')
     crm_org_id = database.get_global_setting('crmplus_orgid', '')
     is_admin = session.get('is_admin', False)
-    return render_template('settings.html', 
-                           configs=configs, 
+    return render_template('settings.html',
+                           configs=configs,
                            shared_configs=shared_configs,
                            show_console=show_console,
                            crm_domain=crm_domain,
                            crm_org_id=crm_org_id,
-                           is_admin=is_admin)
+                           is_admin=is_admin,
+                           app_version=APP_VERSION)
 
 @app.route('/api/modules')
 def get_modules():
