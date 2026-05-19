@@ -52,6 +52,8 @@ ZOHO_CLIENT_ID=$(ask "ZOHO_CLIENT_ID"       "Zoho Client ID:")
 echo ""
 ZOHO_CLIENT_SECRET=$(ask "ZOHO_CLIENT_SECRET"   "Zoho Client Secret:")
 echo ""
+ZOHO_REFRESH_TOKEN=$(ask "ZOHO_REFRESH_TOKEN"   "Zoho Permanent Refresh Token (from /admin/refresh-token-setup — leave blank to skip):")
+echo ""
 GOOGLE_MAPS_API_KEY=$(ask "GOOGLE_MAPS_API_KEY"  "Google Maps API Key:")
 echo ""
 SECRET_KEY=$(ask "APP_SECRET_KEY"          "Flask Secret Key (run: python3 -c \"import secrets; print(secrets.token_hex(32))\"):")
@@ -85,6 +87,7 @@ Environment="PATH=/var/www/zohomap/venv/bin"
 Environment="FLASK_ENV=production"
 Environment="ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID}"
 Environment="ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET}"
+$([ -n "${ZOHO_REFRESH_TOKEN}" ] && echo "Environment=\"ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN}\"")
 Environment="GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
 Environment="APP_SECRET_KEY=${SECRET_KEY}"
 Environment="DATABASE_URI=${DATABASE_URI}"
