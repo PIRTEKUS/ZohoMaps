@@ -8,7 +8,9 @@ echo "=========================================="
 cd /var/www/zohomap || { echo "Error: /var/www/zohomap directory not found"; exit 1; }
 
 # 1. Pull latest code from GitHub
-echo "[1/4] Pulling latest changes from GitHub (may prompt for sudo)..."
+echo "[1/4] Pulling latest changes from GitHub..."
+# Allow root (sudo) to access the repo even if owned by a different user
+sudo git config --global --add safe.directory /var/www/zohomap
 sudo git pull origin main
 
 # 2. Ensure virtual environment exists and is activated
