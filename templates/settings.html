@@ -39,6 +39,67 @@
         </div>
         {% endif %}
 
+        {% if is_admin %}
+        <!-- ADMIN-ONLY: Export / Import Configuration -->
+        <div class="settings-card glass" style="grid-column: 1 / -1; border-color: rgba(99,102,241,0.35);">
+            <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Export / Import Configuration
+                <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span>
+            </h2>
+            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                Transfer all module mappings and settings between servers (e.g. Dev → Production). Secrets and user caches are never included.
+            </p>
+            <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-start;">
+
+                <!-- Export -->
+                <div style="flex:1; min-width:220px;">
+                    <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📤 Export</h3>
+                    <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Download your current configuration as a <code>.json</code> file.</p>
+                    <a id="export-config-btn" href="/api/admin/export-config"
+                       style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
+                              background:linear-gradient(135deg,#6366f1,#4f46e5); color:white;
+                              border-radius:8px; font-weight:600; font-size:0.9rem;
+                              text-decoration:none; transition:opacity 0.2s;"
+                       onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                        Download Config
+                    </a>
+                </div>
+
+                <div style="width:1px; background:rgba(255,255,255,0.1); align-self:stretch;"></div>
+
+                <!-- Import -->
+                <div style="flex:2; min-width:280px;">
+                    <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📥 Import</h3>
+                    <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Upload a <code>zohomap_config_export.json</code> file exported from another server. Existing mappings for the same module will be overwritten.</p>
+                    <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                        <label for="import-config-file"
+                               style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
+                                      background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.5);
+                                      color:white; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                      cursor:pointer; transition:background 0.2s;"
+                               onmouseover="this.style.background='rgba(99,102,241,0.35)'"
+                               onmouseout="this.style.background='rgba(99,102,241,0.2)'">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            Choose File
+                        </label>
+                        <input type="file" id="import-config-file" accept=".json" style="display:none;">
+                        <span id="import-file-name" style="color:#94a3b8; font-size:0.85rem; font-style:italic;">No file chosen</span>
+                        <button id="import-config-btn" onclick="doImportConfig()"
+                                style="padding:0.6rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
+                                       color:white; border:none; border-radius:8px; font-weight:600;
+                                       font-size:0.9rem; cursor:pointer; display:none; transition:opacity 0.2s;"
+                                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                            Import Now
+                        </button>
+                    </div>
+                    <div id="import-status" style="margin-top:1rem; display:none;"></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Add New Config Form -->
         <div class="settings-card glass">
             <h2>Add New Mapping</h2>
@@ -736,6 +797,69 @@ function toggleFilterSection() {
 
 function toggleDupFilterFields(enabled) {
     document.getElementById('dup-filter-fields').style.display = enabled ? 'block' : 'none';
+}
+
+// ── Export / Import ───────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('import-config-file');
+    if (!fileInput) return;
+    fileInput.addEventListener('change', () => {
+        const name = fileInput.files[0]?.name || 'No file chosen';
+        document.getElementById('import-file-name').textContent = name;
+        document.getElementById('import-config-btn').style.display = fileInput.files[0] ? 'inline-flex' : 'none';
+        document.getElementById('import-status').style.display = 'none';
+    });
+});
+
+async function doImportConfig() {
+    const fileInput = document.getElementById('import-config-file');
+    const statusEl  = document.getElementById('import-status');
+    const btn       = document.getElementById('import-config-btn');
+    if (!fileInput.files[0]) return;
+
+    btn.textContent = 'Importing…';
+    btn.disabled = true;
+    statusEl.style.display = 'none';
+
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+
+    try {
+        const res  = await fetch('/api/admin/import-config', { method: 'POST', body: form });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+            const errHtml = data.errors?.length
+                ? `<ul style="margin:0.5rem 0 0 1rem; font-size:0.8rem; color:#fca5a5;">${data.errors.map(e => `<li>${e}</li>`).join('')}</ul>`
+                : '';
+            statusEl.innerHTML = `
+                <div style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4);
+                            border-radius:8px; padding:0.75rem 1rem; color:#6ee7b7; font-size:0.875rem;">
+                    ✅ Imported <strong>${data.imported_configs}</strong> mapping(s) and
+                    <strong>${data.imported_settings}</strong> setting(s) successfully.
+                    ${errHtml}
+                    <br><small style="color:#94a3b8; margin-top:0.5rem; display:block;">
+                        Reload the page to see the updated mappings. Run a Sync to rebuild map data.
+                    </small>
+                </div>`;
+        } else {
+            statusEl.innerHTML = `
+                <div style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4);
+                            border-radius:8px; padding:0.75rem 1rem; color:#fca5a5; font-size:0.875rem;">
+                    ❌ Import failed: ${data.error || 'Unknown error'}
+                </div>`;
+        }
+    } catch (err) {
+        statusEl.innerHTML = `
+            <div style="background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4);
+                        border-radius:8px; padding:0.75rem 1rem; color:#fca5a5; font-size:0.875rem;">
+                ❌ Network error: ${err.message}
+            </div>`;
+    } finally {
+        statusEl.style.display = 'block';
+        btn.textContent = 'Import Now';
+        btn.disabled = false;
+    }
 }
 </script>
 {% endblock %}

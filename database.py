@@ -327,3 +327,22 @@ def clear_module_records(user_id, module_name):
     exec_query(conn, 'DELETE FROM module_records WHERE user_id = ? AND module_name = ?', (str(user_id), module_name))
     conn.commit()
     conn.close()
+
+def get_all_global_settings():
+    """Return all rows from global_settings as a list of dicts."""
+    conn = get_db_connection()
+    rows = exec_query(conn, 'SELECT key, value FROM global_settings', fetchall=True)
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_all_module_configs_all_users():
+    """Return every module_config row (all users) as a list of dicts with field_mappings parsed."""
+    conn = get_db_connection()
+    rows = exec_query(conn, 'SELECT * FROM module_config', fetchall=True)
+    conn.close()
+    results = []
+    for row in rows:
+        r = dict(row)
+        r['field_mappings'] = json.loads(r['field_mappings'])
+        results.append(r)
+    return results

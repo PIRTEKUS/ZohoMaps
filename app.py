@@ -1531,6 +1531,91 @@ def admin_test_franchise_lookup():
 
     return jsonify({'user_id': requested_uid, 'franchises': result, 'raw_sample': raw_sample})
 
+# ── Config Export / Import ────────────────────────────────────────────────────
+
+@app.route('/api/admin/export-config')
+@limiter.limit("10 per minute")
+def export_config():
+    """Download all module mappings + safe global settings as a JSON file. Admin only."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+
+    SKIP_KEYS = {'admin_refresh_token', 'schema_version'}
+    all_settings = database.get_all_global_settings()
+    safe_settings = [
+        s for s in all_settings
+        if s['key'] not in SKIP_KEYS and not s['key'].startswith('franchise_ids_')
+    ]
+    configs = database.get_all_module_configs_all_users()
+
+    payload = {
+        'exported_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'exported_by': session.get('user_name', 'admin'),
+        'module_config': configs,
+        'global_settings': safe_settings,
+    }
+    data = json.dumps(payload, indent=2)
+    from flask import Response
+    return Response(
+        data,
+        mimetype='application/json',
+        headers={'Content-Disposition': 'attachment; filename="zohomap_config_export.json"'}
+    )
+
+
+@app.route('/api/admin/import-config', methods=['POST'])
+@limiter.limit("10 per minute")
+def import_config():
+    """Import module mappings + global settings from an uploaded JSON file. Admin only."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    f = request.files['file']
+    if not f.filename.endswith('.json'):
+        return jsonify({'error': 'Only .json files are accepted'}), 400
+    try:
+        payload = json.loads(f.read().decode('utf-8'))
+    except Exception as e:
+        return jsonify({'error': f'Invalid JSON: {e}'}), 400
+
+    configs  = payload.get('module_config', [])
+    settings = payload.get('global_settings', [])
+    SKIP_KEYS = {'admin_refresh_token', 'schema_version'}
+    ok_configs = ok_settings = 0
+    errors = []
+
+    for cfg in configs:
+        try:
+            fm = cfg.get('field_mappings', '{}')
+            if isinstance(fm, dict):
+                fm = json.dumps(fm)
+            database.save_module_config(
+                user_id=cfg['user_id'],
+                module_name=cfg['module_name'],
+                location_type=cfg.get('location_type', 'both'),
+                field_mappings=json.loads(fm),
+                marker_color=cfg.get('marker_color', '#3b82f6'),
+                marker_icon=cfg.get('marker_icon', 'pin'),
+                is_shared=bool(cfg.get('is_shared', False))
+            )
+            ok_configs += 1
+        except Exception as e:
+            errors.append(f"Config '{cfg.get('module_name','?')}': {e}")
+
+    for s in settings:
+        if s.get('key') in SKIP_KEYS or str(s.get('key', '')).startswith('franchise_ids_'):
+            continue
+        try:
+            database.set_global_setting(s['key'], s['value'])
+            ok_settings += 1
+        except Exception as e:
+            errors.append(f"Setting '{s.get('key','?')}': {e}")
+
+    log_debug(f"Config import by {session.get('user_name')}: {ok_configs} configs, {ok_settings} settings. Errors: {errors}")
+    return jsonify({'success': True, 'imported_configs': ok_configs, 'imported_settings': ok_settings, 'errors': errors})
+
+
 @app.route('/admin/refresh-token-setup')
 def admin_refresh_token_setup():
     """Show the current admin refresh token so it can be stored permanently in the
