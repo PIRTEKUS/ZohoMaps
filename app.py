@@ -17,9 +17,14 @@ from cryptography.fernet import Fernet
 config = ConfigParser()
 config.read('config.ini')
 
+# Safe section accessors — if config.ini is absent (e.g. AWS env-var-only deployments)
+# these fall back to empty dicts so every .get() below returns '' gracefully.
+_app_cfg    = config['APP']    if config.has_section('APP')    else {}
+_google_cfg = config['GOOGLE'] if config.has_section('GOOGLE') else {}
+
 # ── Secret key validation ────────────────────────────────────────────────────
 # Env var (injected by systemd) takes priority over config.ini
-_secret_key = os.environ.get('APP_SECRET_KEY') or config['APP'].get('secret_key', '')
+_secret_key = os.environ.get('APP_SECRET_KEY') or _app_cfg.get('secret_key', '')
 _DEFAULT_KEYS = {'', 'dev_key', 'super_secret_random_key_change_in_production', 'REPLACE_WITH_RANDOM_KEY_SEE_COMMENT_ABOVE'}
 if _secret_key in _DEFAULT_KEYS:
     raise RuntimeError(
@@ -65,7 +70,7 @@ limiter = Limiter(
     default_limits=["500 per hour"],
     storage_uri="memory://"  # Switch to redis:// on AWS for multi-instance safety
 )
-GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY') or config['GOOGLE'].get('maps_api_key', '')
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY') or _google_cfg.get('maps_api_key', '')
 
 # Initialize Database
 database.init_db()

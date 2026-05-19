@@ -5,8 +5,11 @@ from configparser import ConfigParser
 
 config = ConfigParser()
 config.read('config.ini')
+# Safe section accessor — if config.ini is absent (AWS env-var-only deployments)
+# this falls back to an empty dict so .get() returns '' gracefully.
+_app_cfg = config['APP'] if config.has_section('APP') else {}
 # Env var (injected by systemd) takes priority over config.ini
-DB_URI = os.environ.get('DATABASE_URI') or config['APP'].get('database_uri', 'sqlite:///database.db')
+DB_URI = os.environ.get('DATABASE_URI') or _app_cfg.get('database_uri', 'sqlite:///database.db')
 
 IS_POSTGRES = DB_URI.startswith('postgres')
 if IS_POSTGRES:

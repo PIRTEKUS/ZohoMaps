@@ -8,16 +8,21 @@ config.read('config.ini')
 
 # Read secrets from environment variables first (injected by systemd).
 # Fall back to config.ini for backward-compatibility during development.
-ZOHO_CLIENT_ID = os.environ.get('ZOHO_CLIENT_ID') or config['ZOHO'].get('client_id', '')
-ZOHO_CLIENT_SECRET = os.environ.get('ZOHO_CLIENT_SECRET') or config['ZOHO'].get('client_secret', '')
+# All config[] accesses use a safe fallback so the app starts even when
+# config.ini is absent (e.g. AWS deployments that use only env vars).
+_zoho_cfg = config['ZOHO'] if config.has_section('ZOHO') else {}
+_app_cfg  = config['APP']  if config.has_section('APP')  else {}
+
+ZOHO_CLIENT_ID = os.environ.get('ZOHO_CLIENT_ID') or _zoho_cfg.get('client_id', '')
+ZOHO_CLIENT_SECRET = os.environ.get('ZOHO_CLIENT_SECRET') or _zoho_cfg.get('client_secret', '')
 
 # Support comma-separated list of redirect URIs (e.g. IP + DNS)
-_raw_redirect_uris = config['ZOHO'].get('redirect_uri', '')
+_raw_redirect_uris = os.environ.get('ZOHO_REDIRECT_URI', '') or _zoho_cfg.get('redirect_uri', '')
 ZOHO_REDIRECT_URIS = [u.strip() for u in _raw_redirect_uris.split(',') if u.strip()]
 ZOHO_REDIRECT_URI = ZOHO_REDIRECT_URIS[0] if ZOHO_REDIRECT_URIS else ''
 
-ZOHO_ACCOUNTS_URL = config['ZOHO'].get('accounts_url', 'https://accounts.zoho.com')
-ZOHO_API_URL = config['ZOHO'].get('api_url', 'https://www.zohoapis.com')
+ZOHO_ACCOUNTS_URL = os.environ.get('ZOHO_ACCOUNTS_URL', '') or _zoho_cfg.get('accounts_url', 'https://accounts.zoho.com')
+ZOHO_API_URL = os.environ.get('ZOHO_API_URL', '') or _zoho_cfg.get('api_url', 'https://www.zohoapis.com')
 
 def get_matching_redirect_uri(request_host_url: str) -> str:
     """Return the configured redirect URI whose base URL best matches the incoming request host.

@@ -11,13 +11,16 @@ cd /var/www/zohomap || { echo "Error: /var/www/zohomap directory not found"; exi
 echo "[1/4] Pulling latest changes from GitHub (may prompt for sudo)..."
 sudo git pull origin main
 
-# 2. Activate virtual environment
-echo "[2/4] Activating Python virtual environment..."
-if [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
+# 2. Ensure virtual environment exists and is activated
+echo "[2/4] Checking Python virtual environment..."
+if [ ! -f "venv/bin/activate" ]; then
+    echo "  venv not found — creating it now..."
+    python3 -m venv venv
+    echo "  venv created."
 else
-    echo "Warning: venv not found. Ensure you created it as per README."
+    echo "  venv found."
 fi
+source venv/bin/activate
 
 # 2.5 Install OS Dependencies
 echo "[2.5/4] Installing required system packages (may prompt for sudo password)..."
