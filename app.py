@@ -1723,6 +1723,15 @@ def get_map_data():
                     fid for fid in _fi.get('ids', [])
                     if not str(fid).startswith('territory_')
                 ]
+                # If cached result was empty, auto-bust and re-run (catches stale pre-Strategy-3 cache)
+                if not franchise_ids_for_filter:
+                    log_debug(f"[map] Franchise cache returned 0 IDs — auto-refreshing for {user_id}.")
+                    _fi2 = _get_user_franchise_ids(user_id, _atk, force_refresh=True)
+                    if _fi2 is not None:
+                        franchise_ids_for_filter = [
+                            fid for fid in _fi2.get('ids', [])
+                            if not str(fid).startswith('territory_')
+                        ]
                 franchise_lookup_succeeded = True
                 log_debug(f"[map] Franchise lookup OK: {len(franchise_ids_for_filter)} franchise ID(s) for {user_id}.")
             else:
