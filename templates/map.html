@@ -40,6 +40,7 @@ main.container { padding: 0 !important; overflow: hidden; }
 .ctrl-btn.dark    { background:rgba(15,23,42,.9);  color:#e2e8f0; }
 .ctrl-btn.primary { background:rgba(79,70,229,.92); color:#fff; }
 .ctrl-btn.success { background:rgba(16,185,129,.92); color:#fff; }
+.ctrl-btn.active  { background:rgba(251,191,36,.92); color:#0f172a; }
 
 /* ── Category dropdown ────────────────────────────────────────────────── */
 .cat-wrap { position:relative; }
@@ -214,37 +215,11 @@ main.container { padding: 0 !important; overflow: hidden; }
             <span class="rbadge-count" id="route-badge-count">0</span>
         </div>
 
-        <!-- Franchise info button (all users) -->
-        <button class="ctrl-btn dark" id="franchise-info-btn" onclick="openFranchiseModal()"
-                title="My Franchise Assignments" style="padding:0.45rem 0.65rem;">
-            🏢
+        <!-- Toggle Google POIs button -->
+        <button class="ctrl-btn dark" id="poi-toggle-btn" onclick="toggleGooglePOIs()"
+                title="Hide Points of Interest (POIs)" style="padding:0.45rem 0.65rem;">
+            🏛️
         </button>
-    </div>
-
-    <!-- Franchise debug modal -->
-    <div id="franchise-modal" style="display:none; position:absolute; top:56px; right:12px; z-index:50;
-         width:min(420px,calc(100vw - 24px)); background:rgba(10,15,28,.97);
-         border:1px solid rgba(251,191,36,0.35); border-radius:16px;
-         box-shadow:0 8px 32px rgba(0,0,0,.6); backdrop-filter:blur(20px);
-         padding:1.1rem 1.25rem; font-size:0.82rem; color:#e2e8f0;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.85rem;">
-            <span style="font-weight:700; color:#fbbf24; font-size:0.9rem;">🏢 My Franchise Assignments</span>
-            <button onclick="document.getElementById('franchise-modal').style.display='none'"
-                    style="background:none; border:none; color:#64748b; cursor:pointer; font-size:1.1rem; line-height:1;">✕</button>
-        </div>
-        <div id="franchise-modal-body" style="color:#94a3b8;">Loading…</div>
-        <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
-            <button onclick="loadFranchiseModalData(true)"
-                    style="padding:0.35rem 0.8rem; background:rgba(239,68,68,0.12); border:1px solid rgba(239,68,68,0.3);
-                           color:#fca5a5; border-radius:8px; cursor:pointer; font-size:0.75rem;">
-                🔄 Force Refresh
-            </button>
-            <button onclick="document.getElementById('franchise-modal').style.display='none'"
-                    style="padding:0.35rem 0.8rem; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
-                           color:#94a3b8; border-radius:8px; cursor:pointer; font-size:0.75rem;">
-                Close
-            </button>
-        </div>
     </div>
 
     <!-- Search this area button (centred, shown after pan/zoom) -->
@@ -641,65 +616,36 @@ window.syncAllMyData = async function() {
 </script>
 
 <script>
-    // ── Franchise debug modal ─────────────────────────────────────────────────
-async function loadFranchiseModalData(forceRefresh) {
-    const body = document.getElementById('franchise-modal-body');
-    body.innerHTML = '<span style="color:#94a3b8;">Loading…</span>';
-    try {
-        if (forceRefresh) {
-            await fetch('/api/debug/franchise-refresh');
+let googlePoiHidden = false;
+window.toggleGooglePOIs = function() {
+    if (!window.map) return;
+    googlePoiHidden = !googlePoiHidden;
+    const styles = googlePoiHidden ? [
+        {
+            featureType: "poi",
+            elementType: "all",
+            stylers: [{ visibility: "off" }]
+        },
+        {
+            featureType: "transit",
+            elementType: "all",
+            stylers: [{ visibility: "off" }]
         }
-        const res = await fetch('/api/debug/franchise');
-        const d   = await res.json();
-        if (d.error) { body.innerHTML = `<span style="color:#fca5a5;">Error: ${d.error}</span>`; return; }
-
-        const fl  = d.franchise_lookup || {};
-        const ma  = d.match_analysis  || {};
-        const gc  = d.global_cache    || {};
-        const ids = fl.ids   || [];
-        const names = fl.names || [];
-        const trace = fl.coql_trace || [];
-        const canSee = ma.records_user_can_see || 0;
-
-        let franchiseHtml = ids.length
-            ? ids.map((id, i) => `<div style="font-family:monospace;font-size:0.75rem;color:#fbbf24;">${id} <span style="color:#94a3b8;font-family:sans-serif;">— ${names[i]||'?'}</span></div>`).join('')
-            : '<span style="color:#ef4444;">No franchise IDs found</span>';
-
-        let traceHtml = trace.map(t =>
-            `<div style="font-size:0.72rem;color:#475569;font-family:monospace;word-break:break-all;">${t}</div>`
-        ).join('');
-
-        body.innerHTML = `
-            <div style="margin-bottom:0.6rem;">
-                <div style="color:#fbbf24;font-weight:700;margin-bottom:4px;">Franchise IDs (${ids.length})</div>
-                ${franchiseHtml}
-            </div>
-            <div style="margin-bottom:0.6rem;">
-                <div style="padding:0.5rem 0.75rem; border-radius:8px;
-                     background:${canSee > 0 ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'};
-                     border:1px solid ${canSee > 0 ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'};">
-                    <span style="color:${canSee > 0 ? '#6ee7b7' : '#fca5a5'}; font-weight:700;">
-                        ${canSee > 0 ? '✅' : '❌'} ${canSee} records visible in global cache
-                    </span>
-                    <span style="color:#64748b; font-size:0.72rem;"> / ${gc.total_records||0} total</span>
-                </div>
-            </div>
-            <div style="color:#64748b;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:3px;">COQL Trace</div>
-            ${traceHtml || '<span style="color:#475569;font-size:0.72rem;">No trace available</span>'}`;
-    } catch(e) {
-        body.innerHTML = `<span style="color:#fca5a5;">Network error: ${e}</span>`;
+    ] : [];
+    
+    window.map.setOptions({ styles: styles });
+    
+    const btn = document.getElementById('poi-toggle-btn');
+    if (btn) {
+        if (googlePoiHidden) {
+            btn.classList.add('active');
+            btn.title = "Show Points of Interest (POIs)";
+        } else {
+            btn.classList.remove('active');
+            btn.title = "Hide Points of Interest (POIs)";
+        }
     }
-}
-
-function openFranchiseModal() {
-    const modal = document.getElementById('franchise-modal');
-    if (modal.style.display === 'none' || !modal.style.display) {
-        modal.style.display = 'block';
-        loadFranchiseModalData(false);
-    } else {
-        modal.style.display = 'none';
-    }
-}
+};
 </script>
 <script>
     window.configuredModules = {{ configs | tojson | safe }};

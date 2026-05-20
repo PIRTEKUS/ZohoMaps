@@ -13,6 +13,7 @@ async function initMap() {
         disableDefaultUI: true,
         zoomControl: true,
     });
+    window.map = map;
 
     // Setup the map-click listener ONCE here to close any open info popup
     // Must be done after map is initialized, not inside plotData (which runs repeatedly)
