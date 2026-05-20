@@ -1354,11 +1354,16 @@ def _nightly_sync_module(admin_token, module_name, config):
                     lat, lng = geocode_address(full_address)
 
             if lat is not None and lng is not None:
-                # Extract franchise ID for filtering
+                # Extract franchise ID — handles regular lookup (dict) AND
+                # multiuserlookup fields (list of dicts, e.g. Select_Your_Franchise1)
                 franchise_id = None
                 if franchise_field:
                     fval = record.get(franchise_field)
-                    if isinstance(fval, dict):
+                    if isinstance(fval, list):
+                        # Multiuserlookup: list of {id, name} dicts — take the first
+                        first = next((item for item in fval if isinstance(item, dict)), None)
+                        franchise_id = str(first.get('id', '')) or None if first else None
+                    elif isinstance(fval, dict):
                         franchise_id = str(fval.get('id', '')) or None
                     elif fval:
                         franchise_id = str(fval)
@@ -1627,17 +1632,22 @@ def get_map_data():
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
 
-    # ── Global cache first, per-user records as fallback ──────────────────────
-    # DATA PRIVACY: Non-admin users are filtered to their own franchise IDs.
-    # Fallback chain when admin token is unavailable:
-    #   1. Cached franchise IDs (from a previous successful lookup in the DB)
-    #   2. Full global cache with no franchise filter (degraded mode — logged)
-    #   3. Per-user records (if global cache is also empty)
+    # ── Global cache with franchise filter (authoritative) ───────────────────
+    # DATA PRIVACY RULES:
+    #  • Admins: see everything in the global cache.
+    #  • Non-admins with successful franchise lookup: ONLY see records whose
+    #    franchise_id matches one of their franchise IDs.  The result of this
+    #    filter is ALWAYS used — we never fall back to unfiltered data when the
+    #    franchise filter is active, because per-user records may be unfiltered.
+    #  • Non-admins with failed franchise lookup: degraded mode — serve global
+    #    cache unfiltered (franchise_ids_for_filter stays None).
+    #    Fallback to per-user records only if global cache is unpopulated.
+    # ─────────────────────────────────────────────────────────────────────────
     user_id  = session.get('user_id')
     is_admin = session.get('is_admin', False)
 
     franchise_ids_for_filter = None   # None = admin or degraded (no filter)
-    franchise_lookup_ok = True
+    franchise_lookup_succeeded = False  # True once we have a definitive answer
 
     if not is_admin:
         _atk = _get_admin_access_token()
@@ -1648,8 +1658,10 @@ def get_map_data():
                     fid for fid in _fi.get('ids', [])
                     if not str(fid).startswith('territory_')
                 ]
+                franchise_lookup_succeeded = True
+                log_debug(f"[map] Franchise lookup OK: {len(franchise_ids_for_filter)} franchise ID(s) for {user_id}.")
             else:
-                franchise_lookup_ok = False
+                log_debug(f"[map] Franchise lookup returned None for {user_id} — degraded mode.")
         else:
             # Admin token unavailable — try cached franchise IDs from DB
             _cache_key = f'franchise_ids_{user_id}'
@@ -1661,42 +1673,41 @@ def get_map_data():
                                    if not str(fid).startswith('territory_')]
                     if _cached_ids:
                         franchise_ids_for_filter = _cached_ids
-                        log_debug(f"[map] Admin token unavailable — using cached franchise IDs "
-                                  f"({len(_cached_ids)} franchise(s)) for user {user_id}.")
+                        franchise_lookup_succeeded = True
+                        log_debug(f"[map] Admin token unavailable — using {len(_cached_ids)} cached franchise ID(s).")
                     else:
-                        # Cached IDs exist but empty — degraded mode
-                        log_debug(f"[map] Admin token unavailable and no franchise IDs cached — "
-                                  "serving global cache unfiltered (degraded mode).")
+                        log_debug(f"[map] Admin token unavailable and cached IDs empty — degraded mode.")
                 except Exception:
-                    log_debug(f"[map] Admin token unavailable and cache parse failed — "
-                              "serving global cache unfiltered (degraded mode).")
+                    log_debug(f"[map] Admin token unavailable and cache parse failed — degraded mode.")
             else:
-                log_debug(f"[map] Admin token unavailable and no franchise cache for {user_id} — "
-                          "serving global cache unfiltered (degraded mode).")
+                log_debug(f"[map] Admin token unavailable and no franchise cache for {user_id} — degraded mode.")
 
-    if franchise_lookup_ok:
-        global_records = database.get_records_in_bounds_global(
-            franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
-        )
-        if global_records:
-            records = global_records
-            log_debug(f"[map] Served {len(records)} records from global nightly cache.")
-        else:
-            # =====================================================================
-            # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
-            # user's own user_id. We never mix records across users, regardless of
-            # shared configurations or admin status. Shared configs define DISPLAY
-            # settings only (which modules/fields to show, colors, icons). They do
-            # NOT grant access to another user's synced record data.
-            # If this line is changed to include other user_ids, it WILL expose
-            # one user's CRM data to another user. Do not change without full review.
-            # =====================================================================
+    # Query global cache
+    global_records = database.get_records_in_bounds_global(
+        franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
+    )
+
+    if global_records:
+        records = global_records
+        log_debug(f"[map] Served {len(records)} records from global cache (franchise_filter={franchise_ids_for_filter is not None}).")
+    elif franchise_lookup_succeeded and not is_admin:
+        # Franchise filter IS active and returned 0 — this area has no records
+        # for the user's franchise(s).  Do NOT fall back to per-user data
+        # (which may be unfiltered from a previous admin-token sync).
+        records = []
+        global_counts = database.get_global_record_counts()
+        if not global_counts:
+            # Global cache is completely empty — nightly sync hasn't run yet.
+            # Safe to fall back to per-user records (only this user's own synced data).
             records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-            log_debug(f"[map] Global cache empty — served {len(records)} per-user records.")
+            log_debug(f"[map] Global cache unpopulated — served {len(records)} per-user records as last resort.")
+        else:
+            log_debug(f"[map] 0 records in this area for user's {len(franchise_ids_for_filter or [])} franchise(s). "
+                      "Not falling back to unfiltered data.")
     else:
-        # Franchise lookup failed entirely — safe fallback to per-user records only
+        # Degraded mode or admin with empty global cache
         records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-        log_debug(f"[map] Franchise filter failed — served {len(records)} per-user records (safe fallback).")
+        log_debug(f"[map] Global cache empty/degraded — served {len(records)} per-user records.")
     # ─────────────────────────────────────────────────────────────────────────
 
 
