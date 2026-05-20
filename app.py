@@ -723,6 +723,7 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
 
     database.set_global_setting(cache_key, json.dumps(results))
     log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
+    return results  # ←← was missing — caused None return on first call, empty-cache loop on subsequent calls
 
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
@@ -1640,6 +1641,32 @@ def get_map_data():
     # ─────────────────────────────────────────────────────────────────────────
     user_id  = session.get('user_id')
     is_admin = session.get('is_admin', False)
+
+    # ── On-demand email → CRM ID resolution ─────────────────────────────────
+    # If the admin token was unavailable when this user logged in, their user_id
+    # is their Zoho email instead of their numeric CRM user ID.  COQL franchise
+    # queries need the numeric ID to work.  Try to resolve it now.
+    if not is_admin and '@' in str(user_id):
+        _resolve_tok = _get_admin_access_token()
+        if _resolve_tok:
+            try:
+                all_users = requests.get(
+                    f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type=AllUsers",
+                    headers={'Authorization': f'Zoho-oauthtoken {_resolve_tok}'},
+                    timeout=8
+                ).json()
+                for _u in all_users.get('users', []):
+                    if _u.get('email', '').lower() == user_id.lower():
+                        _numeric_id = _u['id']
+                        # Clear stale email-keyed franchise cache so next lookup uses numeric key
+                        database.set_global_setting(f'franchise_ids_{user_id}', '')
+                        session['user_id'] = _numeric_id
+                        session['user_email'] = user_id
+                        user_id = _numeric_id
+                        log_debug(f"[map] Resolved email → CRM ID {_numeric_id} (session updated).")
+                        break
+            except Exception as _e:
+                log_debug(f"[map] Email→ID resolution failed: {_e}")
 
     franchise_ids_for_filter = None   # None = admin or degraded (no filter)
     franchise_lookup_succeeded = False  # True once we have a definitive answer
