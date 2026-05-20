@@ -532,14 +532,28 @@ def _get_admin_access_token():
       1. ZOHO_REFRESH_TOKEN env var (set in systemd service — permanent, no browser login needed)
       2. DB-stored encrypted refresh token (set when an admin user logs in via OAuth)
 
+    If Zoho returns a rotated refresh token (token rotation), it is saved back to the DB
+    automatically so the next call succeeds.
+
     The access token is NEVER exposed to the frontend or sent to the client.
     """
+    def _save_rotated_token(token_data, source):
+        """If Zoho returned a new refresh token (rotation), persist it to the DB."""
+        new_rt = token_data.get('refresh_token', '').strip()
+        if new_rt:
+            try:
+                database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
+                log_debug(f"[admin_token] Refresh token rotated ({source}) — new token saved to DB.")
+            except Exception as _e:
+                log_debug(f"[admin_token] WARNING: Could not save rotated token: {_e}")
+
     # ── Priority 1: env-var refresh token (server config, no human login needed) ──
     env_refresh = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
     if env_refresh:
         try:
             token_data = zoho_api.refresh_access_token(env_refresh)
             if 'access_token' in token_data:
+                _save_rotated_token(token_data, 'env-var')
                 return token_data['access_token']
             log_debug(f"[admin_token] ZOHO_REFRESH_TOKEN exchange failed: {token_data.get('error')} — "
                       "check the token is valid and has the correct scopes.")
@@ -557,6 +571,7 @@ def _get_admin_access_token():
     try:
         token_data = zoho_api.refresh_access_token(refresh_token)
         if 'access_token' in token_data:
+            _save_rotated_token(token_data, 'db-token')
             return token_data['access_token']
         log_debug(f"Admin token refresh failed: {token_data.get('error', 'unknown error')}")
     except Exception as e:
@@ -1559,13 +1574,15 @@ def get_map_data():
 
     # ── Global cache first, per-user records as fallback ──────────────────────
     # DATA PRIVACY: Non-admin users are filtered to their own franchise IDs.
-    # If the franchise lookup fails (admin token unavailable), non-admins fall
-    # back to their per-user records rather than seeing unfiltered global data.
+    # Fallback chain when admin token is unavailable:
+    #   1. Cached franchise IDs (from a previous successful lookup in the DB)
+    #   2. Full global cache with no franchise filter (degraded mode — logged)
+    #   3. Per-user records (if global cache is also empty)
     user_id  = session.get('user_id')
     is_admin = session.get('is_admin', False)
 
-    franchise_ids_for_filter = None  # None = admin (no filter)
-    franchise_lookup_ok = True       # False = admin token unavailable for non-admin
+    franchise_ids_for_filter = None   # None = admin or degraded (no filter)
+    franchise_lookup_ok = True
 
     if not is_admin:
         _atk = _get_admin_access_token()
@@ -1577,13 +1594,30 @@ def get_map_data():
                     if not str(fid).startswith('territory_')
                 ]
             else:
-                # Admin token worked but franchise lookup failed — be safe
                 franchise_lookup_ok = False
         else:
-            # Admin token unavailable — cannot safely filter global cache
-            franchise_lookup_ok = False
-            log_debug(f"[map] Admin token unavailable for franchise filter — "
-                      "non-admin user will use per-user records only.")
+            # Admin token unavailable — try cached franchise IDs from DB
+            _cache_key = f'franchise_ids_{user_id}'
+            _cached_raw = database.get_global_setting(_cache_key, '')
+            if _cached_raw:
+                try:
+                    _cached = json.loads(_cached_raw)
+                    _cached_ids = [fid for fid in _cached.get('ids', [])
+                                   if not str(fid).startswith('territory_')]
+                    if _cached_ids:
+                        franchise_ids_for_filter = _cached_ids
+                        log_debug(f"[map] Admin token unavailable — using cached franchise IDs "
+                                  f"({len(_cached_ids)} franchise(s)) for user {user_id}.")
+                    else:
+                        # Cached IDs exist but empty — degraded mode
+                        log_debug(f"[map] Admin token unavailable and no franchise IDs cached — "
+                                  "serving global cache unfiltered (degraded mode).")
+                except Exception:
+                    log_debug(f"[map] Admin token unavailable and cache parse failed — "
+                              "serving global cache unfiltered (degraded mode).")
+            else:
+                log_debug(f"[map] Admin token unavailable and no franchise cache for {user_id} — "
+                          "serving global cache unfiltered (degraded mode).")
 
     if franchise_lookup_ok:
         global_records = database.get_records_in_bounds_global(
@@ -1605,9 +1639,9 @@ def get_map_data():
             records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
             log_debug(f"[map] Global cache empty — served {len(records)} per-user records.")
     else:
-        # Franchise filter unavailable — safe fallback to per-user records only
+        # Franchise lookup failed entirely — safe fallback to per-user records only
         records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-        log_debug(f"[map] Franchise filter unavailable — served {len(records)} per-user records (safe fallback).")
+        log_debug(f"[map] Franchise filter failed — served {len(records)} per-user records (safe fallback).")
     # ─────────────────────────────────────────────────────────────────────────
 
 
