@@ -2,9 +2,46 @@ import sys
 import os
 import json
 import requests
+import re
 
 # Add current folder to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# ── Load environment variables from systemd service ──
+service_paths = [
+    '/etc/systemd/system/zohomap.service',
+    '/lib/systemd/system/zohomap.service'
+]
+loaded_env = {}
+for path in service_paths:
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                # Find all Environment= lines
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith('Environment='):
+                        env_str = line.split('Environment=', 1)[1]
+                        # Environment lines can contain multiple key=value pairs separated by space
+                        # e.g., Environment="APP_SECRET_KEY=123 DATABASE_URI=456"
+                        # Strip quotes if present
+                        if (env_str.startswith('"') and env_str.endswith('"')) or (env_str.startswith("'") and env_str.endswith("'")):
+                            env_str = env_str[1:-1]
+                        # Simple split on space for key=value
+                        for item in env_str.split():
+                            if '=' in item:
+                                k, v = item.split('=', 1)
+                                os.environ[k] = v
+                                loaded_env[k] = v
+            print(f"Loaded environment variables from {path}: {list(loaded_env.keys())}")
+            break
+        except Exception as e:
+            print(f"Could not read {path}: {e}")
+
+# Default dummy key if still not set to avoid Flask fatal check crash
+if 'APP_SECRET_KEY' not in os.environ:
+    os.environ['APP_SECRET_KEY'] = 'dummy_secret_for_diagnostic_run'
 
 import app
 import database
