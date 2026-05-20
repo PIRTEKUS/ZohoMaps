@@ -2108,6 +2108,92 @@ def get_token_status():
         'has_session_token': bool(session_token),
     })
 
+
+@app.route('/api/debug/franchise')
+@limiter.limit("30 per minute")
+def debug_franchise():
+    """Franchise debug endpoint — visible to any logged-in user.
+    Returns their franchise IDs, the COQL trace, and distinct franchise_ids
+    stored in the global cache so mismatches are immediately obvious."""
+    if 'access_token' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+
+    user_id  = session.get('user_id', '')
+    is_admin = session.get('is_admin', False)
+    user_name = session.get('user_name', '')
+
+    atk = _get_admin_access_token()
+
+    # Franchise lookup for the current user (cached — fast)
+    fi_cached = _get_user_franchise_ids(user_id, atk)
+
+    # Global cache franchise_id distribution
+    try:
+        with database._get_db() as conn:
+            rows = conn.execute(
+                "SELECT franchise_id, COUNT(*) as cnt FROM module_records "
+                "WHERE user_id='__global__' AND franchise_id IS NOT NULL AND franchise_id != '' "
+                "GROUP BY franchise_id ORDER BY cnt DESC LIMIT 30"
+            ).fetchall()
+            cache_franchise_counts = {r[0]: r[1] for r in rows}
+
+            total_global = conn.execute(
+                "SELECT COUNT(*) FROM module_records WHERE user_id='__global__'"
+            ).fetchone()[0]
+
+            no_franchise = conn.execute(
+                "SELECT COUNT(*) FROM module_records "
+                "WHERE user_id='__global__' AND (franchise_id IS NULL OR franchise_id='')"
+            ).fetchone()[0]
+    except Exception as e:
+        cache_franchise_counts = {}
+        total_global = 0
+        no_franchise = 0
+
+    user_franchise_ids = fi_cached.get('ids', []) if fi_cached else []
+    matching = [fid for fid in user_franchise_ids if fid in cache_franchise_counts]
+
+    return jsonify({
+        'user': {'id': user_id, 'name': user_name, 'is_admin': is_admin},
+        'admin_token_available': bool(atk),
+        'franchise_lookup': {
+            'ids':        fi_cached.get('ids', [])        if fi_cached else [],
+            'names':      fi_cached.get('names', [])      if fi_cached else [],
+            'pirtek_ids': fi_cached.get('pirtek_ids', []) if fi_cached else [],
+            'coql_trace': fi_cached.get('debug', [])      if fi_cached else ['lookup returned None'],
+            'cached_at':  fi_cached.get('ts', 0)          if fi_cached else 0,
+        },
+        'global_cache': {
+            'total_records':          total_global,
+            'records_without_franchise_id': no_franchise,
+            'distinct_franchise_ids': cache_franchise_counts,
+        },
+        'match_analysis': {
+            'user_has_n_franchises':   len(user_franchise_ids),
+            'matching_cache_franchise_ids': matching,
+            'records_user_can_see':    sum(cache_franchise_counts.get(fid, 0) for fid in matching),
+        }
+    })
+
+
+@app.route('/api/debug/franchise-refresh')
+@limiter.limit("5 per minute")
+def debug_franchise_refresh():
+    """Force-refresh the franchise lookup for the current user (busts 4h cache)."""
+    if 'access_token' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    user_id = session.get('user_id', '')
+    atk = _get_admin_access_token()
+    if not atk:
+        return jsonify({'error': 'Admin token unavailable — cannot refresh'}), 503
+    fi = _get_user_franchise_ids(user_id, atk, force_refresh=True)
+    return jsonify({
+        'user_id': user_id,
+        'franchise_ids': fi.get('ids', []) if fi else [],
+        'names':         fi.get('names', []) if fi else [],
+        'debug':         fi.get('debug', []) if fi else ['returned None'],
+    })
+
 @app.route('/admin/refresh-token-setup')
 def admin_refresh_token_setup():
     """Show the current admin refresh token so it can be stored permanently in the

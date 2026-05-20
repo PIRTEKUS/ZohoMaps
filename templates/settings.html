@@ -109,7 +109,36 @@
         {% endif %}
 
         {% if is_admin %}
+        <!-- Franchise Debug Card (visible to all logged-in users) -->
+        <div class="settings-card glass" id="franchise-debug-card" style="grid-column: 1 / -1; border-color: rgba(251,191,36,0.35);">
+            <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#fbbf24" stroke-width="2" fill="none">
+                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+                </svg>
+                Franchise Debug
+                <span style="font-size:0.75rem; color:#fbbf24; font-weight:400;">(your franchise assignments &amp; cache match analysis)</span>
+            </h2>
+
+            <div style="display:flex; gap:1rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                <button onclick="loadFranchiseDebug(false)" id="fd-load-btn"
+                    style="padding:0.45rem 1rem; background:rgba(251,191,36,0.15); border:1px solid rgba(251,191,36,0.4);
+                           color:#fbbf24; border-radius:7px; cursor:pointer; font-size:0.82rem; font-weight:600;">
+                    🔍 Load Debug Info
+                </button>
+                <button onclick="loadFranchiseDebug(true)" id="fd-refresh-btn"
+                    style="padding:0.45rem 1rem; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+                           color:#fca5a5; border-radius:7px; cursor:pointer; font-size:0.82rem;">
+                    🔄 Force Refresh (bust 4h cache)
+                </button>
+            </div>
+
+            <div id="franchise-debug-output" style="background:rgba(0,0,0,0.25); border-radius:10px; padding:1rem; font-size:0.82rem; display:none;">
+                <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
+            </div>
+        </div>
+
         <!-- ADMIN-ONLY: Service Token -->
+
         <div class="settings-card glass" id="service-token-card" style="grid-column: 1 / -1; border-color: rgba(99,102,241,0.35);">
             <h2 style="display:flex; align-items:center; gap:0.75rem;">
                 <svg viewBox="0 0 24 24" width="22" height="22" stroke="#818cf8" stroke-width="2" fill="none">
@@ -907,7 +936,96 @@ function toggleDupFilterFields(enabled) {
     document.getElementById('dup-filter-fields').style.display = enabled ? 'block' : 'none';
 }
 
+// ── Franchise Debug ───────────────────────────────────────────────────────────
+async function loadFranchiseDebug(forceRefresh) {
+    const out   = document.getElementById('franchise-debug-output');
+    const inner = document.getElementById('fd-content');
+    if (!out) return;
+    out.style.display = 'block';
+    inner.innerHTML = '<span style="color:#94a3b8;">Loading…</span>';
+
+    try {
+        const url = forceRefresh ? '/api/debug/franchise-refresh' : '/api/debug/franchise';
+        const res  = await fetch(url);
+        const d    = await res.json();
+        if (d.error) { inner.innerHTML = `<span style="color:#fca5a5;">Error: ${d.error}</span>`; return; }
+
+        // If force-refresh, reload the full debug info after cache bust
+        if (forceRefresh) {
+            const res2 = await fetch('/api/debug/franchise');
+            const d2   = await res2.json();
+            if (!d2.error) { renderFranchiseDebug(inner, d2); return; }
+        }
+        renderFranchiseDebug(inner, d);
+    } catch (e) {
+        inner.innerHTML = `<span style="color:#fca5a5;">Network error: ${e}</span>`;
+    }
+}
+
+function renderFranchiseDebug(el, d) {
+    const u   = d.user || {};
+    const fl  = d.franchise_lookup || {};
+    const gc  = d.global_cache || {};
+    const ma  = d.match_analysis || {};
+
+    const ok  = s => `<span style="color:#6ee7b7; background:rgba(16,185,129,0.12); padding:0 6px; border-radius:8px;">✅ ${s}</span>`;
+    const bad = s => `<span style="color:#fca5a5; background:rgba(239,68,68,0.12); padding:0 6px; border-radius:8px;">❌ ${s}</span>`;
+    const tag = (c, s) => `<span style="color:${c}; font-family:monospace; font-size:0.78rem;">${s}</span>`;
+
+    const ids   = fl.ids   || [];
+    const names = fl.names || [];
+    const trace = fl.coql_trace || [];
+
+    let franchiseRows = '';
+    for (let i = 0; i < ids.length; i++) {
+        franchiseRows += `<div style="margin-top:4px;">${tag('#fbbf24', ids[i])} — ${names[i] || '?'}</div>`;
+    }
+    if (!ids.length) franchiseRows = bad('No franchise IDs found');
+
+    const cacheIds = gc.distinct_franchise_ids || {};
+    let cacheRows = '';
+    for (const [fid, cnt] of Object.entries(cacheIds)) {
+        const match = ids.includes(fid);
+        cacheRows += `<div style="margin-top:2px;">${tag(match ? '#6ee7b7' : '#94a3b8', fid)} — ${cnt} records ${match ? '⬅ matches you' : ''}</div>`;
+    }
+    if (!cacheRows) cacheRows = '<span style="color:#64748b;">No franchise_ids in cache</span>';
+
+    const canSee = ma.records_user_can_see || 0;
+
+    el.innerHTML = `
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; align-items:start;">
+        <!-- User & franchise assignments -->
+        <div>
+            <div style="color:#fbbf24; font-weight:700; margin-bottom:0.5rem;">👤 User</div>
+            <div style="color:#e2e8f0;"><b>${u.name || '?'}</b> (${u.is_admin ? 'Admin' : 'Standard'})</div>
+            <div style="color:#94a3b8; font-size:0.75rem; margin-bottom:0.75rem;">CRM ID: ${tag('#fbbf24', u.id || '?')}</div>
+
+            <div style="color:#fbbf24; font-weight:700; margin-bottom:0.5rem;">🏢 Franchise Assignments (${ids.length})</div>
+            ${franchiseRows}
+
+            <div style="margin-top:0.75rem; color:#64748b; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">COQL trace</div>
+            ${trace.map(t => `<div style="color:#475569; font-size:0.73rem; font-family:monospace; word-break:break-all;">${t}</div>`).join('')}
+        </div>
+
+        <!-- Global cache -->
+        <div>
+            <div style="color:#fbbf24; font-weight:700; margin-bottom:0.5rem;">🗄 Global Cache</div>
+            <div style="color:#94a3b8;">Total records: ${tag('#e2e8f0', gc.total_records || 0)}</div>
+            <div style="color:#94a3b8;">Without franchise_id: ${tag(gc.records_without_franchise_id > 0 ? '#fca5a5' : '#6ee7b7', gc.records_without_franchise_id || 0)}</div>
+            <div style="margin-top:0.75rem; color:#64748b; font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">Franchise IDs in cache (top 30)</div>
+            ${cacheRows}
+
+            <div style="margin-top:1rem; padding:0.75rem; background:rgba(251,191,36,0.08); border-radius:8px; border:1px solid rgba(251,191,36,0.2);">
+                <div style="color:#fbbf24; font-weight:700;">🎯 Match Analysis</div>
+                <div style="margin-top:4px;">${canSee > 0 ? ok(canSee + ' records should be visible') : bad('0 records will be visible to this user')}</div>
+                <div style="color:#94a3b8; font-size:0.75rem; margin-top:4px;">Matching franchise IDs: ${(ma.matching_cache_franchise_ids || []).length}</div>
+            </div>
+        </div>
+    </div>`;
+}
+
 // ── Service Token ─────────────────────────────────────────────────────────────
+
 async function loadTokenStatus() {
     const rows = document.getElementById('token-status-rows');
     if (!rows) return;
