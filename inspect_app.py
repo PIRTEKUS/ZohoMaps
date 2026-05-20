@@ -47,34 +47,31 @@ if not admin_token:
 
 headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
 
-print("\n=== 1. LIST ALL DEACTIVE AND NOTCONFIRMED USERS ===")
-for utype in ['DeactiveUsers', 'NotConfirmedUsers']:
-    print(f"\nListing users of type: {utype}")
+print("\n=== 1. TEST GET USER BY EMAIL DIRECTLY ===")
+url = f"{zoho_api.ZOHO_API_URL}/crm/v3/users/zohotest3@pirtekusa.com"
+r = requests.get(url, headers=headers, timeout=8)
+print("GET /users/zohotest3@pirtekusa.com status:", r.status_code)
+if r.ok:
+    print("GET by email success!")
+    u = r.json().get('users', [{}])[0]
+    print(f"  Name: {u.get('full_name')} | ID: {u.get('id')} | Email: {u.get('email')} | Franchise: {u.get('Franchise')}")
+else:
+    print("GET by email error:", r.text[:300])
+
+print("\n=== 2. TEST USERS BY CATEGORY ==")
+# Test category parameter
+for category in ['team_user', 'all']:
+    print(f"\nFetching /users?category={category}")
     r = requests.get(
-        f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type={utype}",
+        f"{zoho_api.ZOHO_API_URL}/crm/v3/users?category={category}",
         headers=headers,
         timeout=8
     )
+    print("Status:", r.status_code)
     if r.ok:
         users = r.json().get('users', [])
-        for u in users:
-            print(f"  Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')}")
+        print(f"Count: {len(users)}")
+        for u in users[:5]:
+            print(f"  Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Category: {u.get('category')} | Franchise: {u.get('Franchise')}")
     else:
-        print(f"  Failed: {r.status_code} - {r.text}")
-
-print("\n=== 2. TEST USERS IN TERRITORY ENDPOINT ===")
-# Let's test if there is a sub-resource endpoint for users in a territory
-t_id = '6959138000001451016'
-urls_to_test = [
-    f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users",
-    f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/associated_users"
-]
-for url in urls_to_test:
-    print(f"Testing URL: {url}")
-    r = requests.get(url, headers=headers, timeout=8)
-    print(f"  Status: {r.status_code}")
-    if r.ok:
-        print("  Response keys:", list(r.json().keys()))
-        print("  Response preview:", r.json())
-    else:
-        print("  Error:", r.text[:300])
+        print("Error:", r.text[:300])
