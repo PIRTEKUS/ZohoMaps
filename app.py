@@ -685,9 +685,9 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
         except Exception as e:
             debug_log.append(f'COQL error: {e}')
 
-    # ── Strategy 2: Territory-based fallback
-    # If COQL finds nothing, derive franchise list from the user's territory assignments.
-    # Territory names in this org match Franchise names (e.g. "Colorado Springs" → franchise "Colorado Springs").
+    # ── Strategy 2: Territory-based fallback ────────────────────────────────
+    # Derive franchise list from the user's CRM territory assignments.
+    territory_ids_raw = []
     if not found:
         try:
             headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
@@ -699,19 +699,62 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                 udata = resp.json()
                 user_obj = udata.get('users', [{}])[0] if 'users' in udata else udata.get('user', {})
                 territories = user_obj.get('territories', [])
-                debug_log.append(f'Territory fallback: user has {len(territories)} territories: {[t.get("name") for t in territories]}')
+                debug_log.append(f'Strategy 2 territories: {[t.get("name") for t in territories]}')
                 for t in territories:
                     tid = str(t.get('id', ''))
                     tname = t.get('name', '')
-                    if tid and tname not in ('PIRTEK USA', 'Head Office'):
-                        # Use territory ID as a proxy franchise identifier
+                    if tid:
+                        territory_ids_raw.append({'id': tid, 'name': tname})
+                        # Keep as territory_ prefix — these are proxy franchise IDs
+                        # (used only when no Franchise record IDs are found)
                         found[f'territory_{tid}'] = {
                             'id': f'territory_{tid}',
                             'name': tname,
                             'pirtek_id': ''
                         }
         except Exception as e:
-            debug_log.append(f'Territory fallback error: {e}')
+            debug_log.append(f'Strategy 2 territory error: {e}')
+
+    # ── Strategy 3: Derive franchise IDs from records owned by this user ───────
+    # Query module records via COQL, filtering by Owner.id = user_id, and extract
+    # the franchise field values.  This is independent of Franchises module field
+    # names and works as long as the user's owned records have franchise data.
+    # This replaces territory_ proxy IDs with real Franchise record IDs.
+    owned_franchise_ids = {}
+    _OWNER_MODULE_FIELDS = [
+        ('Leads',             'Select_Your_Franchise1'),
+        ('Accounts',          'Franchise'),
+        ('Ship_To_Addresses', 'Franchise'),
+    ]
+    for mod, fld in _OWNER_MODULE_FIELDS:
+        coql_owned = (
+            f"SELECT id, {fld} FROM {mod} "
+            f"WHERE Owner.id = '{user_id}' LIMIT 200"
+        )
+        try:
+            result = zoho_api.coql_query(coql_owned, admin_token)
+            recs = result.get('data', [])
+            debug_log.append(f'Strategy 3 {mod} Owner query: {len(recs)} records')
+            for rec in recs:
+                fval = rec.get(fld)
+                # multiuserlookup → list of dicts; regular lookup → dict
+                items = fval if isinstance(fval, list) else ([fval] if isinstance(fval, dict) else [])
+                for item in items:
+                    if isinstance(item, dict) and item.get('id'):
+                        fid  = str(item['id'])
+                        fname = item.get('name', fid)
+                        if fid and fid not in owned_franchise_ids:
+                            owned_franchise_ids[fid] = {'id': fid, 'name': fname, 'pirtek_id': ''}
+        except Exception as e:
+            debug_log.append(f'Strategy 3 {mod} error: {e}')
+
+    if owned_franchise_ids:
+        # Replace territory_ proxy entries with real Franchise record IDs
+        found = {k: v for k, v in found.items() if not k.startswith('territory_')}
+        found.update(owned_franchise_ids)
+        debug_log.append(f'Strategy 3 resolved {len(owned_franchise_ids)} franchise ID(s) from owned records.')
+    else:
+        debug_log.append('Strategy 3: no franchise IDs found in owned records — keeping territory fallback.')
 
     results = {
         'ids':       [v['id']        for v in found.values()],
@@ -723,7 +766,7 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
 
     database.set_global_setting(cache_key, json.dumps(results))
     log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
-    return results  # ←← was missing — caused None return on first call, empty-cache loop on subsequent calls
+    return results
 
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
