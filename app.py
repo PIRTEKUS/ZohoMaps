@@ -591,6 +591,45 @@ def _require_admin_token(context='sync'):
     return _s.get('access_token')
 
 
+# ── Location-aware API filtering helpers ─────────────────────────────────────
+
+def _build_location_filter_criteria(fields):
+    """Build a Zoho search criteria string that skips records where ALL location
+    fields (lat/lng and address fields) are null.  This eliminates unmappable
+    records at the API level, saving API pages and geocoding quota.
+
+    Returns a criteria string like:
+        ((City:is_not_null) or (State:is_not_null) or (Latitude__c:is_not_null))
+    or None if no location fields are configured for this module.
+    """
+    location_keys = ['latitude', 'longitude', 'address1', 'city', 'state', 'zip']
+    seen = set()
+    zoho_fields = []
+    for k in location_keys:
+        f = fields.get(k)
+        if f and f not in seen:
+            seen.add(f)
+            zoho_fields.append(f)
+    if not zoho_fields:
+        return None
+    parts = [f"({f}:is_not_null)" for f in zoho_fields]
+    return parts[0] if len(parts) == 1 else "(" + " or ".join(parts) + ")"
+
+
+def _combine_criteria(criteria_a, criteria_b):
+    """AND two Zoho search criteria strings together.
+    Either can be None (returns the other one)."""
+    if criteria_a and criteria_b:
+        return f"({criteria_a} and {criteria_b})"
+    return criteria_a or criteria_b
+
+
+def _is_null_string(val):
+    """Return True if val is the literal string 'NULL'/'None' that Zoho
+    sometimes returns for unconfigured field names."""
+    return val is not None and str(val).strip().upper() in ('NULL', 'NONE', 'N/A', 'UNKNOWN')
+
+
 def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     """Return franchise memberships for a user via COQL (the only Zoho endpoint
     that returns multiuserlookup field values). Falls back to territory assignments.
@@ -763,7 +802,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
         address_parts = []
         for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
             val = extract_val(record.get(fields.get(k)))
-            if val:
+            if val and not _is_null_string(val):
                 address_parts.append(str(val))
         
         full_address = ", ".join(address_parts)
@@ -986,16 +1025,21 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     page_token = None
     more_records = True
 
-    # Diagnostic — visible in debug.log and the in-app log console
+    # Build the location filter: skip records where ALL location fields are null
+    location_criteria = _build_location_filter_criteria(fields)
+
     log_debug(f"[SYNC DIAG] module={module_name} user={user_id} is_admin={is_admin} "
-              f"franchise_criteria={franchise_criteria!r}")
+              f"franchise_criteria={franchise_criteria!r} "
+              f"location_criteria={location_criteria!r}")
 
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
 
-        # Use franchise criteria search for non-admins; full list for admins
-        if franchise_criteria:
-            data = zoho_api.search_records(module_name, franchise_criteria, access_token,
+        # Merge location filter with any franchise filter and use search endpoint;
+        # fall back to plain list endpoint if neither filter is set.
+        effective_criteria = _combine_criteria(franchise_criteria, location_criteria)
+        if effective_criteria:
+            data = zoho_api.search_records(module_name, effective_criteria, access_token,
                                            fields=fetch_fields_list, page=page, page_token=page_token)
         else:
             data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list,
@@ -1029,8 +1073,11 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                     admin_token = _get_admin_access_token()
                     if admin_token and user_id:
                         log_debug(f"Using admin token to fetch {module_name} records for {user_id} (franchise filter)")
-                        # Use franchise criteria if available; otherwise fall back to owner filter
-                        criteria = franchise_criteria or f"(Owner.id:equals:{user_id})"
+                        # Admin fallback: keep the same location filter, combined with an owner filter
+                        criteria = _combine_criteria(
+                            franchise_criteria or f"(Owner.id:equals:{user_id})",
+                            location_criteria
+                        )
                         owner_data = zoho_api.search_records(module_name, criteria, admin_token,
                                                              fields=fetch_fields_list, page=page, page_token=page_token)
                         if 'data' in owner_data and owner_data['data']:
@@ -1072,7 +1119,7 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                 address_parts = []
                 for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
                     val = extract_val(record.get(fields.get(k)))
-                    if val:
+                    if val and not _is_null_string(val):
                         address_parts.append(str(val))
                 
                 full_address = ", ".join(address_parts)
@@ -1259,9 +1306,17 @@ def _nightly_sync_module(admin_token, module_name, config):
     page_token = None
     more_records = True
 
+    # Build location filter once (outside the loop — same for every page)
+    _nightly_loc_crit = _build_location_filter_criteria(fields)
+    log_debug(f"[nightly] {module_name}: location filter = {_nightly_loc_crit!r}")
+
     while more_records:
-        data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
-                                             page=page, page_token=page_token)
+        if _nightly_loc_crit:
+            data = zoho_api.search_records(module_name, _nightly_loc_crit, admin_token,
+                                           fields=fetch_fields_list, page=page, page_token=page_token)
+        else:
+            data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
+                                                 page=page, page_token=page_token)
 
         if 'code' in data and data.get('status') == 'error':
             log_debug(f"[nightly] API error {module_name}: {data.get('code')} – {data.get('message')}")
@@ -1292,7 +1347,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                 address_parts = []
                 for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
                     val = extract_val(record.get(fields.get(k)))
-                    if val:
+                    if val and not _is_null_string(val):
                         address_parts.append(str(val))
                 full_address = ', '.join(address_parts)
                 if full_address:
