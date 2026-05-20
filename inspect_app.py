@@ -47,8 +47,15 @@ if not admin_token:
 
 headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
 
-print("\n=== 1. CHECK UNCONFIRMED AND INACTIVE USERS ===")
-for utype in ['UnconfirmedUsers', 'InactiveUsers']:
+print("\n=== 1. FETCH OTHER CRM USER TYPES ===")
+# Try other valid Zoho CRM v3 user type values to find zohotest3@pirtekusa.com
+user_types = [
+    'DeactiveUsers',
+    'ConfirmedUsers',
+    'NotConfirmedUsers',
+    'ActiveUnconfirmedUsers'
+]
+for utype in user_types:
     print(f"\nFetching users of type: {utype}")
     r = requests.get(
         f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type={utype}",
@@ -59,34 +66,24 @@ for utype in ['UnconfirmedUsers', 'InactiveUsers']:
         users = r.json().get('users', [])
         print(f"Count: {len(users)}")
         for u in users:
-            if 'zohotest3' in u.get('email', '').lower() or 'colo' in u.get('full_name', '').lower():
-                print(f"  MATCH: Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')}")
+            if 'zohotest3' in u.get('email', '').lower() or 'colo' in u.get('full_name', '').lower() or 'msst' in u.get('last_name', '').lower():
+                print(f"  MATCH: Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')} | Profile: {u.get('profile', {}).get('name')}")
     else:
-        print(f"  Failed: {r.text}")
+        print(f"  Failed: {r.status_code} - {r.text}")
 
-print("\n=== 2. TEST COQL ON LEADS WITH TERRITORY FILTER ===")
-# Try COQL query filtering by Territory
-queries = [
-    "SELECT id, Select_Your_Franchise1 FROM Leads WHERE Territory = 'Colorado Springs' LIMIT 5",
-    "SELECT id, Select_Your_Franchise1 FROM Leads WHERE Territories = 'Colorado Springs' LIMIT 5"
-]
-for q in queries:
-    print(f"Running COQL: {q}")
-    res = zoho_api.coql_query(q, admin_token)
-    recs = res.get('data', [])
-    print(f"Result count: {len(recs)}")
-    if recs:
-        for r in recs[:3]:
-            print(f"  Record: {r}")
-
-print("\n=== 3. FETCH TERRITORIES VIA API ===")
-# Let's see if we can list territories using the Zoho CRM Territories API
-t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories"
+print("\n=== 2. FETCH TERRITORY DETAILS ===")
+# Fetch specific territory details for Colorado Springs
+t_id = '6959138000001451016'
+t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}"
 r = requests.get(t_url, headers=headers, timeout=8)
 if r.ok:
-    t_data = r.json().get('territories', [])
-    print(f"Total territories found: {len(t_data)}")
-    for t in t_data:
-        print(f"Territory: {t.get('name')} | ID: {t.get('id')} | Parent: {t.get('parent_territory', {}).get('name')}")
+    data = r.json().get('territories', [{}])[0]
+    print(f"Territory Name: {data.get('name')}")
+    # print keys to see if users are listed
+    print("Keys in territory details:", list(data.keys()))
+    # print any likely user list fields
+    for k in ['users', 'assigned_users', 'manager', 'reporting_to']:
+        if k in data:
+            print(f"Field '{k}':", data[k])
 else:
-    print("Failed to fetch territories:", r.status_code, r.text)
+    print(f"Failed to fetch territory details: {r.status_code} - {r.text}")
