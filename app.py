@@ -1025,21 +1025,18 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     page_token = None
     more_records = True
 
-    # Build the location filter: skip records where ALL location fields are null
-    location_criteria = _build_location_filter_criteria(fields)
-
+    # Note: location_criteria (is_not_null) is intentionally NOT used here.
+    # Zoho's v3 search API silently returns 0 for 'is_not_null'.
+    # The franchise filter is the performance driver for non-admin users.
+    # Unmappable records (no address/lat-lng) are discarded locally after fetch.
     log_debug(f"[SYNC DIAG] module={module_name} user={user_id} is_admin={is_admin} "
-              f"franchise_criteria={franchise_criteria!r} "
-              f"location_criteria={location_criteria!r}")
+              f"franchise_criteria={franchise_criteria!r}")
 
     while more_records:
         log_debug(f"Fetching page {page} for {module_name}...")
 
-        # Merge location filter with any franchise filter and use search endpoint;
-        # fall back to plain list endpoint if neither filter is set.
-        effective_criteria = _combine_criteria(franchise_criteria, location_criteria)
-        if effective_criteria:
-            data = zoho_api.search_records(module_name, effective_criteria, access_token,
+        if franchise_criteria:
+            data = zoho_api.search_records(module_name, franchise_criteria, access_token,
                                            fields=fetch_fields_list, page=page, page_token=page_token)
         else:
             data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list,
@@ -1076,7 +1073,7 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                         # Admin fallback: keep the same location filter, combined with an owner filter
                         criteria = _combine_criteria(
                             franchise_criteria or f"(Owner.id:equals:{user_id})",
-                            location_criteria
+                            None
                         )
                         owner_data = zoho_api.search_records(module_name, criteria, admin_token,
                                                              fields=fetch_fields_list, page=page, page_token=page_token)
@@ -1306,17 +1303,15 @@ def _nightly_sync_module(admin_token, module_name, config):
     page_token = None
     more_records = True
 
-    # Build location filter once (outside the loop — same for every page)
-    _nightly_loc_crit = _build_location_filter_criteria(fields)
-    log_debug(f"[nightly] {module_name}: location filter = {_nightly_loc_crit!r}")
+    # Nightly sync: always fetch ALL records with no API-level filter.
+    # Zoho's v3 search API does not support 'is_not_null' — it silently returns
+    # 0 records instead of an error.  Records with no mappable location are
+    # discarded locally when geocoding fails (see address_parts logic below).
+    log_debug(f"[nightly] {module_name}: fetching all records (full global cache).")
 
     while more_records:
-        if _nightly_loc_crit:
-            data = zoho_api.search_records(module_name, _nightly_loc_crit, admin_token,
-                                           fields=fetch_fields_list, page=page, page_token=page_token)
-        else:
-            data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
-                                                 page=page, page_token=page_token)
+        data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
+                                             page=page, page_token=page_token)
 
         if 'code' in data and data.get('status') == 'error':
             log_debug(f"[nightly] API error {module_name}: {data.get('code')} – {data.get('message')}")
