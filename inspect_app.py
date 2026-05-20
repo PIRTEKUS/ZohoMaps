@@ -47,31 +47,42 @@ if not admin_token:
 
 headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
 
-print("\n=== 1. TEST GET USER BY EMAIL DIRECTLY ===")
-url = f"{zoho_api.ZOHO_API_URL}/crm/v3/users/zohotest3@pirtekusa.com"
-r = requests.get(url, headers=headers, timeout=8)
-print("GET /users/zohotest3@pirtekusa.com status:", r.status_code)
-if r.ok:
-    print("GET by email success!")
-    u = r.json().get('users', [{}])[0]
-    print(f"  Name: {u.get('full_name')} | ID: {u.get('id')} | Email: {u.get('email')} | Franchise: {u.get('Franchise')}")
-else:
-    print("GET by email error:", r.text[:300])
+print("\n=== 1. FETCH ALL TERRITORIES ===")
+t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories"
+r = requests.get(t_url, headers=headers, timeout=8)
+if not r.ok:
+    print("Failed to fetch territories:", r.text)
+    sys.exit(1)
 
-print("\n=== 2. TEST USERS BY CATEGORY ==")
-# Test category parameter
-for category in ['team_user', 'all']:
-    print(f"\nFetching /users?category={category}")
-    r = requests.get(
-        f"{zoho_api.ZOHO_API_URL}/crm/v3/users?category={category}",
-        headers=headers,
-        timeout=8
-    )
-    print("Status:", r.status_code)
-    if r.ok:
-        users = r.json().get('users', [])
-        print(f"Count: {len(users)}")
-        for u in users[:5]:
-            print(f"  Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Category: {u.get('category')} | Franchise: {u.get('Franchise')}")
+territories = r.json().get('territories', [])
+print(f"Found {len(territories)} territories.")
+
+print("\n=== 2. BUILD USER LOOKUP FROM TERRITORIES ===")
+email_lookup = {}
+for t in territories:
+    t_name = t.get('name')
+    t_id = t.get('id')
+    print(f"Querying users for territory: {t_name} ({t_id})...")
+    u_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users"
+    u_resp = requests.get(u_url, headers=headers, timeout=8)
+    if u_resp.ok:
+        t_users = u_resp.json().get('users', [])
+        for u in t_users:
+            email = (u.get('email') or '').lower()
+            if email:
+                if email not in email_lookup:
+                    email_lookup[email] = {
+                        'id': u.get('id'),
+                        'full_name': u.get('full_name'),
+                        'email': u.get('email'),
+                        'status': u.get('status'),
+                        'category': u.get('category'),
+                        'franchise_field_value': u.get('Franchise'),
+                        'territories': []
+                    }
+                email_lookup[email]['territories'].append(t_name)
     else:
-        print("Error:", r.text[:300])
+        print(f"  Failed for {t_name}: {u_resp.status_code}")
+
+print("\n=== 3. CONSOLIDATED USER MAP FROM TERRITORIES ===")
+print(json.dumps(email_lookup, indent=2))
