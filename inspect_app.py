@@ -47,16 +47,9 @@ if not admin_token:
 
 headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
 
-print("\n=== 1. FETCH OTHER CRM USER TYPES ===")
-# Try other valid Zoho CRM v3 user type values to find zohotest3@pirtekusa.com
-user_types = [
-    'DeactiveUsers',
-    'ConfirmedUsers',
-    'NotConfirmedUsers',
-    'ActiveUnconfirmedUsers'
-]
-for utype in user_types:
-    print(f"\nFetching users of type: {utype}")
+print("\n=== 1. LIST ALL DEACTIVE AND NOTCONFIRMED USERS ===")
+for utype in ['DeactiveUsers', 'NotConfirmedUsers']:
+    print(f"\nListing users of type: {utype}")
     r = requests.get(
         f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type={utype}",
         headers=headers,
@@ -64,29 +57,24 @@ for utype in user_types:
     )
     if r.ok:
         users = r.json().get('users', [])
-        print(f"Count: {len(users)}")
         for u in users:
-            email = (u.get('email') or '').lower()
-            full_name = (u.get('full_name') or '').lower()
-            last_name = (u.get('last_name') or '').lower()
-            if 'zohotest3' in email or 'colo' in full_name or 'msst' in last_name:
-                print(f"  MATCH: Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')} | Profile: {u.get('profile', {}).get('name')}")
+            print(f"  Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')}")
     else:
         print(f"  Failed: {r.status_code} - {r.text}")
 
-print("\n=== 2. FETCH TERRITORY DETAILS ===")
-# Fetch specific territory details for Colorado Springs
+print("\n=== 2. TEST USERS IN TERRITORY ENDPOINT ===")
+# Let's test if there is a sub-resource endpoint for users in a territory
 t_id = '6959138000001451016'
-t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}"
-r = requests.get(t_url, headers=headers, timeout=8)
-if r.ok:
-    data = r.json().get('territories', [{}])[0]
-    print(f"Territory Name: {data.get('name')}")
-    # print keys to see if users are listed
-    print("Keys in territory details:", list(data.keys()))
-    # print any likely user list fields
-    for k in ['users', 'assigned_users', 'manager', 'reporting_to']:
-        if k in data:
-            print(f"Field '{k}':", data[k])
-else:
-    print(f"Failed to fetch territory details: {r.status_code} - {r.text}")
+urls_to_test = [
+    f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users",
+    f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/associated_users"
+]
+for url in urls_to_test:
+    print(f"Testing URL: {url}")
+    r = requests.get(url, headers=headers, timeout=8)
+    print(f"  Status: {r.status_code}")
+    if r.ok:
+        print("  Response keys:", list(r.json().keys()))
+        print("  Response preview:", r.json())
+    else:
+        print("  Error:", r.text[:300])
