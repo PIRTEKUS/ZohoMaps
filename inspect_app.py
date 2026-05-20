@@ -66,7 +66,10 @@ for utype in user_types:
         users = r.json().get('users', [])
         print(f"Count: {len(users)}")
         for u in users:
-            if 'zohotest3' in u.get('email', '').lower() or 'colo' in u.get('full_name', '').lower() or 'msst' in u.get('last_name', '').lower():
+            email = (u.get('email') or '').lower()
+            full_name = (u.get('full_name') or '').lower()
+            last_name = (u.get('last_name') or '').lower()
+            if 'zohotest3' in email or 'colo' in full_name or 'msst' in last_name:
                 print(f"  MATCH: Name: {u.get('full_name')} | ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')} | Profile: {u.get('profile', {}).get('name')}")
     else:
         print(f"  Failed: {r.status_code} - {r.text}")
