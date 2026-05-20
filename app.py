@@ -1921,6 +1921,71 @@ def import_config():
     return jsonify({'success': True, 'imported_configs': ok_configs, 'imported_settings': ok_settings, 'errors': errors})
 
 
+@app.route('/api/admin/save-admin-token', methods=['POST'])
+@limiter.limit("10 per minute")
+def save_admin_token():
+    """Admin saves their current session refresh token as the server-wide service token.
+    This token is used by nightly sync and team user syncs — no SSH required."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+
+    refresh_token = session.get('refresh_token', '').strip()
+    if not refresh_token:
+        return jsonify({
+            'error': 'No refresh token found in your session. '
+                     'Please log out and log back in, then try again.'
+        }), 400
+
+    # Test the token is actually valid before saving
+    try:
+        test = zoho_api.refresh_access_token(refresh_token)
+        if 'access_token' not in test:
+            return jsonify({
+                'error': f"Token validation failed: {test.get('error', 'unknown')}. "
+                         "Please log out, log back in, and try again."
+            }), 400
+    except Exception as e:
+        return jsonify({'error': f'Token validation error: {e}'}), 500
+
+    encrypted = encrypt_token(refresh_token)
+    database.set_global_setting('admin_refresh_token', encrypted)
+    log_debug(f"[admin] Service token manually saved by admin {session.get('user_name')} ({session.get('user_id')})")
+    return jsonify({
+        'success': True,
+        'message': 'Service token saved and validated ✅ '
+                   'Nightly sync and team user syncs will now use your token.'
+    })
+
+
+@app.route('/api/admin/token-status')
+@limiter.limit("20 per minute")
+def get_token_status():
+    """Returns whether each token source is configured and working."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+
+    env_token   = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
+    db_encrypted = database.get_global_setting('admin_refresh_token', '')
+    session_token = session.get('refresh_token', '').strip()
+
+    def _test(token):
+        if not token:
+            return 'missing'
+        try:
+            r = zoho_api.refresh_access_token(token)
+            return 'ok' if 'access_token' in r else f"invalid ({r.get('error', '?')})"
+        except Exception as e:
+            return f'error ({e})'
+
+    db_token = decrypt_token(db_encrypted) if db_encrypted else ''
+
+    return jsonify({
+        'env_token':     _test(env_token),
+        'db_token':      _test(db_token),
+        'session_token': 'present' if session_token else 'missing',
+        'has_session_token': bool(session_token),
+    })
+
 @app.route('/admin/refresh-token-setup')
 def admin_refresh_token_setup():
     """Show the current admin refresh token so it can be stored permanently in the

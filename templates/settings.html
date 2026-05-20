@@ -109,7 +109,54 @@
         {% endif %}
 
         {% if is_admin %}
+        <!-- ADMIN-ONLY: Service Token -->
+        <div class="settings-card glass" id="service-token-card" style="grid-column: 1 / -1; border-color: rgba(99,102,241,0.35);">
+            <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#818cf8" stroke-width="2" fill="none">
+                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                </svg>
+                Service Token
+                <span style="font-size:0.75rem; color:#818cf8; font-weight:400;">(Admin only — powers nightly sync &amp; team user access)</span>
+            </h2>
+            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
+                The service token lets the server sync data on behalf of all users without requiring you to be logged in.
+                If nightly sync or team user syncs are failing, click <strong>Save My Token</strong> to refresh it — no server access needed.
+            </p>
+
+            <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+                <!-- Token status panel -->
+                <div style="flex:1; min-width:260px;">
+                    <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;" id="token-status-panel">
+                        <div style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">Token Sources</div>
+                        <div id="token-status-rows" style="font-size:0.82rem; line-height:2;">
+                            <span style="color:#64748b;">Loading…</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Save button -->
+                <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
+                    <button id="save-token-btn" onclick="saveServiceToken()"
+                            style="display:flex; align-items:center; justify-content:center; gap:8px;
+                                   padding:0.7rem 1.5rem; background:linear-gradient(135deg,#6366f1,#4f46e5);
+                                   color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                   cursor:pointer; transition:opacity 0.2s;"
+                            onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        <span id="save-token-label">💾 Save My Token</span>
+                    </button>
+                    <div id="token-save-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
+                    <p style="font-size:0.75rem; color:#475569; text-align:center; margin:0;">
+                        You must be logged in as admin to save.<br>Log out &amp; back in first if this fails.
+                    </p>
+                </div>
+            </div>
+        </div>
+
         <!-- ADMIN-ONLY: Nightly Sync Status -->
+
         <div class="settings-card glass" id="nightly-sync-card" style="grid-column: 1 / -1; border-color: rgba(16,185,129,0.35);">
             <h2 style="display:flex; align-items:center; gap:0.75rem;">
                 <svg viewBox="0 0 24 24" width="22" height="22" stroke="#10b981" stroke-width="2" fill="none">
@@ -860,7 +907,81 @@ function toggleDupFilterFields(enabled) {
     document.getElementById('dup-filter-fields').style.display = enabled ? 'block' : 'none';
 }
 
+// ── Service Token ─────────────────────────────────────────────────────────────
+async function loadTokenStatus() {
+    const rows = document.getElementById('token-status-rows');
+    if (!rows) return;
+    try {
+        const res  = await fetch('/api/admin/token-status');
+        const data = await res.json();
+        if (data.error) { rows.innerHTML = `<span style="color:#fca5a5;">${data.error}</span>`; return; }
+
+        function badge(status) {
+            const ok = status === 'ok' || status === 'present';
+            const color = ok ? '#6ee7b7' : '#fca5a5';
+            const bg    = ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+            const icon  = ok ? '✅' : '❌';
+            return `<span style="background:${bg}; color:${color}; padding:0.1rem 0.5rem; border-radius:12px; font-size:0.75rem;">${icon} ${status}</span>`;
+        }
+
+        rows.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:#94a3b8;">Service file (env)</span> ${badge(data.env_token)}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:#94a3b8;">Database token</span> ${badge(data.db_token)}
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="color:#94a3b8;">Your session</span> ${badge(data.session_token)}
+            </div>`;
+
+        // Disable save button if no session token available
+        const btn = document.getElementById('save-token-btn');
+        if (btn && !data.has_session_token) {
+            btn.disabled = true;
+            btn.style.opacity = '0.4';
+            btn.title = 'No token in your session — log out and back in first';
+        }
+    } catch (e) {
+        if (rows) rows.innerHTML = '<span style="color:#fca5a5;">⚠ Could not load status</span>';
+    }
+}
+
+async function saveServiceToken() {
+    const btn   = document.getElementById('save-token-btn');
+    const label = document.getElementById('save-token-label');
+    const msg   = document.getElementById('token-save-message');
+    if (!btn) return;
+
+    btn.disabled = true;
+    label.textContent = 'Saving…';
+    if (msg) msg.style.display = 'none';
+
+    try {
+        const res  = await fetch('/api/admin/save-admin-token', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            label.textContent = '✅ Saved!';
+            if (msg) { msg.textContent = data.message; msg.style.color = '#6ee7b7'; msg.style.display = 'block'; }
+            // Refresh token status display
+            setTimeout(loadTokenStatus, 500);
+            setTimeout(() => { label.textContent = '💾 Save My Token'; btn.disabled = false; }, 3000);
+        } else {
+            label.textContent = '❌ Failed';
+            if (msg) { msg.textContent = data.error || 'Unknown error'; msg.style.color = '#fca5a5'; msg.style.display = 'block'; }
+            setTimeout(() => { label.textContent = '💾 Save My Token'; btn.disabled = false; }, 3000);
+        }
+    } catch (e) {
+        label.textContent = '❌ Error';
+        if (msg) { msg.textContent = 'Network error'; msg.style.color = '#fca5a5'; msg.style.display = 'block'; }
+        setTimeout(() => { label.textContent = '💾 Save My Token'; btn.disabled = false; }, 3000);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadTokenStatus);
+
 // ── Nightly Sync Status ───────────────────────────────────────────────────────
+
 let _syncPollTimer = null;
 
 function _formatRelativeTime(isoStr) {
