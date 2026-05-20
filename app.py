@@ -1183,6 +1183,257 @@ def sync_all_modules():
     return jsonify({'success': True, 'total_synced': total_synced, 'details': results})
 
 
+# ── Nightly Global Cache Sync ─────────────────────────────────────────────────
+
+# Franchise field per module — must match FRANCHISE_FIELD_MAP in do_sync_module
+_NIGHTLY_FRANCHISE_FIELD_MAP = {
+    'Accounts':          'Franchise',
+    'Leads':             'Select_Your_Franchise1',
+    'Ship_To_Addresses': 'Franchise',
+}
+
+_nightly_sync_running = False   # simple guard (per-worker); timer uses its own process
+
+
+def _nightly_sync_module(admin_token, module_name, config):
+    """Fetch ALL records for one module and store in the global cache (__global__ user).
+    Returns the number of records saved."""
+    log_debug(f"[nightly] Starting module: {module_name}")
+    fields = config['field_mappings']
+
+    # Build field list (same logic as do_sync_module)
+    fetch_fields = set()
+    for k, v in fields.items():
+        if k == 'additional_fields' and isinstance(v, list):
+            fetch_fields.update([f for f in v if f])
+        elif k == 'duplicate_filter':
+            pass
+        elif isinstance(v, str) and v:
+            fetch_fields.add(v)
+
+    df = fields.get('duplicate_filter', {})
+    if df.get('enabled'):
+        for key in ['parent_link_field', 'primary_code_field', 'override_checkbox_field']:
+            v = df.get(key)
+            if v:
+                fetch_fields.add(v)
+
+    title_field = fields.get('title_field', 'Name')
+    fetch_fields.add(title_field)
+    fetch_fields.add('id')
+
+    # Include franchise lookup field so we can store it for per-user filtering
+    franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
+    if franchise_field:
+        fetch_fields.add(franchise_field)
+
+    fetch_fields_list = list(fetch_fields)
+
+    # Field label map for record_data display labels
+    field_metadata = zoho_api.fetch_module_fields(module_name, admin_token)
+    field_label_map = {}
+    if 'fields' in field_metadata:
+        for f in field_metadata['fields']:
+            field_label_map[f['api_name']] = f['display_label']
+
+    # Wipe old global cache for this module before re-populating
+    database.clear_global_module_records(module_name)
+
+    count = 0
+    page = 1
+    page_token = None
+    more_records = True
+
+    while more_records:
+        data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
+                                             page=page, page_token=page_token)
+
+        if 'code' in data and data.get('status') == 'error':
+            log_debug(f"[nightly] API error {module_name}: {data.get('code')} – {data.get('message')}")
+            break
+
+        if 'data' not in data or not data['data']:
+            break
+
+        page_records = []
+        for record in data['data']:
+            lat, lng = None, None
+            name_raw = record.get(title_field, record.get('Name',
+                                  record.get('Full_Name', f"{module_name} {record.get('id')}")))
+            name = str(extract_val(name_raw))
+
+            # Coordinates first
+            lat_field = fields.get('latitude')
+            lng_field = fields.get('longitude')
+            if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+                try:
+                    lat = float(record[lat_field])
+                    lng = float(record[lng_field])
+                except (ValueError, TypeError):
+                    pass
+
+            # Fallback to address geocoding
+            if lat is None or lng is None:
+                address_parts = []
+                for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+                    val = extract_val(record.get(fields.get(k)))
+                    if val:
+                        address_parts.append(str(val))
+                full_address = ', '.join(address_parts)
+                if full_address:
+                    lat, lng = geocode_address(full_address)
+
+            if lat is not None and lng is not None:
+                # Extract franchise ID for filtering
+                franchise_id = None
+                if franchise_field:
+                    fval = record.get(franchise_field)
+                    if isinstance(fval, dict):
+                        franchise_id = str(fval.get('id', '')) or None
+                    elif fval:
+                        franchise_id = str(fval)
+
+                # Build record_data (display fields for popup)
+                record_data = {}
+                lat_val = record.get(fields.get('latitude'))
+                lng_val = record.get(fields.get('longitude'))
+                if lat_val: record_data['Latitude'] = str(lat_val)
+                if lng_val: record_data['Longitude'] = str(lng_val)
+
+                addr1 = extract_val(record.get(fields.get('address1')))
+                addr2 = extract_val(record.get(fields.get('address2')))
+                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+                if full_addr: record_data['Address'] = full_addr
+
+                for k, label in [('city', 'City'), ('state', 'State'),
+                                  ('zip', 'Zip'), ('country', 'Country')]:
+                    val = extract_val(record.get(fields.get(k)))
+                    if val is not None and val != '':
+                        record_data[label] = str(val)
+
+                for k in fetch_fields_list:
+                    if k in ('id', title_field, franchise_field) or k in fields.values():
+                        continue
+                    val = record.get(k)
+                    if val is not None and val != '':
+                        label = field_label_map.get(k, k.replace('_', ' '))
+                        record_data[label] = str(extract_val(val))
+
+                page_records.append((
+                    record.get('id'), module_name, name, lat, lng,
+                    config['marker_color'], record_data, franchise_id
+                ))
+                count += 1
+
+        if page_records:
+            database.save_global_records_batch(page_records)
+
+        info = data.get('info', {})
+        more_records = info.get('more_records', False)
+        page_token = info.get('next_page_token')
+        if more_records:
+            page += 1
+        if page > 500:
+            break
+
+    log_debug(f"[nightly] {module_name}: {count} records saved to global cache.")
+    return count
+
+
+def do_nightly_sync():
+    """Orchestrates the nightly full sync of all shared modules into the global cache.
+    Called by the systemd timer (via run_nightly_sync.py) and the admin manual trigger."""
+    log_debug("[nightly] ========== Nightly sync started ==========")
+    admin_token = _get_admin_access_token()
+    if not admin_token:
+        log_debug("[nightly] FAILED: No admin token. Admin must log in to ZohoMap first.")
+        database.set_global_setting('last_nightly_sync_results',
+                                    json.dumps({'error': 'No admin token available'}))
+        return {'error': 'No admin token available'}
+
+    configs = database.get_shared_configs()
+    if not configs:
+        log_debug("[nightly] No shared module configs found — nothing to sync.")
+        return {'error': 'No shared configs'}
+
+    results = {}
+    total = 0
+    start = datetime.datetime.now(datetime.timezone.utc)
+
+    for config in configs:
+        module_name = config['module_name']
+        try:
+            count = _nightly_sync_module(admin_token, module_name, config)
+            results[module_name] = count
+            total += count
+        except Exception as e:
+            log_debug(f"[nightly] {module_name}: ERROR – {e}")
+            results[module_name] = f'error: {e}'
+
+    elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
+    database.set_global_setting('last_nightly_sync',
+                                datetime.datetime.now(datetime.timezone.utc).isoformat())
+    database.set_global_setting('last_nightly_sync_results', json.dumps(results))
+    log_debug(f"[nightly] Complete in {elapsed}s. Total: {total} records. {results}")
+    return {'total': total, 'elapsed_seconds': elapsed, 'results': results}
+
+
+# Flask CLI command — called by the systemd timer via run_nightly_sync.py
+@app.cli.command('sync-nightly')
+def cli_sync_nightly():
+    """Full nightly sync of all shared modules into the global cache. Run by systemd timer."""
+    result = do_nightly_sync()
+    print(json.dumps(result, indent=2))
+
+
+@app.route('/api/admin/trigger-sync', methods=['POST'])
+@limiter.limit("5 per minute")
+def trigger_nightly_sync():
+    """Admin manual trigger for the nightly sync. Runs in a background thread."""
+    global _nightly_sync_running
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+    if _nightly_sync_running:
+        return jsonify({'error': 'Sync already in progress — check debug.log for status'}), 409
+
+    def _run():
+        global _nightly_sync_running
+        _nightly_sync_running = True
+        database.set_global_setting('nightly_sync_running', 'true')
+        try:
+            do_nightly_sync()
+        finally:
+            _nightly_sync_running = False
+            database.set_global_setting('nightly_sync_running', 'false')
+
+    import threading
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({'started': True,
+                    'message': 'Nightly sync started. Refresh this panel in a few minutes.'})
+
+
+@app.route('/api/admin/sync-status')
+@limiter.limit("30 per minute")
+def get_nightly_sync_status():
+    """Returns last sync timestamp, per-module counts, and running flag for the admin UI."""
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+    last_sync = database.get_global_setting('last_nightly_sync', '')
+    results_raw = database.get_global_setting('last_nightly_sync_results', '{}')
+    is_running = (database.get_global_setting('nightly_sync_running', 'false') == 'true'
+                  or _nightly_sync_running)
+    counts = database.get_global_record_counts()
+    try:
+        results = json.loads(results_raw)
+    except Exception:
+        results = {}
+    return jsonify({
+        'last_sync': last_sync,
+        'results': results,
+        'is_running': is_running,
+        'record_counts': counts,
+    })
+
 
 def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng):
     """
@@ -1305,20 +1556,46 @@ def get_map_data():
             log_debug(f"WARNING: Area sync failed but continuing with local data: {str(e)}")
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
-    
-    # =========================================================================
-    # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
-    # user's own user_id. We never mix records across users, regardless of
-    # shared configurations or admin status. Shared configs define DISPLAY
-    # settings only (which modules/fields to show, colors, icons). They do
-    # NOT grant access to another user's synced record data.
-    # If this line is changed to include other user_ids, it WILL expose
-    # one user's CRM data to another user. Do not change without full review.
-    # =========================================================================
-    records = database.get_records_in_bounds(
-        session.get('user_id'), min_lat, max_lat, min_lng, max_lng
+
+    # ── Global cache first, per-user records as fallback ──────────────────────
+    # DATA PRIVACY: Non-admin users are filtered to their own franchise IDs.
+    # Admins see all records from the global cache.
+    # Per-user records (from manual sync) are used as fallback if global cache is empty.
+    user_id  = session.get('user_id')
+    is_admin = session.get('is_admin', False)
+
+    franchise_ids_for_filter = None  # None = admin/no filter
+    if not is_admin:
+        _atk = _get_admin_access_token()
+        if _atk:
+            _fi = _get_user_franchise_ids(user_id, _atk)
+            if _fi is not None:
+                franchise_ids_for_filter = [
+                    fid for fid in _fi.get('ids', [])
+                    if not str(fid).startswith('territory_')
+                ]
+
+    global_records = database.get_records_in_bounds_global(
+        franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
     )
-    
+
+    if global_records:
+        records = global_records
+        log_debug(f"[map] Served {len(records)} records from global nightly cache.")
+    else:
+        # =====================================================================
+        # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
+        # user's own user_id. We never mix records across users, regardless of
+        # shared configurations or admin status. Shared configs define DISPLAY
+        # settings only (which modules/fields to show, colors, icons). They do
+        # NOT grant access to another user's synced record data.
+        # If this line is changed to include other user_ids, it WILL expose
+        # one user's CRM data to another user. Do not change without full review.
+        # =====================================================================
+        records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
+        log_debug(f"[map] Global cache empty — served {len(records)} per-user records.")
+    # ─────────────────────────────────────────────────────────────────────────
+
 
     log_debug(f"Found {len(records)} records in bounds.")
     

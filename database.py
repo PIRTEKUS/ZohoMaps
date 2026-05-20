@@ -121,7 +121,7 @@ def init_db():
             else:
                 cols_data = exec_query(conn, "PRAGMA table_info(module_config)", fetchall=True)
                 cols = [col[1] for col in cols_data]
-                
+
             if 'is_shared' not in cols:
                 exec_query(conn, "ALTER TABLE module_config ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0")
         except Exception as e:
@@ -143,6 +143,29 @@ def init_db():
         )
     ''')
 
+    # Schema v4: add franchise_id column for global cache filtering
+    if schema_version < 4:
+        print("Migrating to schema version 4 (Global Nightly Cache)...")
+        try:
+            if IS_POSTGRES:
+                cols_data = exec_query(conn, "SELECT column_name FROM information_schema.columns WHERE table_name='module_records'", fetchall=True)
+                cols = [col['column_name'] for col in cols_data]
+            else:
+                cols_data = exec_query(conn, "PRAGMA table_info(module_records)", fetchall=True)
+                cols = [col[1] for col in cols_data]
+
+            if 'franchise_id' not in cols:
+                exec_query(conn, "ALTER TABLE module_records ADD COLUMN franchise_id TEXT")
+                print("  Added franchise_id column to module_records.")
+        except Exception as e:
+            print(f"Migration v4 error: {e}")
+        # Create index for efficient global cache queries
+        try:
+            exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_global_franchise ON module_records(user_id, franchise_id)")
+        except Exception:
+            pass
+        exec_query(conn, "INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)", ('schema_version', '4'))
+
     # Table for Geocode Caching (Keep this, it's expensive to refill)
     exec_query(conn, '''
         CREATE TABLE IF NOT EXISTS geocode_cache (
@@ -157,7 +180,7 @@ def init_db():
         exec_query(conn, "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
     except Exception:
         pass
-        
+
     conn.commit()
     conn.close()
 
@@ -327,6 +350,106 @@ def clear_module_records(user_id, module_name):
     exec_query(conn, 'DELETE FROM module_records WHERE user_id = ? AND module_name = ?', (str(user_id), module_name))
     conn.commit()
     conn.close()
+
+# ── Global Nightly Cache (user_id = '__global__') ─────────────────────────────
+
+GLOBAL_USER = '__global__'
+
+def clear_global_module_records(module_name):
+    """Wipe the nightly-synced global cache for a single module."""
+    conn = get_db_connection()
+    exec_query(conn, 'DELETE FROM module_records WHERE user_id = ? AND module_name = ?',
+               (GLOBAL_USER, module_name))
+    conn.commit()
+    conn.close()
+
+def save_global_records_batch(records):
+    """Batch-save records into the global cache (user_id='__global__').
+    Each record is a tuple: (id, module_name, name, lat, lng, color, record_data_dict, franchise_id)
+    """
+    conn = get_db_connection()
+    try:
+        exec_query(conn, 'BEGIN TRANSACTION')
+        for rec in records:
+            rid, module_name, name, lat, lng, color, record_data, franchise_id = rec
+            exec_query(conn, '''
+                INSERT INTO module_records
+                    (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id, module_name, user_id) DO UPDATE SET
+                    name=EXCLUDED.name,
+                    lat=EXCLUDED.lat,
+                    lng=EXCLUDED.lng,
+                    color=EXCLUDED.color,
+                    record_data=EXCLUDED.record_data,
+                    franchise_id=EXCLUDED.franchise_id
+            ''', (GLOBAL_USER, str(rid), module_name, name, lat, lng, color,
+                  json.dumps(record_data), franchise_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def get_records_in_bounds_global(franchise_ids, min_lat, max_lat, min_lng, max_lng, is_admin=False):
+    """Query the global cache. Admins see all; non-admins filtered by their franchise IDs.
+    Returns [] if global cache is empty (caller should fall back to per-user records).
+    """
+    if not is_admin and franchise_ids is not None and len(franchise_ids) == 0:
+        return []  # User has no franchises → no records
+
+    conn = get_db_connection()
+
+    # Build franchise IN clause
+    if is_admin or franchise_ids is None:
+        franchise_filter = ""
+        franchise_params = ()
+    else:
+        placeholders = ', '.join(['?' for _ in franchise_ids])
+        franchise_filter = f"AND franchise_id IN ({placeholders})"
+        franchise_params = tuple(franchise_ids)
+
+    base_params = (GLOBAL_USER, min_lat, max_lat)
+    if min_lng > max_lng:
+        query = f'''
+            SELECT * FROM module_records
+            WHERE user_id = ? AND lat >= ? AND lat <= ?
+            AND (lng >= ? OR lng <= ?)
+            {franchise_filter}
+            LIMIT 5000
+        '''
+        params = base_params + (min_lng, max_lng) + franchise_params
+    else:
+        query = f'''
+            SELECT * FROM module_records
+            WHERE user_id = ? AND lat >= ? AND lat <= ?
+            AND lng >= ? AND lng <= ?
+            {franchise_filter}
+            LIMIT 5000
+        '''
+        params = base_params + (min_lng, max_lng) + franchise_params
+
+    rows = exec_query(conn, query, params, fetchall=True)
+    conn.close()
+
+    results = []
+    for row in rows:
+        r = dict(row)
+        r['record_data'] = json.loads(r['record_data'])
+        results.append(r)
+    return results
+
+def get_global_record_counts():
+    """Return {module_name: count} for the global nightly cache."""
+    conn = get_db_connection()
+    rows = exec_query(conn,
+        "SELECT module_name, COUNT(*) as cnt FROM module_records WHERE user_id = ? GROUP BY module_name",
+        (GLOBAL_USER,), fetchall=True)
+    conn.close()
+    return {row['module_name']: row['cnt'] for row in rows}
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
 
 def get_all_global_settings():
     """Return all rows from global_settings as a list of dicts."""

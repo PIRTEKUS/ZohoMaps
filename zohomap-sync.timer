@@ -1,0 +1,11 @@
+[Unit]
+Description=ZohoMap Nightly Sync — runs daily at 11pm EST (04:00 UTC)
+
+[Timer]
+# 04:00 UTC = 11:00 PM EST / Midnight EDT
+OnCalendar=*-*-* 04:00:00 UTC
+# Run immediately on next boot if the timer was missed (server was off at 4am)
+Persistent=true
+
+[Install]
+WantedBy=timers.target

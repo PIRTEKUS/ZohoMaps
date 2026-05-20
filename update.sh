@@ -49,6 +49,15 @@ sudo chmod +x /var/www/zohomap/*.sh
 echo "[4/4] Restarting ZohoMap service (may prompt for sudo password)..."
 sudo systemctl restart zohomap
 
+# 4.5 Install / refresh nightly sync timer
+echo "[4.5/4] Installing nightly sync timer (11pm EST daily)..."
+sudo cp /var/www/zohomap/zohomap-sync.service /etc/systemd/system/
+sudo cp /var/www/zohomap/zohomap-sync.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable zohomap-sync.timer --now
+echo "  ✅ Nightly sync timer active. Next run:"
+systemctl list-timers zohomap-sync.timer --no-pager 2>/dev/null | tail -2 || true
+
 echo "=========================================="
 echo "    Update Complete!"
 echo "=========================================="

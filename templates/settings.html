@@ -108,6 +108,59 @@
         </div>
         {% endif %}
 
+        {% if is_admin %}
+        <!-- ADMIN-ONLY: Nightly Sync Status -->
+        <div class="settings-card glass" id="nightly-sync-card" style="grid-column: 1 / -1; border-color: rgba(16,185,129,0.35);">
+            <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#10b981" stroke-width="2" fill="none">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                </svg>
+                Nightly Auto-Sync
+                <span style="font-size:0.75rem; color:#10b981; font-weight:400;">(Admin only — runs daily at 11pm EST)</span>
+            </h2>
+            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
+                The server automatically syncs all map data every night. Users never need to run a full sync manually.
+                Use <strong>Run Now</strong> to force an immediate refresh after making changes in Zoho.
+            </p>
+
+            <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+                <!-- Status panel -->
+                <div style="flex:1; min-width:260px;">
+                    <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                            <span style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">Status</span>
+                            <span id="sync-status-badge" style="font-size:0.75rem; font-weight:600; padding:0.2rem 0.6rem; border-radius:20px; background:rgba(100,116,139,0.3); color:#94a3b8;">
+                                Loading…
+                            </span>
+                        </div>
+                        <div style="font-size:0.85rem; color:#e2e8f0; margin-bottom:0.5rem;">
+                            Last sync: <span id="sync-last-time" style="color:#94a3b8;">—</span>
+                        </div>
+                        <div id="sync-module-counts" style="font-size:0.8rem; color:#94a3b8; line-height:1.8;">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
+                    <button id="run-sync-btn" onclick="runNightlySync()"
+                            style="display:flex; align-items:center; justify-content:center; gap:8px;
+                                   padding:0.7rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
+                                   color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                   cursor:pointer; transition:opacity 0.2s;"
+                            onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        </svg>
+                        <span id="run-sync-label">▶ Run Sync Now</span>
+                    </button>
+                    <div id="sync-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Add New Config Form -->
         <div class="settings-card glass">
             <h2>Add New Mapping</h2>
@@ -807,7 +860,102 @@ function toggleDupFilterFields(enabled) {
     document.getElementById('dup-filter-fields').style.display = enabled ? 'block' : 'none';
 }
 
+// ── Nightly Sync Status ───────────────────────────────────────────────────────
+let _syncPollTimer = null;
+
+function _formatRelativeTime(isoStr) {
+    if (!isoStr) return 'Never';
+    const diff = Math.floor((Date.now() - new Date(isoStr)) / 1000);
+    if (diff < 60)   return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff/60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)} hr ago`;
+    return `${Math.floor(diff/86400)} day(s) ago`;
+}
+
+async function loadSyncStatus() {
+    const badge   = document.getElementById('sync-status-badge');
+    const lastEl  = document.getElementById('sync-last-time');
+    const countsEl= document.getElementById('sync-module-counts');
+    const btn     = document.getElementById('run-sync-btn');
+    if (!badge) return;  // Not admin or card not rendered
+
+    try {
+        const res  = await fetch('/api/admin/sync-status');
+        const data = await res.json();
+
+        // Status badge
+        if (data.is_running) {
+            badge.textContent = '⟳ Running…';
+            badge.style.background = 'rgba(234,179,8,0.2)';
+            badge.style.color = '#fbbf24';
+            if (btn) { btn.disabled = true; document.getElementById('run-sync-label').textContent = 'Running…'; }
+            // Poll again in 5s
+            _syncPollTimer = setTimeout(loadSyncStatus, 5000);
+        } else {
+            badge.textContent = data.last_sync ? '✅ Idle' : '⚠ Never run';
+            badge.style.background = data.last_sync ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+            badge.style.color = data.last_sync ? '#6ee7b7' : '#fca5a5';
+            if (btn) { btn.disabled = false; document.getElementById('run-sync-label').textContent = '▶ Run Sync Now'; }
+            if (_syncPollTimer) { clearTimeout(_syncPollTimer); _syncPollTimer = null; }
+        }
+
+        // Last sync time
+        if (lastEl) lastEl.textContent = _formatRelativeTime(data.last_sync);
+
+        // Per-module counts
+        if (countsEl) {
+            const counts = data.record_counts || {};
+            const keys = Object.keys(counts);
+            if (keys.length === 0) {
+                countsEl.innerHTML = '<span style="font-style:italic;">No records cached yet</span>';
+            } else {
+                countsEl.innerHTML = keys.map(m =>
+                    `<div style="display:flex; justify-content:space-between;">
+                        <span>${m}</span>
+                        <strong style="color:#e2e8f0;">${counts[m].toLocaleString()} records</strong>
+                    </div>`
+                ).join('');
+            }
+        }
+    } catch (e) {
+        if (badge) { badge.textContent = '⚠ Error'; badge.style.color = '#fca5a5'; }
+    }
+}
+
+async function runNightlySync() {
+    const msgEl = document.getElementById('sync-message');
+    const btn   = document.getElementById('run-sync-btn');
+    const label = document.getElementById('run-sync-label');
+    if (!btn) return;
+
+    btn.disabled = true;
+    label.textContent = 'Starting…';
+    if (msgEl) { msgEl.style.display = 'none'; }
+
+    try {
+        const res  = await fetch('/api/admin/trigger-sync', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.started) {
+            if (msgEl) { msgEl.textContent = data.message; msgEl.style.display = 'block'; }
+            // Start polling for completion
+            _syncPollTimer = setTimeout(loadSyncStatus, 3000);
+        } else {
+            if (msgEl) { msgEl.textContent = '❌ ' + (data.error || 'Unknown error'); msgEl.style.display = 'block'; }
+            btn.disabled = false;
+            label.textContent = '▶ Run Sync Now';
+        }
+    } catch (e) {
+        if (msgEl) { msgEl.textContent = '❌ Network error'; msgEl.style.display = 'block'; }
+        btn.disabled = false;
+        label.textContent = '▶ Run Sync Now';
+    }
+}
+
+// Load status on page load
+document.addEventListener('DOMContentLoaded', loadSyncStatus);
+
 // ── Export / Import ───────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', () => {
     const fileInput = document.getElementById('import-config-file');
     if (!fileInput) return;
