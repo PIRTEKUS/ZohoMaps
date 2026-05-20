@@ -1559,12 +1559,14 @@ def get_map_data():
 
     # ── Global cache first, per-user records as fallback ──────────────────────
     # DATA PRIVACY: Non-admin users are filtered to their own franchise IDs.
-    # Admins see all records from the global cache.
-    # Per-user records (from manual sync) are used as fallback if global cache is empty.
+    # If the franchise lookup fails (admin token unavailable), non-admins fall
+    # back to their per-user records rather than seeing unfiltered global data.
     user_id  = session.get('user_id')
     is_admin = session.get('is_admin', False)
 
-    franchise_ids_for_filter = None  # None = admin/no filter
+    franchise_ids_for_filter = None  # None = admin (no filter)
+    franchise_lookup_ok = True       # False = admin token unavailable for non-admin
+
     if not is_admin:
         _atk = _get_admin_access_token()
         if _atk:
@@ -1574,26 +1576,38 @@ def get_map_data():
                     fid for fid in _fi.get('ids', [])
                     if not str(fid).startswith('territory_')
                 ]
+            else:
+                # Admin token worked but franchise lookup failed — be safe
+                franchise_lookup_ok = False
+        else:
+            # Admin token unavailable — cannot safely filter global cache
+            franchise_lookup_ok = False
+            log_debug(f"[map] Admin token unavailable for franchise filter — "
+                      "non-admin user will use per-user records only.")
 
-    global_records = database.get_records_in_bounds_global(
-        franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
-    )
-
-    if global_records:
-        records = global_records
-        log_debug(f"[map] Served {len(records)} records from global nightly cache.")
+    if franchise_lookup_ok:
+        global_records = database.get_records_in_bounds_global(
+            franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
+        )
+        if global_records:
+            records = global_records
+            log_debug(f"[map] Served {len(records)} records from global nightly cache.")
+        else:
+            # =====================================================================
+            # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
+            # user's own user_id. We never mix records across users, regardless of
+            # shared configurations or admin status. Shared configs define DISPLAY
+            # settings only (which modules/fields to show, colors, icons). They do
+            # NOT grant access to another user's synced record data.
+            # If this line is changed to include other user_ids, it WILL expose
+            # one user's CRM data to another user. Do not change without full review.
+            # =====================================================================
+            records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
+            log_debug(f"[map] Global cache empty — served {len(records)} per-user records.")
     else:
-        # =====================================================================
-        # DATA PRIVACY — CRITICAL: Records are ALWAYS scoped to the requesting
-        # user's own user_id. We never mix records across users, regardless of
-        # shared configurations or admin status. Shared configs define DISPLAY
-        # settings only (which modules/fields to show, colors, icons). They do
-        # NOT grant access to another user's synced record data.
-        # If this line is changed to include other user_ids, it WILL expose
-        # one user's CRM data to another user. Do not change without full review.
-        # =====================================================================
+        # Franchise filter unavailable — safe fallback to per-user records only
         records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-        log_debug(f"[map] Global cache empty — served {len(records)} per-user records.")
+        log_debug(f"[map] Franchise filter unavailable — served {len(records)} per-user records (safe fallback).")
     # ─────────────────────────────────────────────────────────────────────────
 
 
