@@ -345,18 +345,26 @@ def callback():
                         admin_token = _get_admin_access_token()
                         if admin_token:
                             user_email = session['user_id']
-                            all_users = requests.get(
-                                f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type=AllUsers",
-                                headers={'Authorization': f'Zoho-oauthtoken {admin_token}'},
-                                timeout=8
-                            ).json()
-                            if 'users' in all_users:
-                                for u in all_users['users']:
-                                    if u.get('email', '').lower() == user_email.lower():
-                                        session['user_id'] = u['id']
-                                        session['user_email'] = user_email
-                                        log_debug(f"Resolved team user email {user_email} -> CRM ID {u['id']}")
-                                        break
+                            mappings_raw = database.get_global_setting('user_territory_mappings', '')
+                            mappings = {}
+                            if mappings_raw:
+                                try:
+                                    mappings = json.loads(mappings_raw)
+                                except Exception:
+                                    pass
+                            
+                            user_key = user_email.lower().strip()
+                            if user_key not in mappings:
+                                log_debug(f"User {user_key} not in cache, rebuilding mappings...")
+                                new_mappings = _refresh_user_mappings(admin_token)
+                                if new_mappings:
+                                    mappings = new_mappings
+                            
+                            user_detail = mappings.get(user_key)
+                            if user_detail:
+                                session['user_id'] = user_detail['id']
+                                session['user_email'] = user_email
+                                log_debug(f"Resolved team user email {user_email} -> CRM ID {user_detail['id']}")
                     except Exception as e:
                         log_debug(f"Could not resolve team user CRM ID: {e}")
 
@@ -630,11 +638,69 @@ def _is_null_string(val):
     return val is not None and str(val).strip().upper() in ('NULL', 'NONE', 'N/A', 'UNKNOWN')
 
 
-def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
-    """Return franchise memberships for a user via COQL (the only Zoho endpoint
-    that returns multiuserlookup field values). Falls back to territory assignments.
+def _refresh_user_mappings(admin_token):
+    """Fetch all territories and their users, building a mapping of email -> user details."""
+    try:
+        t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories"
+        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+        r = requests.get(t_url, headers=headers, timeout=10)
+        if not r.ok:
+            log_debug(f"[user_mappings] Failed to fetch territories: {r.status_code} - {r.text}")
+            return None
+        
+        territories = r.json().get('territories', [])
+        email_lookup = {}
+        for t in territories:
+            t_name = t.get('name')
+            t_id = t.get('id')
+            u_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users"
+            u_resp = requests.get(u_url, headers=headers, timeout=10)
+            if u_resp.ok:
+                t_users = u_resp.json().get('users', [])
+                for u in t_users:
+                    email = (u.get('email') or '').strip().lower()
+                    if email:
+                        if email not in email_lookup:
+                            email_lookup[email] = {
+                                'id': str(u.get('id')),
+                                'name': u.get('full_name', ''),
+                                'franchise': u.get('Franchise', ''),
+                                'territories': []
+                            }
+                        if t_name not in email_lookup[email]['territories']:
+                            email_lookup[email]['territories'].append(t_name)
+        
+        # Save to database
+        database.set_global_setting('user_territory_mappings', json.dumps(email_lookup))
+        log_debug(f"[user_mappings] Rebuilt user mapping cache. Found {len(email_lookup)} users in territories.")
+        return email_lookup
+    except Exception as e:
+        log_debug(f"[user_mappings] Error building cache: {e}")
+        return None
 
-    Returns a dict: {'ids': [...], 'names': [...], 'pirtek_ids': [...], 'debug': [...]}
+
+def _get_all_franchises(admin_token):
+    """Fetch all Franchises from CRM custom module to resolve names to IDs."""
+    try:
+        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+        resp = requests.get(
+            f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
+            headers=headers,
+            params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
+            timeout=10
+        )
+        if resp.ok:
+            return resp.json().get('data', [])
+        log_debug(f"[franchises] Failed to fetch custom module records: {resp.status_code}")
+    except Exception as e:
+        log_debug(f"[franchises] Error fetching franchises: {e}")
+    return []
+
+
+def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
+    """Return franchise memberships for a user.
+    Uses cached mapping derived from Zoho territories and user profiles,
+    and falls back to standard user profile queries.
     """
     import time
     cache_key = f'franchise_ids_{user_id}'
@@ -652,110 +718,128 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
             return _cached_data
 
     if not admin_token:
-        # Admin token unavailable — use stale cache rather than returning nothing
+        # fallback to stale cache if available
         if _cached_data:
-            log_debug(f"[franchise_ids] Admin token unavailable — using stale cache for user {user_id}. "
-                      "An admin user must log back in to refresh the token.")
             return _cached_data
-        log_debug("[franchise_ids] Admin token unavailable AND no cache — franchise filter skipped. "
-                  "An admin must log in to ZohoMap to store the admin refresh token.")
         return None
 
     debug_log = []
     found = {}
 
-    # ── Strategy 1: COQL — only endpoint that returns multiuserlookup field values
-    # Query franchises where this user is listed in Franchise_Standard_Users OR Franchise_Admin_User
-    for coql in [
-        f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Standard_Users = '{user_id}'",
-        f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Admin_User = '{user_id}'"
-    ]:
+    # Get user email and numeric ID
+    user_email = str(user_id).lower() if '@' in str(user_id) else None
+    resolved_id = str(user_id) if not user_email else None
+
+    # Load or rebuild the territory-to-user mappings cache
+    mappings_raw = database.get_global_setting('user_territory_mappings', '')
+    mappings = {}
+    if mappings_raw:
         try:
-            result = zoho_api.coql_query(coql, admin_token)
-            recs = result.get('data', [])
-            debug_log.append(f'COQL "{coql[:60]}…": {len(recs)} hits')
-            for rec in recs:
-                fid = str(rec.get('id', ''))
-                if fid and fid not in found:
-                    found[fid] = {
-                        'id': fid,
-                        'name': rec.get('Name', ''),
-                        'pirtek_id': rec.get('Pirtek_Franchise_ID', '') or ''
+            mappings = json.loads(mappings_raw)
+        except Exception:
+            pass
+
+    # If the user_id or email is not in the cache, rebuild it on-demand
+    user_key = user_email if user_email else None
+    if not user_key and resolved_id:
+        for em, udet in mappings.items():
+            if udet.get('id') == resolved_id:
+                user_key = em
+                break
+
+    if force_refresh or not user_key or user_key not in mappings:
+        debug_log.append("Rebuilding territory-to-user mappings cache on-demand...")
+        new_mappings = _refresh_user_mappings(admin_token)
+        if new_mappings:
+            mappings = new_mappings
+            if not user_key and resolved_id:
+                for em, udet in mappings.items():
+                    if udet.get('id') == resolved_id:
+                        user_key = em
+                        break
+            elif user_email:
+                user_key = user_email
+
+    # Now look up user details in the mappings cache
+    user_detail = mappings.get(user_key) if user_key else None
+    user_franchise_name = None
+    user_territories = []
+    if user_detail:
+        resolved_id = user_detail.get('id')
+        user_franchise_name = user_detail.get('franchise')
+        user_territories = user_detail.get('territories', [])
+        debug_log.append(f"Found user mapping: Email={user_key}, CRM_ID={resolved_id}, Franchise_Field='{user_franchise_name}', Territories={user_territories}")
+        
+        if user_franchise_name:
+            # Query all custom franchises to find a match by Name
+            franchises = _get_all_franchises(admin_token)
+            for f in franchises:
+                f_name = f.get('Name')
+                f_id = str(f.get('id'))
+                f_pirtek = f.get('Pirtek_Franchise_ID')
+                if f_name and f_name.strip().lower() == user_franchise_name.strip().lower():
+                    found[f_id] = {
+                        'id': f_id,
+                        'name': f_name,
+                        'pirtek_id': f_pirtek or ''
                     }
-        except Exception as e:
-            debug_log.append(f'COQL error: {e}')
-
-    # ── Strategy 2: Territory-based fallback ────────────────────────────────
-    # Derive franchise list from the user's CRM territory assignments.
-    territory_ids_raw = []
-    if not found:
-        try:
-            headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
-            resp = requests.get(
-                f'{zoho_api.ZOHO_API_URL}/crm/v3/users/{user_id}',
-                headers=headers, timeout=10
-            )
-            if resp.ok and resp.content:
-                udata = resp.json()
-                user_obj = udata.get('users', [{}])[0] if 'users' in udata else udata.get('user', {})
-                territories = user_obj.get('territories', [])
-                debug_log.append(f'Strategy 2 territories: {[t.get("name") for t in territories]}')
-                for t in territories:
-                    tid = str(t.get('id', ''))
-                    tname = t.get('name', '')
-                    if tid:
-                        territory_ids_raw.append({'id': tid, 'name': tname})
-                        # Keep as territory_ prefix — these are proxy franchise IDs
-                        # (used only when no Franchise record IDs are found)
-                        found[f'territory_{tid}'] = {
-                            'id': f'territory_{tid}',
-                            'name': tname,
-                            'pirtek_id': ''
-                        }
-        except Exception as e:
-            debug_log.append(f'Strategy 2 territory error: {e}')
-
-    # ── Strategy 3: Derive franchise IDs from records owned by this user ───────
-    # Query module records via COQL, filtering by Owner.id = user_id, and extract
-    # the franchise field values.  This is independent of Franchises module field
-    # names and works as long as the user's owned records have franchise data.
-    # This replaces territory_ proxy IDs with real Franchise record IDs.
-    owned_franchise_ids = {}
-    _OWNER_MODULE_FIELDS = [
-        ('Leads',             'Select_Your_Franchise1'),
-        ('Accounts',          'Franchise'),
-        ('Ship_To_Addresses', 'Franchise'),
-    ]
-    for mod, fld in _OWNER_MODULE_FIELDS:
-        coql_owned = (
-            f"SELECT id, {fld} FROM {mod} "
-            f"WHERE Owner.id = '{user_id}' LIMIT 200"
-        )
-        try:
-            result = zoho_api.coql_query(coql_owned, admin_token)
-            recs = result.get('data', [])
-            debug_log.append(f'Strategy 3 {mod} Owner query: {len(recs)} records')
-            for rec in recs:
-                fval = rec.get(fld)
-                # multiuserlookup → list of dicts; regular lookup → dict
-                items = fval if isinstance(fval, list) else ([fval] if isinstance(fval, dict) else [])
-                for item in items:
-                    if isinstance(item, dict) and item.get('id'):
-                        fid  = str(item['id'])
-                        fname = item.get('name', fid)
-                        if fid and fid not in owned_franchise_ids:
-                            owned_franchise_ids[fid] = {'id': fid, 'name': fname, 'pirtek_id': ''}
-        except Exception as e:
-            debug_log.append(f'Strategy 3 {mod} error: {e}')
-
-    if owned_franchise_ids:
-        # Replace territory_ proxy entries with real Franchise record IDs
-        found = {k: v for k, v in found.items() if not k.startswith('territory_')}
-        found.update(owned_franchise_ids)
-        debug_log.append(f'Strategy 3 resolved {len(owned_franchise_ids)} franchise ID(s) from owned records.')
+                    debug_log.append(f"Mapped user Franchise field '{user_franchise_name}' to record ID {f_id}")
+                    break
     else:
-        debug_log.append('Strategy 3: no franchise IDs found in owned records — keeping territory fallback.')
+        debug_log.append(f"User '{user_id}' not found in territory user mapping cache.")
 
+    # ── Strategy 1: COQL fallback (if Franchise name mapping didn't find anything or is not set)
+    # Check if the user is listed in any Franchise record's "Franchise_Standard_Users" or "Franchise_Admin_User" field.
+    if not found and resolved_id:
+        for coql in [
+            f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Standard_Users = '{resolved_id}'",
+            f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Admin_User = '{resolved_id}'"
+        ]:
+            try:
+                result = zoho_api.coql_query(coql, admin_token)
+                recs = result.get('data', [])
+                for rec in recs:
+                    fid = str(rec.get('id', ''))
+                    if fid and fid not in found:
+                        found[fid] = {
+                            'id': fid,
+                            'name': rec.get('Name', ''),
+                            'pirtek_id': rec.get('Pirtek_Franchise_ID', '') or ''
+                        }
+            except Exception as e:
+                debug_log.append(f'COQL error: {e}')
+
+    # ── Strategy 2: Territory-based fallback (if still nothing found)
+    # Match territory name to franchise name
+    if not found and user_detail and user_territories:
+        franchises = _get_all_franchises(admin_token)
+        for tname in user_territories:
+            matched = False
+            for f in franchises:
+                f_name = f.get('Name', '').strip().lower()
+                f_id = str(f.get('id'))
+                f_pirtek = f.get('Pirtek_Franchise_ID')
+                t_lower = tname.strip().lower()
+                
+                # Check if Franchise Name is similar
+                tokens = [tok for tok in t_lower.replace('_', ' ').split() if len(tok) > 2]
+                if any(tok in f_name for tok in tokens) or f_name in t_lower or t_lower in f_name:
+                    found[f_id] = {
+                        'id': f_id,
+                        'name': f.get('Name'),
+                        'pirtek_id': f_pirtek or ''
+                    }
+                    debug_log.append(f"Mapped territory '{tname}' to similar Franchise '{f.get('Name')}'")
+                    matched = True
+                    break
+            if not matched:
+                found[f'territory_{tname}'] = {
+                    'id': f'territory_{tname}',
+                    'name': tname,
+                    'pirtek_id': ''
+                }
+
+    # Save to cache
     results = {
         'ids':       [v['id']        for v in found.values()],
         'names':     [v['name']      for v in found.values()],
@@ -765,6 +849,9 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     }
 
     database.set_global_setting(cache_key, json.dumps(results))
+    if user_email and resolved_id:
+        database.set_global_setting(f'franchise_ids_{resolved_id}', json.dumps(results))
+        
     log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
     return results
 
@@ -1483,6 +1570,12 @@ def do_nightly_sync():
         except Exception as e:
             log_debug(f"[nightly] {module_name}: ERROR – {e}")
             results[module_name] = f'error: {e}'
+
+    # Rebuild user territory mappings cache nightly
+    try:
+        _refresh_user_mappings(admin_token)
+    except Exception as e:
+        log_debug(f"[nightly] Error rebuilding user mappings: {e}")
 
     elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
     database.set_global_setting('last_nightly_sync',

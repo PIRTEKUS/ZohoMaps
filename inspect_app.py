@@ -45,44 +45,27 @@ if not admin_token:
     print("Error: No admin token could be generated.")
     sys.exit(1)
 
-headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+print("\n=== 1. TRIGGER MAPPINGS REBUILD ===")
+mappings = app._refresh_user_mappings(admin_token)
+if mappings:
+    print(f"Successfully rebuilt mapping. Total cached users: {len(mappings)}")
+else:
+    print("Failed to rebuild mappings cache.")
 
-print("\n=== 1. FETCH ALL TERRITORIES ===")
-t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories"
-r = requests.get(t_url, headers=headers, timeout=8)
-if not r.ok:
-    print("Failed to fetch territories:", r.text)
-    sys.exit(1)
+print("\n=== 2. TEST FRANCHISE RESOLUTIONS ===")
+test_users = [
+    'zohotest3@pirtekusa.com', # Team User - Colorado Springs
+    'zohotest4@pirtekusa.com', # Franchise Owner - Colorado Springs
+    'elmwood@sqible.com.au',   # Regular user - Elmwood
+    'frapa@pirtekusa.com',      # Admin
+    'nonexistent@pirtekusa.com' # Non-existent
+]
 
-territories = r.json().get('territories', [])
-print(f"Found {len(territories)} territories.")
-
-print("\n=== 2. BUILD USER LOOKUP FROM TERRITORIES ===")
-email_lookup = {}
-for t in territories:
-    t_name = t.get('name')
-    t_id = t.get('id')
-    print(f"Querying users for territory: {t_name} ({t_id})...")
-    u_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users"
-    u_resp = requests.get(u_url, headers=headers, timeout=8)
-    if u_resp.ok:
-        t_users = u_resp.json().get('users', [])
-        for u in t_users:
-            email = (u.get('email') or '').lower()
-            if email:
-                if email not in email_lookup:
-                    email_lookup[email] = {
-                        'id': u.get('id'),
-                        'full_name': u.get('full_name'),
-                        'email': u.get('email'),
-                        'status': u.get('status'),
-                        'category': u.get('category'),
-                        'franchise_field_value': u.get('Franchise'),
-                        'territories': []
-                    }
-                email_lookup[email]['territories'].append(t_name)
-    else:
-        print(f"  Failed for {t_name}: {u_resp.status_code}")
-
-print("\n=== 3. CONSOLIDATED USER MAP FROM TERRITORIES ===")
-print(json.dumps(email_lookup, indent=2))
+for email in test_users:
+    print(f"\nResolving for: {email}")
+    res = app._get_user_franchise_ids(email, admin_token, force_refresh=True)
+    print("  Names:", res.get('names'))
+    print("  IDs:", res.get('ids'))
+    print("  Debug Log:")
+    for line in res.get('debug', []):
+        print(f"    - {line}")
