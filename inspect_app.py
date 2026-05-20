@@ -23,23 +23,18 @@ for path in service_paths:
                     line = line.strip()
                     if line.startswith('Environment='):
                         env_str = line.split('Environment=', 1)[1]
-                        # Environment lines can contain multiple key=value pairs separated by space
-                        # e.g., Environment="APP_SECRET_KEY=123 DATABASE_URI=456"
-                        # Strip quotes if present
                         if (env_str.startswith('"') and env_str.endswith('"')) or (env_str.startswith("'") and env_str.endswith("'")):
                             env_str = env_str[1:-1]
-                        # Simple split on space for key=value
                         for item in env_str.split():
                             if '=' in item:
                                 k, v = item.split('=', 1)
                                 os.environ[k] = v
                                 loaded_env[k] = v
-            print(f"Loaded environment variables from {path}: {list(loaded_env.keys())}")
+            print(f"Loaded environment variables: {list(loaded_env.keys())}")
             break
         except Exception as e:
             print(f"Could not read {path}: {e}")
 
-# Default dummy key if still not set to avoid Flask fatal check crash
 if 'APP_SECRET_KEY' not in os.environ:
     os.environ['APP_SECRET_KEY'] = 'dummy_secret_for_diagnostic_run'
 
@@ -58,27 +53,27 @@ if not admin_token:
 
 print("\n=== 1. FRANCHISES MODULE LIST ===")
 headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+# Fetch with basic fields to bypass REQUIRED_PARAM_MISSING
 resp = requests.get(
     f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
     headers=headers,
-    params={'per_page': 200},
+    params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
     timeout=10
 )
 if resp.ok:
     data = resp.json().get('data', [])
     print(f"Total Franchises found: {len(data)}")
-    for f in data[:15]:
+    for f in data[:20]:
         print(f"Name: {f.get('Name')} | ID: {f.get('id')} | Pirtek ID: {f.get('Pirtek_Franchise_ID')}")
-        # print any standard/admin user assignments
         print(f"  Franchise_Standard_Users: {f.get('Franchise_Standard_Users')}")
         print(f"  Franchise_Admin_User: {f.get('Franchise_Admin_User')}")
+        print("-" * 40)
 else:
     print("Failed to fetch Franchises:", resp.status_code, resp.text)
 
-print("\n=== 2. USER DETAILS (zohotest3@pirtekusa.com) ===")
-# Try to resolve zohotest3@pirtekusa.com email using AllUsers
+print("\n=== 2. ALL USERS IN CRM ===")
 page = 1
-numeric_id = None
+all_crm_users = []
 while True:
     r = requests.get(
         f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type=AllUsers&page={page}",
@@ -86,32 +81,16 @@ while True:
         timeout=8
     )
     if not r.ok:
-        print("Users API failed:", r.text)
+        print(f"Users API page {page} failed: {r.text}")
         break
     users = r.json().get('users', [])
     if not users:
         break
     for u in users:
-        if u.get('email', '').lower() == 'zohotest3@pirtekusa.com':
-            numeric_id = u['id']
-            print(f"Resolved: {u.get('full_name')} | CRM ID: {u['id']} | Email: {u['email']} | Status: {u.get('status')}")
-            break
-    if numeric_id or len(users) < 100:
+        all_crm_users.append(u)
+        print(f"Name: {u.get('full_name')} | CRM ID: {u['id']} | Email: {u.get('email')} | Status: {u.get('status')} | Profile: {u.get('profile', {}).get('name')}")
+    if len(users) < 100:
         break
     page += 1
 
-if numeric_id:
-    # Get user territories
-    r2 = requests.get(
-        f"{zoho_api.ZOHO_API_URL}/crm/v3/users/{numeric_id}",
-        headers=headers,
-        timeout=8
-    )
-    if r2.ok:
-        ud = r2.json().get('users', [{}])[0]
-        territories = ud.get('territories', [])
-        print("User Territories:", [t.get('name') for t in territories])
-    else:
-        print("Failed to get territories:", r2.text)
-else:
-    print("User zohotest3@pirtekusa.com was not found in CRM user pages.")
+print(f"\nTotal CRM Users Fetched: {len(all_crm_users)}")
