@@ -9,7 +9,6 @@ async function initMap() {
     map = new google.maps.Map(document.getElementById("map"), {
         center: initialCenter,
         zoom: initialZoom,
-        mapId: 'DEMO_MAP_ID',
         disableDefaultUI: true,
         zoomControl: true,
     });
