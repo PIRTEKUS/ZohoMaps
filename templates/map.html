@@ -220,6 +220,12 @@ main.container { padding: 0 !important; overflow: hidden; }
                 title="Hide Points of Interest (POIs)" style="padding:0.45rem 0.65rem;">
             🏛️
         </button>
+
+        <!-- Toggle Map/Satellite view -->
+        <button class="ctrl-btn dark" id="map-type-btn" onclick="toggleMapType()"
+                title="Switch to Satellite view" style="padding:0.45rem 0.65rem;">
+            🛰️
+        </button>
     </div>
 
     <!-- Search this area button (centred, shown after pan/zoom) -->
@@ -643,6 +649,27 @@ window.toggleGooglePOIs = function() {
         } else {
             btn.classList.remove('active');
             btn.title = "Hide Points of Interest (POIs)";
+        }
+    }
+};
+
+let currentMapType = 'roadmap';
+window.toggleMapType = function() {
+    if (!window.map) return;
+    const btn = document.getElementById('map-type-btn');
+    if (currentMapType === 'roadmap') {
+        window.map.setMapTypeId('hybrid');
+        currentMapType = 'hybrid';
+        if (btn) {
+            btn.classList.add('active');
+            btn.title = "Switch to Map view";
+        }
+    } else {
+        window.map.setMapTypeId('roadmap');
+        currentMapType = 'roadmap';
+        if (btn) {
+            btn.classList.remove('active');
+            btn.title = "Switch to Satellite view";
         }
     }
 };
