@@ -275,41 +275,69 @@ function plotData(data) {
     visibleData.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
 
-        // Custom SVG Marker to use the dynamically configured color and icon
-        let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
-        
-        if (Array.isArray(path)) {
-            path = path.join(' ');
-        }
+        let markerIconOption;
+        const isCustomIcon = item.icon && (item.icon.startsWith('/static/') || item.icon.includes('/') || item.icon.includes('.'));
 
-        const svgMarker = {
-            path: path,
-            fillColor: item.color || "#3b82f6",
-            fillOpacity: 0.85,
-            strokeWeight: 1.4,
-            strokeColor: "#FFFFFF",
-            rotation: 0,
-            scale: 1.4,
-            anchor: new google.maps.Point(12, 12),
-        };
+        if (isCustomIcon) {
+            const sizeName = (item.field_mappings && item.field_mappings.custom_marker_size) || 'medium';
+            let maxSize = 36;
+            if (sizeName === 'small') maxSize = 24;
+            else if (sizeName === 'large') maxSize = 48;
 
-        // Specific adjustments for better visual alignment
-        if (item.icon === 'pin' || !item.icon) {
-            svgMarker.anchor = new google.maps.Point(12, 22);
-            svgMarker.scale = 1.3;
-        } else if (item.icon === 'building3D') {
-            svgMarker.anchor = new google.maps.Point(8, 8);
-            svgMarker.scale = 2.0;
-        } else if (item.icon && item.icon.startsWith('building')) {
-            svgMarker.strokeWeight = 1.4;
-            svgMarker.fillOpacity = 0.9;
-            svgMarker.scale = 1.5;
+            const aspect = parseFloat((item.field_mappings && item.field_mappings.custom_marker_aspect_ratio)) || 1.0;
+
+            let w, h;
+            if (aspect >= 1.0) {
+                w = maxSize;
+                h = maxSize / aspect;
+            } else {
+                h = maxSize;
+                w = maxSize * aspect;
+            }
+
+            markerIconOption = {
+                url: item.icon,
+                scaledSize: new google.maps.Size(w, h),
+                anchor: new google.maps.Point(w / 2, h)
+            };
+        } else {
+            // Custom SVG Marker to use the dynamically configured color and icon
+            let path = ICON_PATHS[item.icon] || ICON_PATHS['pin'];
+            
+            if (Array.isArray(path)) {
+                path = path.join(' ');
+            }
+
+            const svgMarker = {
+                path: path,
+                fillColor: item.color || "#3b82f6",
+                fillOpacity: 0.85,
+                strokeWeight: 1.4,
+                strokeColor: "#FFFFFF",
+                rotation: 0,
+                scale: 1.4,
+                anchor: new google.maps.Point(12, 12),
+            };
+
+            // Specific adjustments for better visual alignment
+            if (item.icon === 'pin' || !item.icon) {
+                svgMarker.anchor = new google.maps.Point(12, 22);
+                svgMarker.scale = 1.3;
+            } else if (item.icon === 'building3D') {
+                svgMarker.anchor = new google.maps.Point(8, 8);
+                svgMarker.scale = 2.0;
+            } else if (item.icon && item.icon.startsWith('building')) {
+                svgMarker.strokeWeight = 1.4;
+                svgMarker.fillOpacity = 0.9;
+                svgMarker.scale = 1.5;
+            }
+            markerIconOption = svgMarker;
         }
 
         const marker = new google.maps.Marker({
             position: position,
             map: map,
-            icon: svgMarker,
+            icon: markerIconOption,
             title: item.name
         });
 

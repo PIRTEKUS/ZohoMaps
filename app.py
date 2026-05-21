@@ -493,6 +493,42 @@ def save_config():
         log_debug(f"Error saving config: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/settings/upload-marker', methods=['POST'])
+def upload_marker():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+    
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part in request'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    # Check extension
+    ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp'}
+    ext = os.path.splitext(file.filename.lower())[1]
+    if ext not in ALLOWED_EXTENSIONS:
+        return jsonify({'error': f'Unsupported file extension. Allowed: {", ".join(ALLOWED_EXTENSIONS)}'}), 400
+    
+    from werkzeug.utils import secure_filename
+    import uuid
+    
+    # Generate unique filename
+    filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+    
+    # Ensure directory exists
+    upload_folder = os.path.join(app.root_path, 'static', 'custom_markers')
+    os.makedirs(upload_folder, exist_ok=True)
+    
+    file.save(os.path.join(upload_folder, filename))
+    
+    return jsonify({
+        'url': f'/static/custom_markers/{filename}'
+    })
+
 @app.route('/api/settings/config/<module_name>', methods=['DELETE'])
 def delete_config(module_name):
     if 'access_token' not in session:
