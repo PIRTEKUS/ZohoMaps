@@ -1971,13 +1971,11 @@ def get_map_data():
     if 'modules' in module_metadata:
         for m in module_metadata['modules']:
             module_label_map[m['api_name']] = m['plural_label']
-            # If it's a custom module, we might need a different identifier for the URL
+            # For custom modules, 'module_name' is always the system tab name (e.g. 'CustomModule2')
+            # while 'api_name' is the user-customized name (e.g. 'Ship_To_Addresses').
+            # The browser URL must use the system tab name, so we use module_name for custom modules.
             if m.get('generated_type') == 'custom':
-                module_url_map[m['api_name']] = m['api_name'] # Default
-                for key, value in m.items():
-                    if isinstance(value, str) and 'CustomModule' in value:
-                        module_url_map[m['api_name']] = value
-                        break
+                module_url_map[m['api_name']] = m.get('module_name', m['api_name'])
             else:
                 module_url_map[m['api_name']] = m['api_name']
 
@@ -1989,13 +1987,10 @@ def get_map_data():
     for r in records:
         cfg = configs.get(r['module_name'], {})
         
-        # Build robust link for CRM or CRM Plus
+        # Build robust link for CRM or CRM Plus.
+        # module_url_map already maps api_name -> system tab name (e.g. Ship_To_Addresses -> CustomModule2)
         api_name = r['module_name']
         link_module = module_url_map.get(api_name, api_name)
-        if api_name in url_overrides:
-            link_module = url_overrides[api_name]
-        elif api_name.lower() in url_overrides:
-            link_module = url_overrides[api_name.lower()]
         
         # If the Zoho API returned the OrgID as the domain name (which it does for standard CRM), ignore it.
         # We only want to use CRM Plus format if they actually have a custom domain name (like 'pirtekus').
@@ -2006,13 +2001,13 @@ def get_map_data():
             safe_org_id = f"org{org_id}" if str(org_id).isdigit() else org_id
             
             if is_crm_plus:
-                # Modern CRM Plus / CX App format with EntityInfo.do redirect
-                zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/EntityInfo.do?module={link_module}&id={r['id']}"
+                # CRM Plus: use /tab/{system_module_name}/{record_id}
+                zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
             else:
-                # Standard Zoho CRM format with EntityInfo.do redirect
-                zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/EntityInfo.do?module={link_module}&id={r['id']}"
+                # Standard Zoho CRM
+                zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
         else:
-            zoho_link = f"https://crm.{ZOHO_TLD}/crm/EntityInfo.do?module={link_module}&id={r['id']}"
+            zoho_link = f"https://crm.{ZOHO_TLD}/crm/tab/{link_module}/{r['id']}"
 
         map_points.append({
             'id': r['id'],
