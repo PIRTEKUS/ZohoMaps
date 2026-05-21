@@ -1923,6 +1923,14 @@ def get_map_data():
     
     # Get module labels and org info for display
     module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
+    try:
+        import os
+        os.makedirs('scratch', exist_ok=True)
+        with open('scratch/prod_modules.json', 'w', encoding='utf-8') as f:
+            json.dump(module_metadata, f, indent=2)
+        log_debug("Saved module metadata to scratch/prod_modules.json")
+    except Exception as e:
+        log_debug(f"Failed to save module metadata: {e}")
     # Priority: Manual Global Setting > Session Cache > Fresh API Fetch
     org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', '')
     domain_name = database.get_global_setting('crmplus_domain', '') or session.get('domain_name', '')
