@@ -191,31 +191,25 @@
                                                 </div>
 
                                                 <!-- Size selection -->
-                                                <div style="flex: 1; min-width: 140px;">
-                                                    <label style="font-size: 0.8rem; color: #cbd5e1; display: block; margin-bottom: 5px;">Marker Size</label>
-                                                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
-                                                            <input type="radio" name="custom-marker-size" value="small" style="width: auto; margin: 0;"> Small (24px)
-                                                        </label>
-                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
-                                                            <input type="radio" name="custom-marker-size" value="medium" checked style="width: auto; margin: 0;"> Medium (36px)
-                                                        </label>
-                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
-                                                            <input type="radio" name="custom-marker-size" value="large" style="width: auto; margin: 0;"> Large (48px)
-                                                        </label>
-                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
-                                                            <input type="radio" name="custom-marker-size" value="xlarge" style="width: auto; margin: 0;"> Extra Large (100px)
-                                                        </label>
-                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
-                                                            <input type="radio" name="custom-marker-size" value="jumbo" style="width: auto; margin: 0;"> Jumbo (200px)
-                                                        </label>
+                                                <div style="flex: 1; min-width: 150px;">
+                                                    <label style="font-size: 0.8rem; color: #cbd5e1; display: block; margin-bottom: 5px;">Marker Size (px)</label>
+                                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                                        <input type="number" id="custom-marker-size" min="8" max="1000" value="36" style="width: 80px; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); color: white; border-radius: 6px; padding: 6px 8px; font-size: 0.85rem; outline: none;">
+                                                        <span style="font-size: 0.75rem; color: #94a3b8;">px</span>
+                                                    </div>
+                                                    <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;">
+                                                        <button type="button" class="btn-preset-size" data-size="24" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">24px</button>
+                                                        <button type="button" class="btn-preset-size" data-size="36" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">36px</button>
+                                                        <button type="button" class="btn-preset-size" data-size="48" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">48px</button>
+                                                        <button type="button" class="btn-preset-size" data-size="100" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">100px</button>
+                                                        <button type="button" class="btn-preset-size" data-size="200" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #cbd5e1; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">200px</button>
                                                     </div>
                                                 </div>
 
                                                 <!-- Map Preview Box -->
-                                                <div style="width: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px; min-height: 80px; align-self: center;">
-                                                    <span style="font-size: 0.7rem; color: #94a3b8; margin-bottom: 8px;">Map Preview</span>
-                                                    <div id="custom-marker-preview-container" style="position: relative; display: flex; align-items: center; justify-content: center; width: 60px; height: 60px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 4px;">
+                                                <div style="width: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 12px; min-height: 120px; align-self: center;">
+                                                    <span style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 8px;">Map Preview</span>
+                                                    <div id="custom-marker-preview-container" style="position: relative; display: flex; align-items: center; justify-content: center; width: 160px; height: 160px; border: 1px dashed rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; background: rgba(255,255,255,0.02);">
                                                         <!-- Preview image scaled and styled like a marker -->
                                                         <img id="custom-marker-preview-img" src="" style="display: none; object-fit: contain; filter: drop-shadow(0px 2px 4px rgba(0,0,0,0.5));">
                                                         <span id="custom-marker-preview-placeholder" style="font-size: 0.75rem; color: #475569; font-style: italic; text-align: center;">No Image</span>
@@ -765,9 +759,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Custom marker size radio listeners
-    document.querySelectorAll('input[name="custom-marker-size"]').forEach(radio => {
-        radio.addEventListener('change', updateCustomMarkerPreview);
+    // Custom marker size input listener
+    const customSizeInput = document.getElementById('custom-marker-size');
+    if (customSizeInput) {
+        customSizeInput.addEventListener('input', updateCustomMarkerPreview);
+        customSizeInput.addEventListener('change', updateCustomMarkerPreview);
+    }
+
+    // Preset buttons listeners
+    document.querySelectorAll('.btn-preset-size').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const size = e.target.getAttribute('data-size');
+            if (customSizeInput) {
+                customSizeInput.value = size;
+                updateCustomMarkerPreview();
+            }
+        });
     });
 
     async function uploadFile(file) {
@@ -830,7 +837,7 @@ document.addEventListener('DOMContentLoaded', () => {
             field_mappings['additional_field_labels'] = selectedOptions.map(opt => opt.textContent);
 
             // Append custom marker size and aspect ratio
-            field_mappings['custom_marker_size'] = document.querySelector('input[name="custom-marker-size"]:checked')?.value || 'medium';
+            field_mappings['custom_marker_size'] = document.getElementById('custom-marker-size')?.value || '36';
             field_mappings['custom_marker_aspect_ratio'] = window.activeCustomMarkerAspect || 1.0;
 
             // Collect duplicate filter settings
@@ -942,7 +949,13 @@ function updateCustomMarkerPreview() {
     const previewImg = document.getElementById('custom-marker-preview-img');
     const placeholder = document.getElementById('custom-marker-preview-placeholder');
     const markerIconInput = document.getElementById('marker-icon');
-    const sizeName = document.querySelector('input[name="custom-marker-size"]:checked')?.value || 'medium';
+    
+    // Get numeric value from input
+    const sizeInput = document.getElementById('custom-marker-size');
+    let size = 36;
+    if (sizeInput) {
+        size = parseInt(sizeInput.value) || 36;
+    }
     
     const iconVal = markerIconInput ? markerIconInput.value : '';
     const isCustomUrl = iconVal && (iconVal.startsWith('/static/') || iconVal.includes('/') || iconVal.includes('.'));
@@ -951,12 +964,6 @@ function updateCustomMarkerPreview() {
         previewImg.src = iconVal;
         previewImg.style.display = 'block';
         placeholder.style.display = 'none';
-        
-        let size = 36;
-        if (sizeName === 'small') size = 24;
-        else if (sizeName === 'large') size = 48;
-        else if (sizeName === 'xlarge') size = 100;
-        else if (sizeName === 'jumbo') size = 200;
         
         let aspect = window.activeCustomMarkerAspect || 1.0;
         
@@ -971,7 +978,7 @@ function updateCustomMarkerPreview() {
         
         let dispW = w;
         let dispH = h;
-        const maxDisp = 56;
+        const maxDisp = 150;
         if (dispW > maxDisp || dispH > maxDisp) {
             const scale = maxDisp / Math.max(dispW, dispH);
             dispW = dispW * scale;
@@ -1200,9 +1207,17 @@ async function loadConfigIntoForm(conf) {
     if (modSelect) modSelect.value = conf.module_name;
     
     // Restore custom marker size and aspect ratio
-    const customSize = conf.field_mappings?.custom_marker_size || 'medium';
-    const radioBtn = document.querySelector(`input[name="custom-marker-size"][value="${customSize}"]`);
-    if (radioBtn) radioBtn.checked = true;
+    let customSize = conf.field_mappings?.custom_marker_size || '36';
+    if (customSize === 'small') customSize = '24';
+    else if (customSize === 'medium') customSize = '36';
+    else if (customSize === 'large') customSize = '48';
+    else if (customSize === 'xlarge') customSize = '100';
+    else if (customSize === 'jumbo') customSize = '200';
+    
+    const sizeInput = document.getElementById('custom-marker-size');
+    if (sizeInput) {
+        sizeInput.value = customSize;
+    }
 
     window.activeCustomMarkerAspect = parseFloat(conf.field_mappings?.custom_marker_aspect_ratio) || 1.0;
 

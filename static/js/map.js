@@ -280,11 +280,14 @@ function plotData(data) {
 
         if (isCustomIcon) {
             const sizeName = (item.field_mappings && item.field_mappings.custom_marker_size) || 'medium';
-            let maxSize = 36;
-            if (sizeName === 'small') maxSize = 24;
-            else if (sizeName === 'large') maxSize = 48;
-            else if (sizeName === 'xlarge') maxSize = 100;
-            else if (sizeName === 'jumbo') maxSize = 200;
+            let maxSize = parseInt(sizeName);
+            if (isNaN(maxSize)) {
+                if (sizeName === 'small') maxSize = 24;
+                else if (sizeName === 'large') maxSize = 48;
+                else if (sizeName === 'xlarge') maxSize = 100;
+                else if (sizeName === 'jumbo') maxSize = 200;
+                else maxSize = 36;
+            }
 
             const aspect = parseFloat((item.field_mappings && item.field_mappings.custom_marker_aspect_ratio)) || 1.0;
 
