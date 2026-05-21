@@ -300,17 +300,22 @@ def save_module_records_batch(user_id, records):
     try:
         exec_query(conn, 'BEGIN TRANSACTION')
         for rec in records:
-            id, module_name, name, lat, lng, color, record_data = rec
+            franchise_id = None
+            if len(rec) == 8:
+                id, module_name, name, lat, lng, color, record_data, franchise_id = rec
+            else:
+                id, module_name, name, lat, lng, color, record_data = rec
             exec_query(conn, '''
-                INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id, module_name, user_id) DO UPDATE SET
                     name=EXCLUDED.name,
                     lat=EXCLUDED.lat,
                     lng=EXCLUDED.lng,
                     color=EXCLUDED.color,
-                    record_data=EXCLUDED.record_data
-            ''', (str(user_id), str(id), module_name, name, lat, lng, color, json.dumps(record_data)))
+                    record_data=EXCLUDED.record_data,
+                    franchise_id=EXCLUDED.franchise_id
+            ''', (str(user_id), str(id), module_name, name, lat, lng, color, json.dumps(record_data), franchise_id))
         conn.commit()
     except Exception as e:
         conn.rollback()

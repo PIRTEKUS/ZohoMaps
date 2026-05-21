@@ -585,9 +585,10 @@ window.updateRouteBadge = function(count) {
 // Search this area button
 function searchArea() {
     const btn = document.getElementById('search-area-btn');
-    btn.style.display = 'none';
+    if (btn) btn.style.display = 'none';
     if (window.fetchData) window.fetchData();
 }
+window.searchArea = searchArea;
 
 // Re-wire search button display — map.js calls this when the map is panned
 window.showSearchButton = function() {
@@ -677,6 +678,6 @@ window.toggleMapType = function() {
 <script>
     window.configuredModules = {{ configs | tojson | safe }};
 </script>
-<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}?v={{ cache_bust }}"></script>
 <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key }}&callback=initMap"></script>
 {% endblock %}

@@ -1,5 +1,8 @@
 let map;
 let markers = [];
+window.mapInitialized = false;
+window.isProgrammaticMove = false;
+let programmaticTimeout = null;
 
 async function initMap() {
     // Default fallback to US
@@ -20,9 +23,44 @@ async function initMap() {
         if (window.activeInfoWindow) window.activeInfoWindow.close();
     });
 
-    // Show search button when map is panned/zoomed
-    map.addListener('dragend', () => { if (window.showSearchButton) window.showSearchButton(); });
-    map.addListener('zoom_changed', () => { if (window.showSearchButton) window.showSearchButton(); });
+    // Auto-trigger search in this area with 500ms debounce when map is panned/zoomed
+    let searchDebounceTimeout = null;
+
+    function triggerAutoSearch() {
+        if (!window.mapInitialized) return;
+
+        if (window.isProgrammaticMove) {
+            // Keep extending the programmatic timeout while moving
+            if (programmaticTimeout) {
+                clearTimeout(programmaticTimeout);
+            }
+            programmaticTimeout = setTimeout(() => {
+                window.isProgrammaticMove = false;
+            }, 1000);
+            return;
+        }
+
+        if (searchDebounceTimeout) {
+            clearTimeout(searchDebounceTimeout);
+        }
+
+        // Show the search button immediately to give visual feedback that search is pending
+        if (window.showSearchButton) window.showSearchButton();
+
+        searchDebounceTimeout = setTimeout(() => {
+            console.log('[Map] Auto-triggering search in this area...');
+            if (typeof window.searchArea === 'function') {
+                window.searchArea();
+            } else if (window.fetchData) {
+                const btn = document.getElementById('search-area-btn');
+                if (btn) btn.style.display = 'none';
+                window.fetchData();
+            }
+        }, 500);
+    }
+
+    map.addListener('dragend', triggerAutoSearch);
+    map.addListener('zoom_changed', triggerAutoSearch);
 
     // Also keep direct click on the button (handled in map.html as searchArea())
     window.fetchData = loadMapData;
@@ -121,6 +159,7 @@ async function loadMapData() {
         plotData(filtered);
         updateLegend(filtered);
         if (window.updateRecordList) window.updateRecordList(filtered);
+        window.mapInitialized = true;
     } catch (e) {
         console.error(e);
     }
@@ -335,6 +374,9 @@ window.focusMapMarker = function(id) {
     console.log('[focusMapMarker] called | id:', sid,
                 '| markersById entries:', window.markersById ? Object.keys(window.markersById).length : 'undefined');
 
+    window.isProgrammaticMove = true;
+    if (programmaticTimeout) clearTimeout(programmaticTimeout);
+
     // Primary path — marker is in the current viewport lookup
     const entry = window.markersById && (window.markersById[sid] || window.markersById[id]);
     if (entry) {
@@ -345,6 +387,10 @@ window.focusMapMarker = function(id) {
         if (!window.activeInfoWindow) window.activeInfoWindow = new google.maps.InfoWindow();
         window.activeInfoWindow.setContent(window.buildPopupContent(item));
         window.activeInfoWindow.open(map, marker);
+
+        programmaticTimeout = setTimeout(() => {
+            window.isProgrammaticMove = false;
+        }, 1000);
         return;
     }
 
@@ -365,9 +411,15 @@ window.focusMapMarker = function(id) {
                 window.activeInfoWindow.setPosition({ lat: fallback.lat, lng: fallback.lng });
                 window.activeInfoWindow.open(map);
             }
+
+            if (programmaticTimeout) clearTimeout(programmaticTimeout);
+            programmaticTimeout = setTimeout(() => {
+                window.isProgrammaticMove = false;
+            }, 1000);
         });
     } else {
         console.error('[focusMapMarker] record not found anywhere. id=', sid);
+        window.isProgrammaticMove = false;
     }
 };
 

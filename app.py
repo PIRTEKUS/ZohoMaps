@@ -85,6 +85,13 @@ try:
 except Exception:
     APP_VERSION = 'unknown'
 
+import uuid
+CACHE_BUST = APP_VERSION if APP_VERSION != 'unknown' else str(uuid.uuid4())[:8]
+
+@app.context_processor
+def inject_cache_bust():
+    return {'cache_bust': CACHE_BUST, 'app_version': APP_VERSION}
+
 # Initialize Database
 database.init_db()
 
@@ -1853,28 +1860,19 @@ def get_map_data():
     global_records = database.get_records_in_bounds_global(
         franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
     )
+    
+    # Query user's own cache (updated by on-demand syncs, viewport syncs, single record syncs)
+    user_records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
 
-    if global_records:
-        records = global_records
-        log_debug(f"[map] Served {len(records)} records from global cache (franchise_filter={franchise_ids_for_filter is not None}).")
-    elif franchise_lookup_succeeded and not is_admin:
-        # Franchise filter IS active and returned 0 — this area has no records
-        # for the user's franchise(s).  Do NOT fall back to per-user data
-        # (which may be unfiltered from a previous admin-token sync).
-        records = []
-        global_counts = database.get_global_record_counts()
-        if not global_counts:
-            # Global cache is completely empty — nightly sync hasn't run yet.
-            # Safe to fall back to per-user records (only this user's own synced data).
-            records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-            log_debug(f"[map] Global cache unpopulated — served {len(records)} per-user records as last resort.")
-        else:
-            log_debug(f"[map] 0 records in this area for user's {len(franchise_ids_for_filter or [])} franchise(s). "
-                      "Not falling back to unfiltered data.")
-    else:
-        # Degraded mode or admin with empty global cache
-        records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
-        log_debug(f"[map] Global cache empty/degraded — served {len(records)} per-user records.")
+    # Merge: user_records takes priority over global_records because they are on-demand / newer
+    record_map = {}
+    for r in global_records:
+        record_map[(r['id'], r['module_name'])] = r
+    for r in user_records:
+        record_map[(r['id'], r['module_name'])] = r
+        
+    records = list(record_map.values())
+    log_debug(f"[map] Served {len(records)} records (global={len(global_records)}, user_cache={len(user_records)}, franchise_filter={franchise_ids_for_filter is not None}).")
     # ─────────────────────────────────────────────────────────────────────────
 
 
