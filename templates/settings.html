@@ -203,6 +203,12 @@
                                                         <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
                                                             <input type="radio" name="custom-marker-size" value="large" style="width: auto; margin: 0;"> Large (48px)
                                                         </label>
+                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
+                                                            <input type="radio" name="custom-marker-size" value="xlarge" style="width: auto; margin: 0;"> Extra Large (100px)
+                                                        </label>
+                                                        <label style="font-size: 0.8rem; color: white; display: flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; user-select: none;">
+                                                            <input type="radio" name="custom-marker-size" value="jumbo" style="width: auto; margin: 0;"> Jumbo (200px)
+                                                        </label>
                                                     </div>
                                                 </div>
 
@@ -949,6 +955,8 @@ function updateCustomMarkerPreview() {
         let size = 36;
         if (sizeName === 'small') size = 24;
         else if (sizeName === 'large') size = 48;
+        else if (sizeName === 'xlarge') size = 100;
+        else if (sizeName === 'jumbo') size = 200;
         
         let aspect = window.activeCustomMarkerAspect || 1.0;
         
@@ -961,8 +969,17 @@ function updateCustomMarkerPreview() {
             w = size * aspect;
         }
         
-        previewImg.style.width = w + 'px';
-        previewImg.style.height = h + 'px';
+        let dispW = w;
+        let dispH = h;
+        const maxDisp = 56;
+        if (dispW > maxDisp || dispH > maxDisp) {
+            const scale = maxDisp / Math.max(dispW, dispH);
+            dispW = dispW * scale;
+            dispH = dispH * scale;
+        }
+        
+        previewImg.style.width = dispW + 'px';
+        previewImg.style.height = dispH + 'px';
     } else {
         previewImg.src = '';
         previewImg.style.display = 'none';

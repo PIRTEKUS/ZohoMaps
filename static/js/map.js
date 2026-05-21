@@ -283,6 +283,8 @@ function plotData(data) {
             let maxSize = 36;
             if (sizeName === 'small') maxSize = 24;
             else if (sizeName === 'large') maxSize = 48;
+            else if (sizeName === 'xlarge') maxSize = 100;
+            else if (sizeName === 'jumbo') maxSize = 200;
 
             const aspect = parseFloat((item.field_mappings && item.field_mappings.custom_marker_aspect_ratio)) || 1.0;
 
