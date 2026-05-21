@@ -50,6 +50,11 @@ sudo chmod +x /var/www/zohomap/*.sh
 echo "[4/4] Restarting ZohoMap service (may prompt for sudo password)..."
 sudo systemctl restart zohomap
 
+# 4.1 Update Nginx configuration and reload
+echo "Updating Nginx configuration and reloading..."
+sudo cp /var/www/zohomap/zohomap.nginx.conf /etc/nginx/sites-available/zohomap
+sudo nginx -t && sudo systemctl reload nginx
+
 # 4.5 Install / refresh nightly sync timer
 echo "[4.5/4] Installing nightly sync timer (11pm EST daily)..."
 sudo cp /var/www/zohomap/zohomap-sync.service /etc/systemd/system/
