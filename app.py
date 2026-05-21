@@ -1998,13 +1998,13 @@ def get_map_data():
             safe_org_id = f"org{org_id}" if str(org_id).isdigit() else org_id
             
             if is_crm_plus:
-                # Modern CRM Plus / CX App format: /pirtekus/index.do/cxapp/crm/org897316137/tab/Leads/...
-                zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
+                # Modern CRM Plus / CX App format with EntityInfo.do redirect
+                zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/EntityInfo.do?module={link_module}&id={r['id']}"
             else:
-                # Standard Zoho CRM format: /crm/org897316137/tab/Leads/...
-                zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
+                # Standard Zoho CRM format with EntityInfo.do redirect
+                zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/EntityInfo.do?module={link_module}&id={r['id']}"
         else:
-            zoho_link = f"https://crm.{ZOHO_TLD}/crm/tab/{link_module}/{r['id']}"
+            zoho_link = f"https://crm.{ZOHO_TLD}/crm/EntityInfo.do?module={link_module}&id={r['id']}"
 
         map_points.append({
             'id': r['id'],
