@@ -1942,6 +1942,24 @@ def get_map_data():
 
     module_label_map = {}
     module_url_map = {} # Map api_name to URL segment
+
+    # Load manual module URL overrides (e.g. mapping ShipToAddress to CustomModule2)
+    url_overrides = {}
+    try:
+        db_overrides_str = database.get_global_setting('module_url_overrides', '{}')
+        db_overrides = json.loads(db_overrides_str)
+        if isinstance(db_overrides, dict):
+            for k, v in db_overrides.items():
+                url_overrides[str(k)] = str(v)
+                url_overrides[str(k).lower()] = str(v)
+    except Exception as e:
+        log_debug(f"Error loading module_url_overrides from DB: {e}")
+
+    if config.has_section('MODULE_URL_OVERRIDES'):
+        for key, value in config['MODULE_URL_OVERRIDES'].items():
+            url_overrides[str(key)] = str(value)
+            url_overrides[str(key).lower()] = str(value)
+
     if 'modules' in module_metadata:
         for m in module_metadata['modules']:
             module_label_map[m['api_name']] = m['plural_label']
@@ -1964,7 +1982,12 @@ def get_map_data():
         cfg = configs.get(r['module_name'], {})
         
         # Build robust link for CRM or CRM Plus
-        link_module = module_url_map.get(r['module_name'], r['module_name'])
+        api_name = r['module_name']
+        link_module = module_url_map.get(api_name, api_name)
+        if api_name in url_overrides:
+            link_module = url_overrides[api_name]
+        elif api_name.lower() in url_overrides:
+            link_module = url_overrides[api_name.lower()]
         
         # If the Zoho API returned the OrgID as the domain name (which it does for standard CRM), ignore it.
         # We only want to use CRM Plus format if they actually have a custom domain name (like 'pirtekus').
