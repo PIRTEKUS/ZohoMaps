@@ -516,14 +516,21 @@ def upload_marker():
     from werkzeug.utils import secure_filename
     import uuid
     
-    # Generate unique filename
-    filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
-    
-    # Ensure directory exists
-    upload_folder = os.path.join(app.root_path, 'static', 'custom_markers')
-    os.makedirs(upload_folder, exist_ok=True)
-    
-    file.save(os.path.join(upload_folder, filename))
+    try:
+        # Generate unique filename
+        filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+        
+        # Ensure directory exists
+        upload_folder = os.path.join(app.root_path, 'static', 'custom_markers')
+        os.makedirs(upload_folder, exist_ok=True)
+        
+        save_path = os.path.join(upload_folder, filename)
+        file.save(save_path)
+    except Exception as e:
+        log_debug(f"Error saving custom marker file: {str(e)}")
+        import traceback
+        log_debug(traceback.format_exc())
+        return jsonify({'error': f"Failed to save file: {str(e)}"}), 500
     
     return jsonify({
         'url': f'/static/custom_markers/{filename}'
@@ -1984,7 +1991,7 @@ def get_map_data():
             'name': r['name'],
             'lat': r['lat'],
             'lng': r['lng'],
-            'color': r['color'],
+            'color': cfg.get('marker_color') or r['color'] or '#3b82f6',
             'icon': cfg.get('marker_icon', 'pin'),
             'record_data': r['record_data'],
             'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),

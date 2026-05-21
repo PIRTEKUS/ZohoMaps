@@ -774,7 +774,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 body: formData
             });
-            const data = await resp.json();
+            
+            let data;
+            const contentType = resp.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+                data = await resp.json();
+            } else {
+                const text = await resp.text();
+                if (statusEl) statusEl.textContent = 'Upload failed (' + resp.status + '): ' + text.substring(0, 80);
+                return;
+            }
+
             if (resp.ok && data.url) {
                 if (statusEl) statusEl.textContent = 'Uploaded: ' + file.name;
                 
@@ -789,7 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             console.error(err);
-            if (statusEl) statusEl.textContent = 'Upload error';
+            if (statusEl) statusEl.textContent = 'Upload error: ' + err.message;
         }
     }
 

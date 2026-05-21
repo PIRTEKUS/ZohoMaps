@@ -41,6 +41,7 @@ fi
 
 # 3.8 Fix permissions
 echo "Fixing permissions for www-data..."
+sudo mkdir -p /var/www/zohomap/static/custom_markers
 sudo chown -R www-data:www-data /var/www/zohomap
 # Re-apply execute permissions on shell scripts so they can still be run with sudo
 sudo chmod +x /var/www/zohomap/*.sh
