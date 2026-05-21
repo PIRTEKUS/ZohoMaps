@@ -15,504 +15,560 @@
         </div>
     </div>
 
-    <div class="settings-grid">
+    <!-- Tab Navigation -->
+    <div class="settings-tabs">
+        <button class="settings-tab-btn active" onclick="switchTab('mappings-tab')">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+            Module Mappings
+        </button>
         {% if is_admin %}
-        <!-- ADMIN-ONLY: Global Application Settings (org/domain/console) -->
-        <!-- Team users are redirected away from /settings, but this guard
-             is kept as a defence-in-depth measure. -->
-        <div class="settings-card glass" style="grid-column: 1 / -1;">
-            <h2>Global Application Settings <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
-                <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
-                    <label style="margin:0;">Show Debug Console on Map View <small style="color:#94a3b8;">(your session only)</small></label>
-                    <label class="switch">
-                        <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                
-                <div class="form-group">
-                    <label>CRM Plus Portal Name (Optional)</label>
-                    <input type="text" id="crmplus-domain" placeholder="e.g. pirtekus" value="{{ crm_domain or '' }}" style="margin-top: 5px;">
-                    <small style="color: #94a3b8; font-size: 0.75rem;">Required for 'Open in Zoho' links to work in Zoho One/CRM Plus.</small>
-                </div>
-
-                <div class="form-group">
-                    <label>CRM Plus Org ID (Optional)</label>
-                    <input type="text" id="crmplus-orgid" placeholder="e.g. 897316137" value="{{ crm_org_id or '' }}" style="margin-top: 5px;">
-                    <small style="color: #94a3b8; font-size: 0.75rem;">Only enter if links show the wrong Org ID.</small>
-                </div>
-            </div>
-            <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
-        </div>
+        <button class="settings-tab-btn" onclick="switchTab('system-tab')">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            System & Sync
+        </button>
         {% endif %}
+        <button class="settings-tab-btn" onclick="switchTab('diagnostics-tab')">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            Diagnostics
+        </button>
+    </div>
 
-        {% if is_admin %}
-        <!-- ADMIN-ONLY: Export / Import Configuration -->
-        <div class="settings-card glass" style="grid-column: 1 / -1; border-color: rgba(99,102,241,0.35);">
-            <h2 style="display:flex; align-items:center; gap:0.75rem;">
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Export / Import Configuration
-                <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span>
-            </h2>
-            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
-                Transfer all module mappings and settings between servers (e.g. Dev → Production). Secrets and user caches are never included.
-            </p>
-            <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-start;">
-
-                <!-- Export -->
-                <div style="flex:1; min-width:220px;">
-                    <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📤 Export</h3>
-                    <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Download your current configuration as a <code>.json</code> file.</p>
-                    <a id="export-config-btn" href="/api/admin/export-config"
-                       style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
-                              background:linear-gradient(135deg,#6366f1,#4f46e5); color:white;
-                              border-radius:8px; font-weight:600; font-size:0.9rem;
-                              text-decoration:none; transition:opacity 0.2s;"
-                       onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        Download Config
-                    </a>
-                </div>
-
-                <div style="width:1px; background:rgba(255,255,255,0.1); align-self:stretch;"></div>
-
-                <!-- Import -->
-                <div style="flex:2; min-width:280px;">
-                    <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📥 Import</h3>
-                    <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Upload a <code>zohomap_config_export.json</code> file exported from another server. Existing mappings for the same module will be overwritten.</p>
-                    <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
-                        <label for="import-config-file"
-                               style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
-                                      background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.5);
-                                      color:white; border-radius:8px; font-weight:600; font-size:0.9rem;
-                                      cursor:pointer; transition:background 0.2s;"
-                               onmouseover="this.style.background='rgba(99,102,241,0.35)'"
-                               onmouseout="this.style.background='rgba(99,102,241,0.2)'">
-                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                            Choose File
-                        </label>
-                        <input type="file" id="import-config-file" accept=".json" style="display:none;">
-                        <span id="import-file-name" style="color:#94a3b8; font-size:0.85rem; font-style:italic;">No file chosen</span>
-                        <button id="import-config-btn" onclick="doImportConfig()"
-                                style="padding:0.6rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
-                                       color:white; border:none; border-radius:8px; font-weight:600;
-                                       font-size:0.9rem; cursor:pointer; display:none; transition:opacity 0.2s;"
-                                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                            Import Now
-                        </button>
-                    </div>
-                    <div id="import-status" style="margin-top:1rem; display:none;"></div>
-                </div>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Franchise Debug Card (visible to ALL logged-in users) -->
-        <div class="settings-card glass" id="franchise-debug-card" style="grid-column: 1 / -1; border-color: rgba(251,191,36,0.35);">
-            <h2 style="display:flex; align-items:center; gap:0.75rem;">
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#fbbf24" stroke-width="2" fill="none">
-                    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
-                </svg>
-                Franchise Debug
-                <span style="font-size:0.75rem; color:#fbbf24; font-weight:400;">(your franchise assignments &amp; cache match analysis)</span>
-            </h2>
-
-            <div style="display:flex; gap:1rem; margin-bottom:0.75rem; flex-wrap:wrap;">
-                <button onclick="loadFranchiseDebug(false)" id="fd-load-btn"
-                    style="padding:0.45rem 1rem; background:rgba(251,191,36,0.15); border:1px solid rgba(251,191,36,0.4);
-                           color:#fbbf24; border-radius:7px; cursor:pointer; font-size:0.82rem; font-weight:600;">
-                    🔍 Load Debug Info
-                </button>
-                <button onclick="loadFranchiseDebug(true)" id="fd-refresh-btn"
-                    style="padding:0.45rem 1rem; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
-                           color:#fca5a5; border-radius:7px; cursor:pointer; font-size:0.82rem;">
-                    🔄 Force Refresh (bust 4h cache)
-                </button>
-            </div>
-
-            <div id="franchise-debug-output" style="background:rgba(0,0,0,0.25); border-radius:10px; padding:1rem; font-size:0.82rem; display:none;">
-                <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
-            </div>
-        </div>
-
-        {% if is_admin %}
-        <!-- ADMIN-ONLY: Service Token -->
-
-        <div class="settings-card glass" id="service-token-card" style="grid-column: 1 / -1; border-color: rgba(99,102,241,0.35);">
-
-            <h2 style="display:flex; align-items:center; gap:0.75rem;">
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#818cf8" stroke-width="2" fill="none">
-                    <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-                </svg>
-                Service Token
-                <span style="font-size:0.75rem; color:#818cf8; font-weight:400;">(Admin only — powers nightly sync &amp; team user access)</span>
-            </h2>
-            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
-                The service token lets the server sync data on behalf of all users without requiring you to be logged in.
-                If nightly sync or team user syncs are failing, click <strong>Save My Token</strong> to refresh it — no server access needed.
-            </p>
-
-            <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
-                <!-- Token status panel -->
-                <div style="flex:1; min-width:260px;">
-                    <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;" id="token-status-panel">
-                        <div style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">Token Sources</div>
-                        <div id="token-status-rows" style="font-size:0.82rem; line-height:2;">
-                            <span style="color:#64748b;">Loading…</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Save button -->
-                <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
-                    <button id="save-token-btn" onclick="saveServiceToken()"
-                            style="display:flex; align-items:center; justify-content:center; gap:8px;
-                                   padding:0.7rem 1.5rem; background:linear-gradient(135deg,#6366f1,#4f46e5);
-                                   color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
-                                   cursor:pointer; transition:opacity 0.2s;"
-                            onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
-                        </svg>
-                        <span id="save-token-label">💾 Save My Token</span>
-                    </button>
-                    <div id="token-save-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
-                    <p style="font-size:0.75rem; color:#475569; text-align:center; margin:0;">
-                        You must be logged in as admin to save.<br>Log out &amp; back in first if this fails.
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <!-- ADMIN-ONLY: Nightly Sync Status -->
-
-        <div class="settings-card glass" id="nightly-sync-card" style="grid-column: 1 / -1; border-color: rgba(16,185,129,0.35);">
-            <h2 style="display:flex; align-items:center; gap:0.75rem;">
-                <svg viewBox="0 0 24 24" width="22" height="22" stroke="#10b981" stroke-width="2" fill="none">
-                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                </svg>
-                Nightly Auto-Sync
-                <span style="font-size:0.75rem; color:#10b981; font-weight:400;">(Admin only — runs daily at 11pm EST)</span>
-            </h2>
-            <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
-                The server automatically syncs all map data every night. Users never need to run a full sync manually.
-                Use <strong>Run Now</strong> to force an immediate refresh after making changes in Zoho.
-            </p>
-
-            <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
-                <!-- Status panel -->
-                <div style="flex:1; min-width:260px;">
-                    <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
-                            <span style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">Status</span>
-                            <span id="sync-status-badge" style="font-size:0.75rem; font-weight:600; padding:0.2rem 0.6rem; border-radius:20px; background:rgba(100,116,139,0.3); color:#94a3b8;">
-                                Loading…
-                            </span>
-                        </div>
-                        <div style="font-size:0.85rem; color:#e2e8f0; margin-bottom:0.5rem;">
-                            Last sync: <span id="sync-last-time" style="color:#94a3b8;">—</span>
-                        </div>
-                        <div id="sync-module-counts" style="font-size:0.8rem; color:#94a3b8; line-height:1.8;">
-                            <!-- Populated by JS -->
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Controls -->
-                <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
-                    <button id="run-sync-btn" onclick="runNightlySync()"
-                            style="display:flex; align-items:center; justify-content:center; gap:8px;
-                                   padding:0.7rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
-                                   color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
-                                   cursor:pointer; transition:opacity 0.2s;"
-                            onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
-                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-                        </svg>
-                        <span id="run-sync-label">▶ Run Sync Now</span>
-                    </button>
-                    <div id="sync-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
-                </div>
-            </div>
-        </div>
-        {% endif %}
-
-        <!-- Add New Config Form -->
-        <div class="settings-card glass">
-            <h2>Add New Mapping</h2>
-            <form id="config-form" class="config-form">
-                <div class="form-group">
-                    <label>Zoho Module</label>
-                    <select id="module-select" required>
-                        <option value="">Loading modules...</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Marker Color</label>
-                    <input type="hidden" id="marker-color" value="#3b82f6">
-                    <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;">
-                        <!-- Swatches injected by JS -->
-                    </div>
-                    <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 6px;">Selected: <span id="color-preview" style="display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;background:#3b82f6;"></span> <span id="color-hex">#3b82f6</span></small>
-                </div>
-
-                <div class="form-group">
-                    <label>Marker Icon</label>
-                    <div id="icon-selector" style="display:flex; gap:12px; flex-wrap: wrap; margin-top: 6px;">
-                        <!-- Icon options injected by JS -->
-                    </div>
-                    <input type="hidden" id="marker-icon" value="pin">
-                </div>
-
-                <div id="fields-container" class="fields-container" style="display:none;">
-                    <h3>Field Mapping</h3>
-                    
-                    <div class="mapping-section">
-                        <h4>Coordinates (Priority)</h4>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Latitude Field</label>
-                                <select id="map-lat" class="field-select"></select>
-                            </div>
-                            <div class="form-group">
-                                <label>Longitude Field</label>
-                                <select id="map-lng" class="field-select"></select>
-                            </div>
-                        </div>
-                        <small style="color: #94a3b8; font-size: 0.75rem;">If these fields have values, they will be used instead of the address.</small>
-                    </div>
-
-                    <div id="address-fields" class="mapping-section" style="margin-top: 1.5rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
-                        <h4>Address Fields (Fallback)</h4>
-                        <div class="form-group">
-                            <label>Street Address 1</label>
-                            <select id="map-address1" class="field-select"></select>
-                        </div>
-                        <div class="form-group">
-                            <label>Street Address 2</label>
-                            <select id="map-address2" class="field-select"></select>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>City</label>
-                                <select id="map-city" class="field-select"></select>
-                            </div>
-                            <div class="form-group">
-                                <label>State/Province</label>
-                                <select id="map-state" class="field-select"></select>
-                            </div>
-                        </div>
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Zip/Postal Code</label>
-                                <select id="map-zip" class="field-select"></select>
-                            </div>
-                            <div class="form-group">
-                                <label>Country</label>
-                                <select id="map-country" class="field-select"></select>
-                            </div>
-                        </div>
+    <!-- ── MAPPINGS TAB ── -->
+    <div id="mappings-tab" class="settings-tab-content active">
+        <div class="settings-grid">
+            <!-- Add/Edit Config Form -->
+            <div class="settings-card glass">
+                <h2>Add New Mapping</h2>
+                <form id="config-form" class="config-form">
+                    <div class="form-group">
+                        <label>Zoho Module</label>
+                        <select id="module-select" required>
+                            <option value="">Loading modules...</option>
+                        </select>
                     </div>
                     
-                    <div class="mapping-section" style="margin-top: 1rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
-                        <h3>Display Settings</h3>
-                        <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
-                            <div style="flex: 1; min-width: 250px;">
+                    <div class="form-group">
+                        <label>Marker Color</label>
+                        <input type="hidden" id="marker-color" value="#3b82f6">
+                        <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px;">
+                            <!-- Swatches injected by JS -->
+                        </div>
+                        <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 6px;">Selected: <span id="color-preview" style="display:inline-block;width:14px;height:14px;border-radius:50%;vertical-align:middle;background:#3b82f6;"></span> <span id="color-hex">#3b82f6</span></small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Marker Icon</label>
+                        <div id="icon-selector" style="display:flex; gap:12px; flex-wrap: wrap; margin-top: 6px;">
+                            <!-- Icon options injected by JS -->
+                        </div>
+                        <input type="hidden" id="marker-icon" value="pin">
+                    </div>
+
+                    <div id="fields-container" class="fields-container" style="display:none;">
+                        <h3>Field Mapping</h3>
+                        
+                        <div class="mapping-section">
+                            <h4>Coordinates (Priority)</h4>
+                            <div class="form-row">
                                 <div class="form-group">
-                                    <label>Title Field (Required)</label>
-                                    <select id="map-title_field" class="field-select" required></select>
-                                    <small style="color: #94a3b8; font-size: 0.75rem;">This will be the main name of the pin on the map.</small>
+                                    <label>Latitude Field</label>
+                                    <select id="map-lat" class="field-select"></select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Additional Display Fields (Optional)</label>
-                                    <select id="map-additional_fields" class="field-select" multiple size="4" style="height: auto;"></select>
-                                    <small style="color: #94a3b8; font-size: 0.75rem;">Hold Ctrl/Cmd to select multiple. These show in the popup.</small>
+                                    <label>Longitude Field</label>
+                                    <select id="map-lng" class="field-select"></select>
                                 </div>
                             </div>
-                            <div style="flex: 1; min-width: 250px;">
-                                <h4>Live Popup Preview</h4>
-                                <div id="preview-box" style="background: white; color: black; padding: 1rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); min-height: 100px;">
-                                    <div class="info-window" style="font-family: sans-serif;">
-                                        <h3 id="preview-title" style="margin: 0 0 10px 0; font-size: 1.1rem; color: #1e293b;">Select a title field...</h3>
-                                        <p style="margin: 0 0 10px 0; font-size: 0.85rem; color: #64748b;"><strong>Module:</strong> <span id="preview-module">...</span></p>
-                                        <div class="info-details" id="preview-details" style="font-size: 0.9rem;">
-                                            <div style="color: #94a3b8; font-style: italic;">No additional fields selected</div>
+                            <small style="color: #94a3b8; font-size: 0.75rem;">If these fields have values, they will be used instead of the address.</small>
+                        </div>
+
+                        <div id="address-fields" class="mapping-section" style="margin-top: 1.5rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+                            <h4>Address Fields (Fallback)</h4>
+                            <div class="form-group">
+                                <label>Street Address 1</label>
+                                <select id="map-address1" class="field-select"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Street Address 2</label>
+                                <select id="map-address2" class="field-select"></select>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>City</label>
+                                    <select id="map-city" class="field-select"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>State/Province</label>
+                                    <select id="map-state" class="field-select"></select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Zip/Postal Code</label>
+                                    <select id="map-zip" class="field-select"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Country</label>
+                                    <select id="map-country" class="field-select"></select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mapping-section" style="margin-top: 1rem; border-top: 1px solid var(--glass-border); padding-top: 1rem;">
+                            <h3>Display Settings</h3>
+                            <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+                                <div style="flex: 1.2; min-width: 280px;">
+                                    <div class="form-group">
+                                        <label>Title Field (Required)</label>
+                                        <select id="map-title_field" class="field-select" required></select>
+                                        <small style="color: #94a3b8; font-size: 0.75rem;">This will be the main name of the pin on the map.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Additional Display Fields (Optional)</label>
+                                        <div class="dual-list-container">
+                                            <!-- Available Fields -->
+                                            <div class="dual-list-pane">
+                                                <span class="dual-list-title">Available Fields</span>
+                                                <select id="dual-list-available" class="field-select" multiple size="8"></select>
+                                            </div>
+                                            
+                                            <!-- Control Buttons -->
+                                            <div class="dual-list-btns">
+                                                <button type="button" id="btn-dual-add" title="Add Selected" class="btn-primary">➔</button>
+                                                <button type="button" id="btn-dual-remove" title="Remove Selected" class="btn-primary">⬅</button>
+                                            </div>
+                                            
+                                            <!-- Selected Fields -->
+                                            <div class="dual-list-pane">
+                                                <span class="dual-list-title">Selected Fields</span>
+                                                <select id="dual-list-selected" class="field-select" multiple size="8"></select>
+                                            </div>
+                                            
+                                            <!-- Order Buttons -->
+                                            <div class="dual-list-order-btns">
+                                                <button type="button" id="btn-dual-up" title="Move Up" class="btn-primary">▲</button>
+                                                <button type="button" id="btn-dual-down" title="Move Down" class="btn-primary">▼</button>
+                                            </div>
+                                        </div>
+                                        <small style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 0.5rem;">
+                                            Double-click to move fields. Use the arrows on the right to re-order selected fields.
+                                        </small>
+                                    </div>
+                                </div>
+                                <div style="flex: 0.8; min-width: 240px;">
+                                    <h4>Live Popup Preview</h4>
+                                    <div id="preview-box" style="background: white; color: black; padding: 1rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); min-height: 100px;">
+                                        <div class="info-window" style="font-family: sans-serif;">
+                                            <h3 id="preview-title" style="margin: 0 0 10px 0; font-size: 1.1rem; color: #1e293b;">Select a title field...</h3>
+                                            <p style="margin: 0 0 10px 0; font-size: 0.85rem; color: #64748b;"><strong>Module:</strong> <span id="preview-module">...</span></p>
+                                            <div class="info-details" id="preview-details" style="font-size: 0.9rem;">
+                                                <div style="color: #94a3b8; font-style: italic;">No additional fields selected</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <small id="preview-status" style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 0.5rem;">Waiting for module selection...</small>
+                                </div>
+                            </div>
+
+                            <!-- Marker Aesthetics -->
+                            <div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1);">
+                                <div style="flex: 1; min-width: 250px;">
+                                    <div class="form-group">
+                                        <label>Marker Color</label>
+                                        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+                                            <div id="color-preview" style="width: 24px; height: 24px; border-radius: 50%; border: 2px solid white;"></div>
+                                            <span id="color-hex" style="font-family: monospace; font-size: 0.9rem;">#3b82f6</span>
+                                            <input type="hidden" id="marker-color" value="#3b82f6">
+                                        </div>
+                                        <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                                    </div>
+                                </div>
+                                <div style="flex: 1; min-width: 250px;">
+                                    <div class="form-group">
+                                        <label>Marker Icon</label>
+                                        <input type="hidden" id="marker-icon" value="pin">
+                                        <div id="icon-selector" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        {% if is_admin %}
+                        <div class="form-group" style="display:flex; align-items:center; gap: 0.75rem; margin-top: 1rem; background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
+                            <label style="margin:0; color: #fff; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 500;">
+                                <input type="checkbox" id="map-is_shared" style="width:auto;">
+                                Share this configuration with all users
+                            </label>
+                        </div>
+                        {% endif %}
+
+                        <!-- ===== DUPLICATE FILTER SECTION ===== -->
+                        <div id="dup-filter-section" style="margin-top:1rem; border-top:1px solid var(--glass-border); padding-top:1rem;">
+                            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;" onclick="toggleFilterSection()">
+                                <h3 style="margin:0; display:flex; align-items:center; gap:8px; font-size:0.95rem;">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2V12.46L22 3z"/></svg>
+                                    Duplicate Filter
+                                    <small style="font-weight:400; font-size:0.72rem; color:#94a3b8;">hide overlapping markers from another module</small>
+                                </h3>
+                                <span id="filter-toggle-icon" style="color:var(--primary); font-size:0.8rem; font-weight:600;">&#9658; Configure</span>
+                            </div>
+                            <div id="dup-filter-body" style="display:none; margin-top:1rem;">
+                                <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:8px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.8rem; color:#94a3b8; line-height:1.5;">
+                                    When two modules share the same location (e.g. a <strong style="color:#cbd5e1;">Ship to Address</strong> duplicating its parent <strong style="color:#cbd5e1;">Customer</strong>), configure this to automatically hide the child marker that duplicates the parent pin. A re-sync is required after saving.
+                                </div>
+                                <div class="form-group" style="display:flex; align-items:center; gap:0.75rem; background:rgba(99,102,241,0.1); padding:0.75rem; border-radius:8px; border:1px solid rgba(99,102,241,0.2);">
+                                    <label style="margin:0; font-weight:500; flex:1;">Enable Duplicate Filter for this module</label>
+                                    <label class="switch" style="flex-shrink:0;">
+                                        <input type="checkbox" id="dup-filter-enabled" onchange="toggleDupFilterFields(this.checked)">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div id="dup-filter-fields" style="display:none; margin-top:1rem;">
+                                    <div class="form-group">
+                                        <label>Parent Module <small style="color:#94a3b8; font-weight:400;">— the module whose pin takes priority (e.g. Customers)</small></label>
+                                        <select id="dup-filter-parent-module"><option value="">-- Select parent module --</option></select>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Parent Link Field <small style="color:#94a3b8; font-weight:400;">— field in THIS module that links to the parent record</small></label>
+                                            <select id="dup-filter-parent-link"><option value="">-- Select field --</option></select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Primary Code Field <small style="color:#94a3b8; font-weight:400;">— field identifying the primary duplicate (e.g. Ship to Code)</small></label>
+                                            <select id="dup-filter-primary-code-field"><option value="">-- Select field --</option></select>
+                                        </div>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Primary Code Value <small style="color:#94a3b8; font-weight:400;">— value that marks the duplicate (usually 0)</small></label>
+                                            <input type="text" id="dup-filter-primary-code-value" value="0" placeholder="e.g. 0" style="margin-top:4px;">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Override Checkbox Field <small style="color:#94a3b8; font-weight:400;">— optional: if checked, THIS record is duplicate instead of the code above</small></label>
+                                            <select id="dup-filter-override-field"><option value="">-- None (use code only) --</option></select>
                                         </div>
                                     </div>
                                 </div>
-                                <small id="preview-status" style="color: #94a3b8; font-size: 0.75rem; display: block; margin-top: 0.5rem;">Waiting for module selection...</small>
                             </div>
                         </div>
+                        <!-- ===== END DUPLICATE FILTER ===== -->
 
-                        <!-- Marker Aesthetics -->
-                        <div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1);">
-                            <div style="flex: 1; min-width: 250px;">
-                                <div class="form-group">
-                                    <label>Marker Color</label>
-                                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
-                                        <div id="color-preview" style="width: 24px; height: 24px; border-radius: 50%; border: 2px solid white;"></div>
-                                        <span id="color-hex" style="font-family: monospace; font-size: 0.9rem;">#3b82f6</span>
-                                        <input type="hidden" id="marker-color" value="#3b82f6">
-                                    </div>
-                                    <div id="color-swatches" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+                        <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Existing Mappings List -->
+            <div class="settings-card glass">
+                <h2>Active Mappings</h2>
+                <div class="mappings-list">
+                    {% if configs %}
+                        {% for conf in configs %}
+                        <div class="mapping-item">
+                            <div class="mapping-info">
+                                <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
+                                <div class="mapping-details">
+                                    <strong>{{ conf.module_name }}</strong>
+                                    <span class="mapping-type">Unified Mapping (Lat/Long + Address)</span>
                                 </div>
                             </div>
-                            <div style="flex: 1; min-width: 250px;">
-                                <div class="form-group">
-                                    <label>Marker Icon</label>
-                                    <input type="hidden" id="marker-icon" value="pin">
-                                    <div id="icon-selector" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
-                                </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <button class="btn-primary" style="padding: 0.4rem 0.75rem; font-size: 0.85rem;" onclick="syncMapping('{{ conf.module_name }}')" id="sync-btn-{{ conf.module_name }}">
+                                    Sync Data
+                                </button>
+                                <script type="application/json" id="conf-data-{{ conf.module_name }}">
+                                    {{ conf|tojson|safe }}
+                                </script>
+                                <button class="btn-primary" style="padding: 0.4rem 0.75rem; font-size: 0.85rem; background: var(--secondary);" onclick="editMapping('{{ conf.module_name }}')">
+                                    Edit
+                                </button>
+                                <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')" style="padding: 0.4rem; height: auto;">
+                                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    </svg>
+                                </button>
                             </div>
                         </div>
-                    </div>
-                    
-                    {% if is_admin %}
-                    <div class="form-group" style="display:flex; align-items:center; gap: 0.75rem; margin-top: 1rem; background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);">
-                        <label style="margin:0; color: #fff; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 500;">
-                            <input type="checkbox" id="map-is_shared" style="width:auto;">
-                            Share this configuration with all users
+                        {% endfor %}
+                    {% else %}
+                        <p class="empty-state">No modules mapped yet. Add one to get started.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Shared Configurations from Admins -->
+            <div class="settings-card glass" style="border-color: rgba(59, 130, 246, 0.3);">
+                <h2 style="display: flex; align-items: center; gap: 0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    Shared Configurations (Admin)
+                </h2>
+                <div class="mappings-list">
+                    {% if shared_configs %}
+                        {% for conf in shared_configs %}
+                        {% if conf.user_id != session.get('user_id') %}
+                        <div class="mapping-item" style="border-left: 4px solid var(--primary);">
+                            <div class="mapping-info">
+                                <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
+                                <div class="mapping-details">
+                                    <strong>{{ conf.module_name }}</strong>
+                                    <span class="mapping-type">Shared by Administrator</span>
+                                </div>
+                            </div>
+                            <div>
+                                <script type="application/json" id="shared-conf-{{ loop.index }}">
+                                    {{ conf|tojson|safe }}
+                                </script>
+                                <button class="btn-primary" style="padding: 0.4rem 1rem; font-size: 0.85rem;" onclick="copySharedConfig({{ loop.index }})">
+                                    Copy to My Mapping
+                                </button>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <p class="empty-state">No shared configurations available yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── SYSTEM & SYNC TAB ── -->
+    {% if is_admin %}
+    <div id="system-tab" class="settings-tab-content">
+        <div class="settings-grid">
+            <!-- Global Application Settings (org/domain/console) -->
+            <div class="settings-card glass">
+                <h2>Global Application Settings <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+                    <div class="form-group" style="display:flex; align-items:center; gap: 1rem;">
+                        <label style="margin:0;">Show Debug Console on Map View <small style="color:#94a3b8;">(your session only)</small></label>
+                        <label class="switch">
+                            <input type="checkbox" id="toggle-console" {% if show_console %}checked{% endif %}>
+                            <span class="slider round"></span>
                         </label>
                     </div>
-                    {% endif %}
-
-                    <!-- ===== DUPLICATE FILTER SECTION ===== -->
-                    <div id="dup-filter-section" style="margin-top:1rem; border-top:1px solid var(--glass-border); padding-top:1rem;">
-                        <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;" onclick="toggleFilterSection()">
-                            <h3 style="margin:0; display:flex; align-items:center; gap:8px; font-size:0.95rem;">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2V12.46L22 3z"/></svg>
-                                Duplicate Filter
-                                <small style="font-weight:400; font-size:0.72rem; color:#94a3b8;">hide overlapping markers from another module</small>
-                            </h3>
-                            <span id="filter-toggle-icon" style="color:var(--primary); font-size:0.8rem; font-weight:600;">&#9658; Configure</span>
-                        </div>
-                        <div id="dup-filter-body" style="display:none; margin-top:1rem;">
-                            <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:8px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.8rem; color:#94a3b8; line-height:1.5;">
-                                When two modules share the same location (e.g. a <strong style="color:#cbd5e1;">Ship to Address</strong> duplicating its parent <strong style="color:#cbd5e1;">Customer</strong>), configure this to automatically hide the child marker that duplicates the parent pin. A re-sync is required after saving.
-                            </div>
-                            <div class="form-group" style="display:flex; align-items:center; gap:0.75rem; background:rgba(99,102,241,0.1); padding:0.75rem; border-radius:8px; border:1px solid rgba(99,102,241,0.2);">
-                                <label style="margin:0; font-weight:500; flex:1;">Enable Duplicate Filter for this module</label>
-                                <label class="switch" style="flex-shrink:0;">
-                                    <input type="checkbox" id="dup-filter-enabled" onchange="toggleDupFilterFields(this.checked)">
-                                    <span class="slider round"></span>
-                                </label>
-                            </div>
-                            <div id="dup-filter-fields" style="display:none; margin-top:1rem;">
-                                <div class="form-group">
-                                    <label>Parent Module <small style="color:#94a3b8; font-weight:400;">— the module whose pin takes priority (e.g. Customers)</small></label>
-                                    <select id="dup-filter-parent-module"><option value="">-- Select parent module --</option></select>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>Parent Link Field <small style="color:#94a3b8; font-weight:400;">— field in THIS module that links to the parent record</small></label>
-                                        <select id="dup-filter-parent-link"><option value="">-- Select field --</option></select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Primary Code Field <small style="color:#94a3b8; font-weight:400;">— field identifying the primary duplicate (e.g. Ship to Code)</small></label>
-                                        <select id="dup-filter-primary-code-field"><option value="">-- Select field --</option></select>
-                                    </div>
-                                </div>
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label>Primary Code Value <small style="color:#94a3b8; font-weight:400;">— value that marks the duplicate (usually 0)</small></label>
-                                        <input type="text" id="dup-filter-primary-code-value" value="0" placeholder="e.g. 0" style="margin-top:4px;">
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Override Checkbox Field <small style="color:#94a3b8; font-weight:400;">— optional: if checked, THIS record is duplicate instead of the code above</small></label>
-                                        <select id="dup-filter-override-field"><option value="">-- None (use code only) --</option></select>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                    
+                    <div class="form-group">
+                        <label>CRM Plus Portal Name (Optional)</label>
+                        <input type="text" id="crmplus-domain" placeholder="e.g. pirtekus" value="{{ crm_domain or '' }}" style="margin-top: 5px;">
+                        <small style="color: #94a3b8; font-size: 0.75rem;">Required for 'Open in Zoho' links to work in Zoho One/CRM Plus.</small>
                     </div>
-                    <!-- ===== END DUPLICATE FILTER ===== -->
 
-                    <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
+                    <div class="form-group">
+                        <label>CRM Plus Org ID (Optional)</label>
+                        <input type="text" id="crmplus-orgid" placeholder="e.g. 897316137" value="{{ crm_org_id or '' }}" style="margin-top: 5px;">
+                        <small style="color: #94a3b8; font-size: 0.75rem;">Only enter if links show the wrong Org ID.</small>
+                    </div>
                 </div>
-            </form>
-        </div>
-    </div> <!-- End of settings-grid -->
+                <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
+            </div>
 
-    <!-- Existing Mappings List - Now full width below the form -->
-    <div class="settings-card glass" style="margin-top: 2rem;">
-        <h2>Active Mappings</h2>
-        <div class="mappings-list">
-            {% if configs %}
-                {% for conf in configs %}
-                <div class="mapping-item">
-                    <div class="mapping-info">
-                        <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
-                        <div class="mapping-details">
-                            <strong>{{ conf.module_name }}</strong>
-                            <span class="mapping-type">Unified Mapping (Lat/Long + Address)</span>
+            <!-- Export / Import Configuration -->
+            <div class="settings-card glass" style="border-color: rgba(99,102,241,0.35);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Export / Import Configuration
+                    <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span>
+                </h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                    Transfer all module mappings and settings between servers (e.g. Dev → Production). Secrets and user caches are never included.
+                </p>
+                <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-start;">
+                    <!-- Export -->
+                    <div style="flex:1; min-width:220px;">
+                        <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📤 Export</h3>
+                        <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Download your current configuration as a <code>.json</code> file.</p>
+                        <a id="export-config-btn" href="/api/admin/export-config"
+                           style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
+                                  background:linear-gradient(135deg,#6366f1,#4f46e5); color:white;
+                                  border-radius:8px; font-weight:600; font-size:0.9rem;
+                                  text-decoration:none; transition:opacity 0.2s;"
+                           onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download Config
+                        </a>
+                    </div>
+
+                    <div style="width:1px; background:rgba(255,255,255,0.1); align-self:stretch;"></div>
+
+                    <!-- Import -->
+                    <div style="flex:2; min-width:280px;">
+                        <h3 style="font-size:0.95rem; margin-bottom:0.5rem; color:#e2e8f0;">📥 Import</h3>
+                        <p style="color:#94a3b8; font-size:0.8rem; margin-bottom:1rem;">Upload a <code>zohomap_config_export.json</code> file exported from another server. Existing mappings for the same module will be overwritten.</p>
+                        <div style="display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                            <label for="import-config-file"
+                                   style="display:inline-flex; align-items:center; gap:8px; padding:0.6rem 1.5rem;
+                                          background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.5);
+                                          color:white; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                          cursor:pointer; transition:background 0.2s;"
+                                   onmouseover="this.style.background='rgba(99,102,241,0.35)'"
+                                   onmouseout="this.style.background='rgba(99,102,241,0.2)'">
+                                <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                                Choose File
+                            </label>
+                            <input type="file" id="import-config-file" accept=".json" style="display:none;">
+                            <span id="import-file-name" style="color:#94a3b8; font-size:0.85rem; font-style:italic;">No file chosen</span>
+                            <button id="import-config-btn" onclick="doImportConfig()"
+                                    style="padding:0.6rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
+                                           color:white; border:none; border-radius:8px; font-weight:600;
+                                           font-size:0.9rem; cursor:pointer; display:none; transition:opacity 0.2s;"
+                                    onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                                Import Now
+                            </button>
+                        </div>
+                        <div id="import-status" style="margin-top:1rem; display:none;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service Token -->
+            <div class="settings-card glass" id="service-token-card" style="border-color: rgba(99,102,241,0.35);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="#818cf8" stroke-width="2" fill="none">
+                        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                    </svg>
+                    Service Token
+                    <span style="font-size:0.75rem; color:#818cf8; font-weight:400;">(Admin only — powers nightly sync &amp; team user access)</span>
+                </h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
+                    The service token lets the server sync data on behalf of all users without requiring you to be logged in.
+                    If nightly sync or team user syncs are failing, click <strong>Save My Token</strong> to refresh it — no server access needed.
+                </p>
+
+                <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+                    <!-- Token status panel -->
+                    <div style="flex:1; min-width:260px;">
+                        <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;" id="token-status-panel">
+                            <div style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.75rem;">Token Sources</div>
+                            <div id="token-status-rows" style="font-size:0.82rem; line-height:2;">
+                                <span style="color:#64748b;">Loading…</span>
+                            </div>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <button class="btn-primary" style="padding: 0.4rem 0.75rem; font-size: 0.85rem;" onclick="syncMapping('{{ conf.module_name }}')" id="sync-btn-{{ conf.module_name }}">
-                            Sync Data
-                        </button>
-                        <script type="application/json" id="conf-data-{{ conf.module_name }}">
-                            {{ conf|tojson|safe }}
-                        </script>
-                        <button class="btn-primary" style="padding: 0.4rem 0.75rem; font-size: 0.85rem; background: var(--secondary);" onclick="editMapping('{{ conf.module_name }}')">
-                            Edit
-                        </button>
-                        <button class="btn-icon-danger" onclick="deleteMapping('{{ conf.module_name }}')" style="padding: 0.4rem; height: auto;">
-                            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2" fill="none">
-                                <polyline points="3 6 5 6 21 6"></polyline>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+
+                    <!-- Save button -->
+                    <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
+                        <button id="save-token-btn" onclick="saveServiceToken()"
+                                style="display:flex; align-items:center; justify-content:center; gap:8px;
+                                       padding:0.7rem 1.5rem; background:linear-gradient(135deg,#6366f1,#4f46e5);
+                                       color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                       cursor:pointer; transition:opacity 0.2s;"
+                                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>
                             </svg>
+                            <span id="save-token-label">💾 Save My Token</span>
                         </button>
+                        <div id="token-save-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
+                        <p style="font-size:0.75rem; color:#475569; text-align:center; margin:0;">
+                            You must be logged in as admin to save.<br>Log out &amp; back in first if this fails.
+                        </p>
                     </div>
                 </div>
-                {% endfor %}
-            {% else %}
-                <p class="empty-state">No modules mapped yet. Add one to get started.</p>
-            {% endif %}
-        </div>
-    </div>
+            </div>
 
-    <!-- Shared Configurations from Admins -->
-    <div class="settings-card glass" style="margin-top: 2rem; border-color: rgba(59, 130, 246, 0.3);">
-        <h2 style="display: flex; align-items: center; gap: 0.75rem;">
-            <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-            Shared Configurations (Admin)
-        </h2>
-        <div class="mappings-list">
-            {% if shared_configs %}
-                {% for conf in shared_configs %}
-                {% if conf.user_id != session.get('user_id') %}
-                <div class="mapping-item" style="border-left: 4px solid var(--primary);">
-                    <div class="mapping-info">
-                        <span class="color-dot" style="background-color: {{ conf.marker_color }}"></span>
-                        <div class="mapping-details">
-                            <strong>{{ conf.module_name }}</strong>
-                            <span class="mapping-type">Shared by Administrator</span>
+            <!-- Nightly Auto-Sync -->
+            <div class="settings-card glass" id="nightly-sync-card" style="border-color: rgba(16,185,129,0.35);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="#10b981" stroke-width="2" fill="none">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                    Nightly Auto-Sync
+                    <span style="font-size:0.75rem; color:#10b981; font-weight:400;">(Admin only — runs daily at 11pm EST)</span>
+                </h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.25rem;">
+                    The server automatically syncs all map data every night. Users never need to run a full sync manually.
+                    Use <strong>Run Now</strong> to force an immediate refresh after making changes in Zoho.
+                </p>
+
+                <div style="display:flex; gap:2rem; flex-wrap:wrap; align-items:flex-start;">
+                    <!-- Status panel -->
+                    <div style="flex:1; min-width:260px;">
+                        <div style="background:rgba(0,0,0,0.2); border-radius:10px; padding:1rem;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem;">
+                                <span style="color:#94a3b8; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">Status</span>
+                                <span id="sync-status-badge" style="font-size:0.75rem; font-weight:600; padding:0.2rem 0.6rem; border-radius:20px; background:rgba(100,116,139,0.3); color:#94a3b8;">
+                                    Loading…
+                                </span>
+                            </div>
+                            <div style="font-size:0.85rem; color:#e2e8f0; margin-bottom:0.5rem;">
+                                Last sync: <span id="sync-last-time" style="color:#94a3b8;">—</span>
+                            </div>
+                            <div id="sync-module-counts" style="font-size:0.8rem; color:#94a3b8; line-height:1.8;">
+                                <!-- Populated by JS -->
+                            </div>
                         </div>
                     </div>
-                    <div>
-                        <script type="application/json" id="shared-conf-{{ loop.index }}">
-                            {{ conf|tojson|safe }}
-                        </script>
-                        <button class="btn-primary" style="padding: 0.4rem 1rem; font-size: 0.85rem;" onclick="copySharedConfig({{ loop.index }})">
-                            Copy to My Mapping
+
+                    <!-- Controls -->
+                    <div style="flex:1; min-width:200px; display:flex; flex-direction:column; gap:0.75rem; justify-content:center;">
+                        <button id="run-sync-btn" onclick="runNightlySync()"
+                                style="display:flex; align-items:center; justify-content:center; gap:8px;
+                                       padding:0.7rem 1.5rem; background:linear-gradient(135deg,#10b981,#059669);
+                                       color:white; border:none; border-radius:8px; font-weight:600; font-size:0.9rem;
+                                       cursor:pointer; transition:opacity 0.2s;"
+                                onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none">
+                                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                            </svg>
+                            <span id="run-sync-label">▶ Run Sync Now</span>
                         </button>
+                        <div id="sync-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
                     </div>
                 </div>
-                {% endif %}
-                {% endfor %}
-            {% else %}
-                <p class="empty-state">No shared configurations available yet.</p>
-            {% endif %}
+            </div>
         </div>
     </div>
-</div>
+    {% endif %}
 
-<script>
+    <!-- ── DIAGNOSTICS TAB ── -->
+    <div id="diagnostics-tab" class="settings-tab-content">
+        <div class="settings-grid">
+            <!-- Franchise Debug Card -->
+            <div class="settings-card glass" id="franchise-debug-card" style="border-color: rgba(251,191,36,0.35);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="#fbbf24" stroke-width="2" fill="none">
+                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+                    </svg>
+                    Franchise Debug
+                    <span style="font-size:0.75rem; color:#fbbf24; font-weight:400;">(your franchise assignments &amp; cache match analysis)</span>
+                </h2>
+
+                <div style="display:flex; gap:1rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                    <button type="button" onclick="loadFranchiseDebug(false)" id="fd-load-btn"
+                        style="padding:0.45rem 1rem; background:rgba(251,191,36,0.15); border:1px solid rgba(251,191,36,0.4);
+                               color:#fbbf24; border-radius:7px; cursor:pointer; font-size:0.82rem; font-weight:600;">
+                        🔍 Load Debug Info
+                    </button>
+                    <button type="button" onclick="loadFranchiseDebug(true)" id="fd-refresh-btn"
+                        style="padding:0.45rem 1rem; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+                               color:#fca5a5; border-radius:7px; cursor:pointer; font-size:0.82rem;">
+                        🔄 Force Refresh (bust 4h cache)
+                    </button>
+                </div>
+
+                <div id="franchise-debug-output" style="background:rgba(0,0,0,0.25); border-radius:10px; padding:1rem; font-size:0.82rem; display:none;">
+                    <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
+   <script>
 let currentFields = [];
 let previewRecord = null;
+
+// Tab switcher function defined globally so it can be called by inline onclick
+function switchTab(tabId) {
+    document.querySelectorAll('.settings-tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-btn').forEach(el => el.classList.remove('active'));
+    
+    document.getElementById(tabId).classList.add('active');
+    
+    const buttons = document.querySelectorAll('.settings-tab-btn');
+    buttons.forEach(btn => {
+        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId)) {
+            btn.classList.add('active');
+        }
+    });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchModules();
@@ -524,14 +580,16 @@ document.addEventListener('DOMContentLoaded', () => {
         '#0ea5e9','#a3e635','#fb923c','#c084fc','#34d399','#ffffff'
     ];
     const swatchContainer = document.getElementById('color-swatches');
-    SWATCHES.forEach(c => {
-        const swatch = document.createElement('button');
-        swatch.type = 'button';
-        swatch.title = c;
-        swatch.style.cssText = `width:28px;height:28px;border-radius:50%;background:${c};border:3px solid transparent;cursor:pointer;transition:transform 0.15s,border-color 0.15s;`;
-        swatch.addEventListener('click', () => selectColor(c));
-        swatchContainer.appendChild(swatch);
-    });
+    if (swatchContainer) {
+        SWATCHES.forEach(c => {
+            const swatch = document.createElement('button');
+            swatch.type = 'button';
+            swatch.title = c;
+            swatch.style.cssText = `width:28px;height:28px;border-radius:50%;background:${c};border:3px solid transparent;cursor:pointer;transition:transform 0.15s,border-color 0.15s;`;
+            swatch.addEventListener('click', () => selectColor(c));
+            swatchContainer.appendChild(swatch);
+        });
+    }
     selectColor('#3b82f6');
 
     // Initialize icon selector
@@ -547,120 +605,150 @@ document.addEventListener('DOMContentLoaded', () => {
         { id:'building3D', label:'Modern', svg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="22" height="22"><path d="M4 21h16M7 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M10 7h4M10 11h4M10 15h4"/></svg>' },
     ];
     const iconContainer = document.getElementById('icon-selector');
-    ICONS.forEach(ic => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.title = ic.label;
-        btn.dataset.icon = ic.id;
-        btn.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(255,255,255,0.07);border:2px solid transparent;border-radius:8px;padding:8px 10px;cursor:pointer;color:white;font-size:0.7rem;transition:border-color 0.15s,background 0.15s;';
-        btn.innerHTML = ic.svg + `<span>${ic.label}</span>`;
-        btn.addEventListener('click', () => selectIcon(ic.id));
-        iconContainer.appendChild(btn);
-    });
+    if (iconContainer) {
+        ICONS.forEach(ic => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.title = ic.label;
+            btn.dataset.icon = ic.id;
+            btn.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(255,255,255,0.07);border:2px solid transparent;border-radius:8px;padding:8px 10px;cursor:pointer;color:white;font-size:0.7rem;transition:border-color 0.15s,background 0.15s;';
+            btn.innerHTML = ic.svg + `<span>${ic.label}</span>`;
+            btn.addEventListener('click', () => selectIcon(ic.id));
+            iconContainer.appendChild(btn);
+        });
+    }
     selectIcon('pin');
 
-    document.getElementById('save-global-btn').addEventListener('click', async () => {
-        const show_console = document.getElementById('toggle-console').checked ? 'true' : 'false';
-        const crm_domain = document.getElementById('crmplus-domain').value;
-        const crm_org_id = document.getElementById('crmplus-orgid').value;
-        
-        try {
-            await fetch('/api/settings/global', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: 'show_console', value: show_console})
-            });
-            await fetch('/api/settings/global', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: 'crmplus_domain', value: crm_domain})
-            });
-            await fetch('/api/settings/global', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({key: 'crmplus_orgid', value: crm_org_id})
-            });
-            alert('Global settings saved!');
-            window.location.reload();
-        } catch (err) {
-            console.error('Failed to save settings', err);
-            alert('Error saving global settings');
-        }
-    });
-
-    // Location type radios removed - always using both with priority logic
-
-    document.getElementById('module-select').addEventListener('change', (e) => {
-        if(e.target.value) {
-            fetchFields(e.target.value);
-            fetchPreviewRecord(e.target.value);
-        } else {
-            document.getElementById('fields-container').style.display = 'none';
-            previewRecord = null;
-            updatePreview();
-        }
-    });
-
-    document.getElementById('map-title_field').addEventListener('change', updatePreview);
-    document.getElementById('map-additional_fields').addEventListener('change', updatePreview);
-
-    document.getElementById('config-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const module_name = document.getElementById('module-select').value;
-        const marker_color = document.getElementById('marker-color').value;
-        
-        let field_mappings = {};
-        ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
-            field_mappings[f] = document.getElementById('map-' + f).value;
-        });
-        field_mappings['latitude'] = document.getElementById('map-lat').value;
-        field_mappings['longitude'] = document.getElementById('map-lng').value;
-        field_mappings['title_field'] = document.getElementById('map-title_field').value;
-        const addFieldsSelect = document.getElementById('map-additional_fields');
-        field_mappings['additional_fields'] = Array.from(addFieldsSelect.selectedOptions).map(opt => opt.value);
-
-        // Collect duplicate filter settings
-        const dupEnabled = document.getElementById('dup-filter-enabled').checked;
-        const parentLinkSel = document.getElementById('dup-filter-parent-link');
-        const primaryCodeSel = document.getElementById('dup-filter-primary-code-field');
-        const overrideSel = document.getElementById('dup-filter-override-field');
-        field_mappings['duplicate_filter'] = {
-            enabled: dupEnabled,
-            parent_module: document.getElementById('dup-filter-parent-module').value,
-            parent_link_field: parentLinkSel.value,
-            parent_link_field_label: parentLinkSel.options[parentLinkSel.selectedIndex]?.text || '',
-            primary_code_field: primaryCodeSel.value,
-            primary_code_field_label: primaryCodeSel.options[primaryCodeSel.selectedIndex]?.text || '',
-            primary_code_value: document.getElementById('dup-filter-primary-code-value').value || '0',
-            override_checkbox_field: overrideSel.value,
-            override_checkbox_field_label: overrideSel.value ? (overrideSel.options[overrideSel.selectedIndex]?.text || '') : ''
-        };
-
-        const isSharedEl = document.getElementById('map-is_shared');
-        const is_shared = isSharedEl ? isSharedEl.checked : false;
-
-        try {
-            const resp = await fetch('/api/settings/config', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({module_name, location_type: 'both', marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings, is_shared})
-            });
-            if(resp.ok) {
+    const saveGlobalBtn = document.getElementById('save-global-btn');
+    if (saveGlobalBtn) {
+        saveGlobalBtn.addEventListener('click', async () => {
+            const show_console = document.getElementById('toggle-console').checked ? 'true' : 'false';
+            const crm_domain = document.getElementById('crmplus-domain').value;
+            const crm_org_id = document.getElementById('crmplus-orgid').value;
+            
+            try {
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'show_console', value: show_console})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'crmplus_domain', value: crm_domain})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'crmplus_orgid', value: crm_org_id})
+                });
+                alert('Global settings saved!');
                 window.location.reload();
-            } else {
-                alert('Failed to save mapping');
+            } catch (err) {
+                console.error('Failed to save settings', err);
+                alert('Error saving global settings');
             }
-        } catch(e) {
-            console.error(e);
-            alert('Error saving mapping');
-        }
-    });
+        });
+    }
+
+    const moduleSelect = document.getElementById('module-select');
+    if (moduleSelect) {
+        moduleSelect.addEventListener('change', (e) => {
+            if(e.target.value) {
+                fetchFields(e.target.value);
+                fetchPreviewRecord(e.target.value);
+            } else {
+                document.getElementById('fields-container').style.display = 'none';
+                previewRecord = null;
+                updatePreview();
+            }
+        });
+    }
+
+    const titleFieldSelect = document.getElementById('map-title_field');
+    if (titleFieldSelect) {
+        titleFieldSelect.addEventListener('change', updatePreview);
+    }
+    
+    // Set up dual-list event listeners
+    const btnAdd = document.getElementById('btn-dual-add');
+    if (btnAdd) btnAdd.addEventListener('click', addSelectedFields);
+    const btnRemove = document.getElementById('btn-dual-remove');
+    if (btnRemove) btnRemove.addEventListener('click', removeSelectedFields);
+    const btnUp = document.getElementById('btn-dual-up');
+    if (btnUp) btnUp.addEventListener('click', moveSelectedFieldsUp);
+    const btnDown = document.getElementById('btn-dual-down');
+    if (btnDown) btnDown.addEventListener('click', moveSelectedFieldsDown);
+
+    const listAvail = document.getElementById('dual-list-available');
+    if (listAvail) listAvail.addEventListener('dblclick', addSelectedFields);
+    const listSel = document.getElementById('dual-list-selected');
+    if (listSel) listSel.addEventListener('dblclick', removeSelectedFields);
+
+    const configForm = document.getElementById('config-form');
+    if (configForm) {
+        configForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const module_name = document.getElementById('module-select').value;
+            const marker_color = document.getElementById('marker-color').value;
+            
+            let field_mappings = {};
+            ['address1', 'address2', 'city', 'state', 'zip', 'country'].forEach(f => {
+                field_mappings[f] = document.getElementById('map-' + f).value;
+            });
+            field_mappings['latitude'] = document.getElementById('map-lat').value;
+            field_mappings['longitude'] = document.getElementById('map-lng').value;
+            field_mappings['title_field'] = document.getElementById('map-title_field').value;
+            
+            // Retrieve selected fields in exact order
+            const selectedOptions = Array.from(document.querySelectorAll('#dual-list-selected option'));
+            field_mappings['additional_fields'] = selectedOptions.map(opt => opt.value);
+            field_mappings['additional_field_labels'] = selectedOptions.map(opt => opt.textContent);
+
+            // Collect duplicate filter settings
+            const dupEnabled = document.getElementById('dup-filter-enabled').checked;
+            const parentLinkSel = document.getElementById('dup-filter-parent-link');
+            const primaryCodeSel = document.getElementById('dup-filter-primary-code-field');
+            const overrideSel = document.getElementById('dup-filter-override-field');
+            field_mappings['duplicate_filter'] = {
+                enabled: dupEnabled,
+                parent_module: document.getElementById('dup-filter-parent-module').value,
+                parent_link_field: parentLinkSel.value,
+                parent_link_field_label: parentLinkSel.options[parentLinkSel.selectedIndex]?.text || '',
+                primary_code_field: primaryCodeSel.value,
+                primary_code_field_label: primaryCodeSel.options[primaryCodeSel.selectedIndex]?.text || '',
+                primary_code_value: document.getElementById('dup-filter-primary-code-value').value || '0',
+                override_checkbox_field: overrideSel.value,
+                override_checkbox_field_label: overrideSel.value ? (overrideSel.options[overrideSel.selectedIndex]?.text || '') : ''
+            };
+
+            const isSharedEl = document.getElementById('map-is_shared');
+            const is_shared = isSharedEl ? isSharedEl.checked : false;
+
+            try {
+                const resp = await fetch('/api/settings/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({module_name, location_type: 'both', marker_color, marker_icon: document.getElementById('marker-icon').value, field_mappings, is_shared})
+                });
+                if(resp.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Failed to save mapping');
+                }
+            } catch(e) {
+                console.error(e);
+                alert('Error saving mapping');
+            }
+        });
+    }
 });
 
 function selectColor(hex) {
-    document.getElementById('marker-color').value = hex;
-    document.getElementById('color-preview').style.background = hex;
-    document.getElementById('color-hex').textContent = hex;
+    const markerColorInput = document.getElementById('marker-color');
+    if (markerColorInput) markerColorInput.value = hex;
+    document.querySelectorAll('#color-preview').forEach(el => el.style.background = hex);
+    document.querySelectorAll('#color-hex').forEach(el => el.textContent = hex);
     
     // Update swatch borders
     document.querySelectorAll('#color-swatches button').forEach(btn => {
@@ -670,7 +758,8 @@ function selectColor(hex) {
 }
 
 function selectIcon(iconId) {
-    document.getElementById('marker-icon').value = iconId;
+    const markerIconInput = document.getElementById('marker-icon');
+    if (markerIconInput) markerIconInput.value = iconId;
     
     // Update icon button borders
     document.querySelectorAll('#icon-selector button').forEach(btn => {
@@ -684,12 +773,12 @@ function selectIcon(iconId) {
     });
 }
 
-
 async function fetchModules() {
     try {
         const res = await fetch('/api/modules');
         const modules = await res.json();
         const select = document.getElementById('module-select');
+        if (!select) return;
         select.innerHTML = '<option value="">Select a Module...</option>';
         modules.forEach(m => {
             const opt = document.createElement('option');
@@ -699,15 +788,24 @@ async function fetchModules() {
         });
     } catch (e) {
         console.error(e);
-        document.getElementById('module-select').innerHTML = '<option value="">Error loading modules</option>';
+        const select = document.getElementById('module-select');
+        if (select) select.innerHTML = '<option value="">Error loading modules</option>';
     }
 }
 
 async function fetchFields(moduleName) {
-    document.getElementById('fields-container').style.display = 'none';
+    const container = document.getElementById('fields-container');
+    if (container) container.style.display = 'none';
     try {
         const res = await fetch('/api/fields/' + moduleName);
         currentFields = await res.json();
+        
+        // Sort fields alphabetically by display label
+        currentFields.sort((a, b) => {
+            const la = (a.display_label || a.api_name).toLowerCase();
+            const lb = (b.display_label || b.api_name).toLowerCase();
+            return la.localeCompare(lb);
+        });
         
         const populateSelect = (selectId) => {
             const select = document.getElementById(selectId);
@@ -721,7 +819,23 @@ async function fetchFields(moduleName) {
             });
         };
 
-        ['map-address1', 'map-address2', 'map-city', 'map-state', 'map-zip', 'map-country', 'map-lat', 'map-lng', 'map-title_field', 'map-additional_fields'].forEach(populateSelect);
+        ['map-address1', 'map-address2', 'map-city', 'map-state', 'map-zip', 'map-country', 'map-lat', 'map-lng', 'map-title_field'].forEach(populateSelect);
+
+        // Populate dual-list available pane with alphabetically sorted fields
+        const availSelect = document.getElementById('dual-list-available');
+        if (availSelect) {
+            availSelect.innerHTML = '';
+            currentFields.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.api_name;
+                opt.textContent = f.display_label || f.api_name;
+                availSelect.appendChild(opt);
+            });
+        }
+        
+        // Reset selected list
+        const selectedSelect = document.getElementById('dual-list-selected');
+        if (selectedSelect) selectedSelect.innerHTML = '';
 
         // Populate duplicate filter field dropdowns with same field list
         ['dup-filter-parent-link', 'dup-filter-primary-code-field', 'dup-filter-override-field'].forEach(id => {
@@ -751,11 +865,75 @@ async function fetchFields(moduleName) {
             });
         }
 
-        document.getElementById('fields-container').style.display = 'block';
+        if (container) container.style.display = 'block';
     } catch (e) {
         console.error(e);
         alert('Error loading fields for module');
     }
+}
+
+// Dual List helper methods
+function addSelectedFields() {
+    const avail = document.getElementById('dual-list-available');
+    const selected = document.getElementById('dual-list-selected');
+    if (!avail || !selected) return;
+    const selectedOpts = Array.from(avail.selectedOptions);
+    selectedOpts.forEach(opt => {
+        selected.appendChild(opt);
+    });
+    updatePreview();
+}
+
+function removeSelectedFields() {
+    const avail = document.getElementById('dual-list-available');
+    const selected = document.getElementById('dual-list-selected');
+    if (!avail || !selected) return;
+    const selectedOpts = Array.from(selected.selectedOptions);
+    selectedOpts.forEach(opt => {
+        avail.appendChild(opt);
+    });
+    sortAvailableFields();
+    updatePreview();
+}
+
+function sortAvailableFields() {
+    const avail = document.getElementById('dual-list-available');
+    if (!avail) return;
+    const options = Array.from(avail.options);
+    options.sort((a, b) => a.text.toLowerCase().localeCompare(b.text.toLowerCase()));
+    avail.innerHTML = '';
+    options.forEach(opt => avail.appendChild(opt));
+}
+
+function moveSelectedFieldsUp() {
+    const selected = document.getElementById('dual-list-selected');
+    if (!selected) return;
+    const selectedOptions = Array.from(selected.selectedOptions);
+    if (selectedOptions.length === 0) return;
+    
+    selectedOptions.forEach(opt => {
+        const prev = opt.previousElementSibling;
+        if (prev && !prev.selected) {
+            selected.insertBefore(opt, prev);
+        }
+    });
+    updatePreview();
+}
+
+function moveSelectedFieldsDown() {
+    const selected = document.getElementById('dual-list-selected');
+    if (!selected) return;
+    const selectedOptions = Array.from(selected.selectedOptions);
+    if (selectedOptions.length === 0) return;
+    
+    for (let i = selectedOptions.length - 1; i >= 0; i--) {
+        const opt = selectedOptions[i];
+        const next = opt.nextElementSibling;
+        if (next && !next.selected) {
+            selected.insertBefore(next, opt);
+        }
+    }
+    updatePreview();
 }
 
 async function deleteMapping(moduleName) {
@@ -772,6 +950,7 @@ async function deleteMapping(moduleName) {
 
 async function syncMapping(moduleName) {
     const btn = document.getElementById('sync-btn-' + moduleName);
+    if (!btn) return;
     const originalText = btn.textContent;
     btn.textContent = 'Syncing...';
     btn.disabled = true;
@@ -794,6 +973,7 @@ async function syncMapping(moduleName) {
 }
 
 async function editMapping(moduleName) {
+    switchTab('mappings-tab');
     const confScript = document.getElementById('conf-data-' + moduleName);
     if(!confScript) return;
     const conf = JSON.parse(confScript.textContent);
@@ -802,7 +982,8 @@ async function editMapping(moduleName) {
 
 async function loadConfigIntoForm(conf) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
-    document.getElementById('module-select').value = conf.module_name;
+    const modSelect = document.getElementById('module-select');
+    if (modSelect) modSelect.value = conf.module_name;
     selectColor(conf.marker_color || '#3b82f6');
     selectIcon(conf.marker_icon || 'pin');
     
@@ -824,27 +1005,42 @@ async function loadConfigIntoForm(conf) {
     const titleEl = document.getElementById('map-title_field');
     if(titleEl) titleEl.value = conf.field_mappings['title_field'] || '';
     
-    const addSelect = document.getElementById('map-additional_fields');
-    if(addSelect) {
+    // Load dual list selected fields in exact order
+    const avail = document.getElementById('dual-list-available');
+    const selected = document.getElementById('dual-list-selected');
+    if (avail && selected) {
+        selected.innerHTML = '';
         const additional = conf.field_mappings['additional_fields'] || [];
-        Array.from(addSelect.options).forEach(opt => {
-            opt.selected = additional.includes(opt.value);
+        additional.forEach(apiName => {
+            const opt = Array.from(avail.options).find(o => o.value === apiName);
+            if (opt) {
+                selected.appendChild(opt);
+            }
         });
     }
 
     // Restore duplicate filter settings
     const df = conf.field_mappings?.duplicate_filter;
     if (df && df.enabled) {
-        // Expand the section
-        document.getElementById('dup-filter-body').style.display = 'block';
-        document.getElementById('filter-toggle-icon').innerHTML = '&#9660; Collapse';
-        document.getElementById('dup-filter-enabled').checked = true;
+        const dfBody = document.getElementById('dup-filter-body');
+        const dfToggleIcon = document.getElementById('filter-toggle-icon');
+        const dfEnabledInput = document.getElementById('dup-filter-enabled');
+        
+        if (dfBody) dfBody.style.display = 'block';
+        if (dfToggleIcon) dfToggleIcon.innerHTML = '&#9660; Collapse';
+        if (dfEnabledInput) dfEnabledInput.checked = true;
+        
         toggleDupFilterFields(true);
-        document.getElementById('dup-filter-parent-module').value = df.parent_module || '';
-        document.getElementById('dup-filter-parent-link').value = df.parent_link_field || '';
-        document.getElementById('dup-filter-primary-code-field').value = df.primary_code_field || '';
-        document.getElementById('dup-filter-primary-code-value').value = df.primary_code_value || '0';
-        document.getElementById('dup-filter-override-field').value = df.override_checkbox_field || '';
+        const pmSelect = document.getElementById('dup-filter-parent-module');
+        if (pmSelect) pmSelect.value = df.parent_module || '';
+        const plSelect = document.getElementById('dup-filter-parent-link');
+        if (plSelect) plSelect.value = df.parent_link_field || '';
+        const pcSelect = document.getElementById('dup-filter-primary-code-field');
+        if (pcSelect) pcSelect.value = df.primary_code_field || '';
+        const pcvInput = document.getElementById('dup-filter-primary-code-value');
+        if (pcvInput) pcvInput.value = df.primary_code_value || '0';
+        const ovSelect = document.getElementById('dup-filter-override-field');
+        if (ovSelect) ovSelect.value = df.override_checkbox_field || '';
     }
     
     fetchPreviewRecord(conf.module_name);
@@ -852,20 +1048,20 @@ async function loadConfigIntoForm(conf) {
 
 async function fetchPreviewRecord(moduleName) {
     const statusEl = document.getElementById('preview-status');
-    statusEl.textContent = 'Fetching sample record...';
+    if (statusEl) statusEl.textContent = 'Fetching sample record...';
     try {
         const res = await fetch('/api/preview-record/' + moduleName);
         if(res.ok) {
             previewRecord = await res.json();
-            statusEl.textContent = 'Previewing real sample data';
+            if (statusEl) statusEl.textContent = 'Previewing real sample data';
         } else {
             previewRecord = null;
-            statusEl.textContent = 'Could not fetch sample record. Using mock data.';
+            if (statusEl) statusEl.textContent = 'Could not fetch sample record. Using mock data.';
         }
     } catch(e) {
         console.error(e);
         previewRecord = null;
-        statusEl.textContent = 'Error fetching sample record. Using mock data.';
+        if (statusEl) statusEl.textContent = 'Error fetching sample record. Using mock data.';
     }
     updatePreview();
 }
@@ -879,44 +1075,52 @@ function extractZohoVal(val) {
 
 function updatePreview() {
     const titleSelect = document.getElementById('map-title_field');
-    const additionalSelect = document.getElementById('map-additional_fields');
+    const selectedSelect = document.getElementById('dual-list-selected');
     const moduleSelect = document.getElementById('module-select');
+    if (!titleSelect || !selectedSelect || !moduleSelect) return;
     
     const titleField = titleSelect.value;
-    const additionalFields = Array.from(additionalSelect.selectedOptions).map(o => o.value);
+    const additionalOptions = Array.from(selectedSelect.options);
     
-    document.getElementById('preview-module').textContent = moduleSelect.options[moduleSelect.selectedIndex]?.text || '...';
+    const pmEl = document.getElementById('preview-module');
+    if (pmEl) pmEl.textContent = moduleSelect.options[moduleSelect.selectedIndex]?.text || '...';
     
     const titleEl = document.getElementById('preview-title');
-    if (titleField) {
-        if (previewRecord && previewRecord[titleField] != null) {
-            titleEl.textContent = extractZohoVal(previewRecord[titleField]);
+    if (titleEl) {
+        if (titleField) {
+            if (previewRecord && previewRecord[titleField] != null) {
+                titleEl.textContent = extractZohoVal(previewRecord[titleField]);
+            } else {
+                titleEl.textContent = '[' + (titleSelect.options[titleSelect.selectedIndex]?.text || titleField) + ']';
+            }
         } else {
-            titleEl.textContent = '[' + (titleSelect.options[titleSelect.selectedIndex]?.text || titleField) + ']';
+            titleEl.textContent = 'Select a title field...';
         }
-    } else {
-        titleEl.textContent = 'Select a title field...';
     }
     
     const detailsEl = document.getElementById('preview-details');
-    detailsEl.innerHTML = '';
-    
-    if (additionalFields.length === 0) {
-        detailsEl.innerHTML = '<div style="color: #94a3b8; font-style: italic;">No additional fields selected</div>';
-    } else {
-        additionalFields.forEach(field => {
-            const label = Array.from(additionalSelect.options).find(o => o.value === field)?.text || field;
-            let val = '[' + label + ']';
-            if (previewRecord && previewRecord[field] != null) {
-                val = extractZohoVal(previewRecord[field]);
-            }
-            const div = document.createElement('div');
-            div.innerHTML = `<strong>${label}:</strong> ${val}`;
-            detailsEl.appendChild(div);
-        });
+    if (detailsEl) {
+        detailsEl.innerHTML = '';
+        if (additionalOptions.length === 0) {
+            detailsEl.innerHTML = '<div style="color: #94a3b8; font-style: italic;">No additional fields selected</div>';
+        } else {
+            additionalOptions.forEach(opt => {
+                const field = opt.value;
+                const label = opt.textContent;
+                let val = '[' + label + ']';
+                if (previewRecord && previewRecord[field] != null) {
+                    val = extractZohoVal(previewRecord[field]);
+                }
+                const div = document.createElement('div');
+                div.innerHTML = `<strong>${label}:</strong> ${val}`;
+                detailsEl.appendChild(div);
+            });
+        }
     }
 }
+
 function copySharedConfig(index) {
+    switchTab('mappings-tab');
     const confScript = document.getElementById('shared-conf-' + index);
     if(!confScript) return;
     const conf = JSON.parse(confScript.textContent);

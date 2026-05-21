@@ -349,9 +349,30 @@ window.buildPopupContent = function(item) {
     addressKeys.forEach(k => { if (item.record_data[k]) addressHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`; });
     if (addressHtml) content += `<div style="background:rgba(255,255,255,0.05);padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);margin-bottom:8px;"><div style="font-size:0.75rem;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Location</div>${addressHtml}</div>`;
 
-    const addKeys = Object.keys(item.record_data).filter(k => !addressKeys.includes(k) && !k.startsWith('_')).sort();
     let addHtml = '';
-    addKeys.forEach(k => { if (item.record_data[k]) addHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`; });
+    if (item.field_mappings && Array.isArray(item.field_mappings.additional_field_labels) && item.field_mappings.additional_field_labels.length > 0) {
+        const renderedLabels = new Set();
+        item.field_mappings.additional_field_labels.forEach(label => {
+            if (item.record_data[label] !== undefined && item.record_data[label] !== null && item.record_data[label] !== '') {
+                addHtml += `<div style="margin-bottom:2px;"><strong>${label}:</strong> ${item.record_data[label]}</div>`;
+                renderedLabels.add(label);
+            }
+        });
+        // Render any remaining keys that are not address keys, don't start with '_', and weren't rendered yet
+        const remainingKeys = Object.keys(item.record_data).filter(k => !addressKeys.includes(k) && !k.startsWith('_') && !renderedLabels.has(k)).sort();
+        remainingKeys.forEach(k => {
+            if (item.record_data[k] !== undefined && item.record_data[k] !== null && item.record_data[k] !== '') {
+                addHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
+            }
+        });
+    } else {
+        const addKeys = Object.keys(item.record_data).filter(k => !addressKeys.includes(k) && !k.startsWith('_')).sort();
+        addKeys.forEach(k => {
+            if (item.record_data[k] !== undefined && item.record_data[k] !== null && item.record_data[k] !== '') {
+                addHtml += `<div style="margin-bottom:2px;"><strong>${k}:</strong> ${item.record_data[k]}</div>`;
+            }
+        });
+    }
     if (addHtml) content += `<div style="background:rgba(255,255,255,0.02);padding:8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);margin-bottom:12px;"><div style="font-size:0.75rem;color:#94a3b8;text-transform:uppercase;margin-bottom:4px;font-weight:600;">Additional Info</div>${addHtml}</div>`;
 
     const safeName = item.name.replace(/'/g, "&apos;").replace(/"/g, "&quot;");

@@ -1951,7 +1951,8 @@ def get_map_data():
             'color': r['color'],
             'icon': cfg.get('marker_icon', 'pin'),
             'record_data': r['record_data'],
-            'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter')
+            'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),
+            'field_mappings': cfg.get('field_mappings', {})
         })
 
     return jsonify(map_points)
