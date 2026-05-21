@@ -344,6 +344,8 @@ def callback():
                     encrypted = encrypt_token(token_data['refresh_token'])
                     database.set_global_setting('admin_refresh_token', encrypted)
                     log_debug("Admin refresh token encrypted and cached for team user fallback sync.")
+                    # Immediately cache the module URL map so non-admin users get correct links
+                    _cache_module_url_map(session['access_token'])
                 
                 # If user logged in via email fallback, try to resolve their real numeric CRM user ID
                 # using the admin token. This is needed for the Owner.id filter in the fallback sync.
@@ -647,6 +649,36 @@ def _require_admin_token(context='sync'):
     log_debug(f"[{context}] WARNING: No admin token — using user session token (degraded mode).")
     from flask import session as _s
     return _s.get('access_token')
+
+
+def _cache_module_url_map(access_token):
+    """Fetch module metadata and store the api_name→module_name map in the DB.
+    Called by admin login and nightly sync so non-admin users can always
+    resolve the correct system tab name (e.g. CustomModule2) for custom modules."""
+    try:
+        module_metadata = zoho_api.fetch_module_metadata(access_token)
+        if 'modules' not in module_metadata:
+            log_debug(f"[_cache_module_url_map] Fetch failed: {module_metadata.get('message','?')}")
+            return
+        url_map = {}
+        label_map = {}
+        for m in module_metadata['modules']:
+            api_name = m.get('api_name', '')
+            if not api_name:
+                continue
+            label_map[api_name] = m.get('plural_label', api_name)
+            if m.get('generated_type') == 'custom':
+                # module_name is always the immutable system name (e.g. 'CustomModule2')
+                url_map[api_name] = m.get('module_name', api_name)
+            else:
+                url_map[api_name] = api_name
+        database.set_global_setting('cached_module_url_map', json.dumps(url_map))
+        # Also refresh the simpler cached_modules list used by the settings page
+        modules_list = [{'api_name': k, 'plural_label': v} for k, v in label_map.items()]
+        database.set_global_setting('cached_modules', json.dumps(modules_list))
+        log_debug(f"[_cache_module_url_map] Cached {len(url_map)} module URL mappings.")
+    except Exception as e:
+        log_debug(f"[_cache_module_url_map] Exception: {e}")
 
 
 # ── Location-aware API filtering helpers ─────────────────────────────────────
@@ -1627,6 +1659,12 @@ def do_nightly_sync():
     except Exception as e:
         log_debug(f"[nightly] Error rebuilding user mappings: {e}")
 
+    # Refresh module URL map cache nightly (keeps non-admin links working)
+    try:
+        _cache_module_url_map(admin_token)
+    except Exception as e:
+        log_debug(f"[nightly] Error refreshing module URL map: {e}")
+
     elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
     database.set_global_setting('last_nightly_sync',
                                 datetime.datetime.now(datetime.timezone.utc).isoformat())
@@ -1922,15 +1960,6 @@ def get_map_data():
     log_debug(f"Found {len(records)} records in bounds.")
     
     # Get module labels and org info for display
-    module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
-    try:
-        import os
-        os.makedirs('scratch', exist_ok=True)
-        with open('scratch/prod_modules.json', 'w', encoding='utf-8') as f:
-            json.dump(module_metadata, f, indent=2)
-        log_debug("Saved module metadata to scratch/prod_modules.json")
-    except Exception as e:
-        log_debug(f"Failed to save module metadata: {e}")
     # Priority: Manual Global Setting > Session Cache > Fresh API Fetch
     org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', '')
     domain_name = database.get_global_setting('crmplus_domain', '') or session.get('domain_name', '')
@@ -1949,35 +1978,37 @@ def get_map_data():
     log_debug(f"DEBUG: Using OrgID={org_id}, Domain={domain_name}")
 
     module_label_map = {}
-    module_url_map = {} # Map api_name to URL segment
+    module_url_map = {} # Map api_name -> system tab name (e.g. Ship_To_Addresses -> CustomModule2)
 
-    # Load manual module URL overrides (e.g. mapping ShipToAddress to CustomModule2)
-    url_overrides = {}
-    try:
-        db_overrides_str = database.get_global_setting('module_url_overrides', '{}')
-        db_overrides = json.loads(db_overrides_str)
-        if isinstance(db_overrides, dict):
-            for k, v in db_overrides.items():
-                url_overrides[str(k)] = str(v)
-                url_overrides[str(k).lower()] = str(v)
-    except Exception as e:
-        log_debug(f"Error loading module_url_overrides from DB: {e}")
-
-    if config.has_section('MODULE_URL_OVERRIDES'):
-        for key, value in config['MODULE_URL_OVERRIDES'].items():
-            url_overrides[str(key)] = str(value)
-            url_overrides[str(key).lower()] = str(value)
-
+    # Try live fetch; non-admin users often lack ZohoCRM.settings.modules scope
+    module_metadata = zoho_api.fetch_module_metadata(session['access_token'])
     if 'modules' in module_metadata:
+        # Live fetch succeeded — update the DB cache so non-admins benefit later
+        if session.get('is_admin', False):
+            _cache_module_url_map(session['access_token'])
         for m in module_metadata['modules']:
-            module_label_map[m['api_name']] = m['plural_label']
+            module_label_map[m['api_name']] = m.get('plural_label', m['api_name'])
             # For custom modules, 'module_name' is always the system tab name (e.g. 'CustomModule2')
             # while 'api_name' is the user-customized name (e.g. 'Ship_To_Addresses').
-            # The browser URL must use the system tab name, so we use module_name for custom modules.
             if m.get('generated_type') == 'custom':
                 module_url_map[m['api_name']] = m.get('module_name', m['api_name'])
             else:
                 module_url_map[m['api_name']] = m['api_name']
+    else:
+        # Live fetch failed (non-admin without settings scope) — use the DB-cached map
+        log_debug(f"[map] Module metadata fetch failed ({module_metadata.get('message','?')}), using cached map.")
+        cached_url_map_str = database.get_global_setting('cached_module_url_map', '{}')
+        try:
+            module_url_map = json.loads(cached_url_map_str)
+        except Exception:
+            module_url_map = {}
+        # Also load label map from cached_modules list
+        cached_modules_str = database.get_global_setting('cached_modules', '[]')
+        try:
+            for m in json.loads(cached_modules_str):
+                module_label_map[m['api_name']] = m.get('plural_label', m['api_name'])
+        except Exception:
+            pass
 
     # Build a config lookup dict: for team users this includes shared configs automatically
     configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'))}
