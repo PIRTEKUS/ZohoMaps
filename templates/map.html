@@ -414,7 +414,8 @@ function toggleListDrawer() {
 window.toggleListDrawer = toggleListDrawer;
 
 window.updateRecordList = function(data) {
-    _listData = data;
+    const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
+    _listData = visibleData;
     _renderSortedList();
 };
 
