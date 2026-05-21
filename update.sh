@@ -53,6 +53,7 @@ sudo systemctl restart zohomap
 # 4.1 Update Nginx configuration and reload
 echo "Updating Nginx configuration and reloading..."
 sudo cp /var/www/zohomap/zohomap.nginx.conf /etc/nginx/sites-available/zohomap
+sudo ln -sf /etc/nginx/sites-available/zohomap /etc/nginx/sites-enabled/zohomap
 sudo nginx -t && sudo systemctl reload nginx
 
 # 4.5 Install / refresh nightly sync timer
