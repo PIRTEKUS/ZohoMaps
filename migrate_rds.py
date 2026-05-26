@@ -10,14 +10,16 @@ print(" ZohoMap SQLite to PostgreSQL Migration Tool")
 print("=============================================")
 
 # 1. Load config
+import os
 config = ConfigParser()
 config.read('config.ini')
 
-rds_uri = config['APP'].get('database_uri', '')
+_app_cfg = config['APP'] if config.has_section('APP') else {}
+rds_uri = os.environ.get('DATABASE_URI') or _app_cfg.get('database_uri', '')
 
 if not rds_uri.startswith('postgres'):
-    print("ERROR: config.ini [APP] database_uri is not a PostgreSQL URI.")
-    print("Please update it to your RDS endpoint (e.g., postgresql://user:pass@host/db)")
+    print("ERROR: DATABASE_URI is not set or is not a PostgreSQL URI.")
+    print("Please set the DATABASE_URI env var or specify it in config.ini [APP] database_uri.")
     sys.exit(1)
 
 # 2. Connect to both DBs

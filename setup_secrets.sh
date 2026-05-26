@@ -18,10 +18,41 @@ echo ""
 echo "You will be prompted for each secret. Press Enter to keep the current value."
 echo ""
 
-# --- Helper: read current value from service file ---
+# --- Helper: read current value from service file or config.ini ---
 get_current() {
     local KEY="$1"
-    sudo grep -oP "(?<=${KEY}=)[^\"]+" "$SERVICE_FILE" 2>/dev/null | head -1 || true
+    local VAL
+    VAL=$(sudo grep -oP "(?<=${KEY}=)[^\"]+" "$SERVICE_FILE" 2>/dev/null | head -1 || true)
+    if [ -n "$VAL" ]; then
+        echo "$VAL"
+        return
+    fi
+    # Fallback to config.ini
+    local CONFIG_FILE=""
+    if [ -f "/var/www/zohomap/config.ini" ]; then
+        CONFIG_FILE="/var/www/zohomap/config.ini"
+    elif [ -f "config.ini" ]; then
+        CONFIG_FILE="config.ini"
+    fi
+    if [ -n "$CONFIG_FILE" ]; then
+        local CONFIG_KEY
+        case "$KEY" in
+            ZOHO_CLIENT_ID) CONFIG_KEY="client_id" ;;
+            ZOHO_CLIENT_SECRET) CONFIG_KEY="client_secret" ;;
+            ZOHO_REDIRECT_URI) CONFIG_KEY="redirect_uri" ;;
+            GOOGLE_MAPS_API_KEY) CONFIG_KEY="maps_api_key" ;;
+            APP_SECRET_KEY) CONFIG_KEY="secret_key" ;;
+            DATABASE_URI) CONFIG_KEY="database_uri" ;;
+            *) CONFIG_KEY="" ;;
+        esac
+        if [ -n "$CONFIG_KEY" ]; then
+            VAL=$(grep -i "^[[:space:]]*${CONFIG_KEY}[[:space:]]*=" "$CONFIG_FILE" 2>/dev/null | head -n1 | cut -d'=' -f2- | xargs || true)
+            if [ -n "$VAL" ]; then
+                echo "$VAL"
+                return
+            fi
+        fi
+    fi
 }
 
 # --- Interactive prompt (reads directly from /dev/tty to avoid pipe issues) ---
@@ -51,6 +82,8 @@ ask() {
 ZOHO_CLIENT_ID=$(ask "ZOHO_CLIENT_ID"       "Zoho Client ID:")
 echo ""
 ZOHO_CLIENT_SECRET=$(ask "ZOHO_CLIENT_SECRET"   "Zoho Client Secret:")
+echo ""
+ZOHO_REDIRECT_URI=$(ask "ZOHO_REDIRECT_URI"     "Zoho Redirect URI(s) (comma-separated, e.g. https://yourdomain.com/callback):")
 echo ""
 ZOHO_REFRESH_TOKEN=$(ask "ZOHO_REFRESH_TOKEN"   "Zoho Permanent Refresh Token (from /admin/refresh-token-setup — leave blank to skip):")
 echo ""
@@ -87,6 +120,7 @@ Environment="PATH=/var/www/zohomap/venv/bin"
 Environment="FLASK_ENV=production"
 Environment="ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID}"
 Environment="ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET}"
+Environment="ZOHO_REDIRECT_URI=${ZOHO_REDIRECT_URI}"
 $([ -n "${ZOHO_REFRESH_TOKEN}" ] && echo "Environment=\"ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN}\"")
 Environment="GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}"
 Environment="APP_SECRET_KEY=${SECRET_KEY}"
@@ -113,6 +147,7 @@ PATH=/var/www/zohomap/venv/bin
 FLASK_ENV=production
 ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID}
 ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET}
+ZOHO_REDIRECT_URI=${ZOHO_REDIRECT_URI}
 $([ -n "${ZOHO_REFRESH_TOKEN}" ] && echo "ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN}")
 GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
 APP_SECRET_KEY=${SECRET_KEY}
@@ -153,6 +188,6 @@ echo "=============================================="
 sleep 3
 sudo systemctl is-active zohomap && echo "Service: RUNNING" || echo "Service: FAILED — run: sudo journalctl -u zohomap -n 20"
 echo ""
-echo "NEXT STEP: Remove secrets from /var/www/zohomap/config.ini"
-echo "Only keep: redirect_uri, accounts_url, api_url"
-
+echo "NEXT STEP: You can safely delete /var/www/zohomap/config.ini entirely since all"
+echo "configurations are now securely stored as environment variables!"
+echo ""
