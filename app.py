@@ -1715,8 +1715,7 @@ def get_nightly_sync_status():
         return jsonify({'error': 'Admin only'}), 403
     last_sync = database.get_global_setting('last_nightly_sync', '')
     results_raw = database.get_global_setting('last_nightly_sync_results', '{}')
-    is_running = (database.get_global_setting('nightly_sync_running', 'false') == 'true'
-                  or _nightly_sync_running)
+    is_running = (database.get_global_setting('nightly_sync_running', 'false') == 'true')
     counts = database.get_global_record_counts()
     try:
         results = json.loads(results_raw)

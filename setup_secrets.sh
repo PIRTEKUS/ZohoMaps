@@ -100,6 +100,49 @@ EOF
 
 sudo chmod 600 "$SERVICE_FILE"
 sudo chown root:root "$SERVICE_FILE"
+
+# ── Write a www-data-readable env file for the nightly sync service ──────────
+# The sync service runs as www-data and cannot read the root-only service file.
+# This env file contains the same vars so the sync job can start correctly.
+ENV_FILE="/etc/zohomap/app.env"
+echo ""
+echo "Writing env file for nightly sync to $ENV_FILE ..."
+sudo mkdir -p /etc/zohomap
+cat <<ENVEOF | sudo tee "$ENV_FILE" > /dev/null
+PATH=/var/www/zohomap/venv/bin
+FLASK_ENV=production
+ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID}
+ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET}
+$([ -n "${ZOHO_REFRESH_TOKEN}" ] && echo "ZOHO_REFRESH_TOKEN=${ZOHO_REFRESH_TOKEN}")
+GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+APP_SECRET_KEY=${SECRET_KEY}
+DATABASE_URI=${DATABASE_URI}
+TOKEN_ENCRYPTION_KEY=${FERNET_KEY}
+ENVEOF
+sudo chown root:www-data "$ENV_FILE"
+sudo chmod 640 "$ENV_FILE"
+echo "  ✅  $ENV_FILE written (readable by www-data)"
+
+# ── Update the sync service to load env from the env file ───────────────────
+SYNC_SERVICE="/etc/systemd/system/zohomap-sync.service"
+cat <<SYNCEOF | sudo tee "$SYNC_SERVICE" > /dev/null
+[Unit]
+Description=ZohoMap Nightly Data Sync Job
+After=network.target zohomap.service
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/zohomap
+EnvironmentFile=/etc/zohomap/app.env
+ExecStart=/var/www/zohomap/venv/bin/python3 /var/www/zohomap/run_nightly_sync.py
+StandardOutput=append:/var/www/zohomap/debug.log
+StandardError=append:/var/www/zohomap/debug.log
+SYNCEOF
+sudo chmod 644 "$SYNC_SERVICE"
+echo "  ✅  $SYNC_SERVICE updated with EnvironmentFile"
+
 sudo systemctl daemon-reload
 sudo systemctl restart zohomap
 
@@ -112,3 +155,4 @@ sudo systemctl is-active zohomap && echo "Service: RUNNING" || echo "Service: FA
 echo ""
 echo "NEXT STEP: Remove secrets from /var/www/zohomap/config.ini"
 echo "Only keep: redirect_uri, accounts_url, api_url"
+

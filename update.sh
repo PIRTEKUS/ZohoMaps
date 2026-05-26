@@ -65,6 +65,18 @@ sudo systemctl enable zohomap-sync.timer --now
 echo "  ✅ Nightly sync timer active. Next run:"
 systemctl list-timers zohomap-sync.timer --no-pager 2>/dev/null | tail -2 || true
 
+# 4.6 Check for env file required by the nightly sync service
+echo "[4.6/4] Checking for /etc/zohomap/app.env (required by nightly sync)..."
+if [ -f "/etc/zohomap/app.env" ]; then
+    echo "  ✅ /etc/zohomap/app.env found — nightly sync will have correct env vars"
+else
+    echo "  ❌ /etc/zohomap/app.env is MISSING"
+    echo "     The nightly sync job will FAIL at 4am without it."
+    echo "     FIX: Run: sudo ./setup_secrets.sh"
+    echo "     (This only needs to be done once per server)"
+fi
+
+
 echo "=========================================="
 echo "    Update Complete!"
 echo "=========================================="
