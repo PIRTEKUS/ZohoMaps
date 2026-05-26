@@ -393,6 +393,8 @@ def callback():
                                  args=(session['user_id'],), daemon=True).start()
 
             return redirect(url_for('index'))
+        else:
+            log_debug(f"OAuth token exchange failed! token_data response: {token_data}")
     return "Error in Zoho Authentication", 400
 
 @app.route('/logout')
