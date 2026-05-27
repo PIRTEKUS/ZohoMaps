@@ -1536,7 +1536,17 @@ def _nightly_sync_module(admin_token, module_name, config):
             break
 
         page_records = []
+        should_fetch_details = (module_name != 'Ship_To_Addresses')
         for record in data['data']:
+            record_id = record.get('id')
+            if should_fetch_details and record_id:
+                try:
+                    detail_res = zoho_api.fetch_single_record(module_name, record_id, admin_token, fetch_fields_list)
+                    if 'data' in detail_res and detail_res['data']:
+                        record = detail_res['data'][0]
+                except Exception as ex:
+                    log_debug(f"[nightly] Detail fetch failed for {module_name}/{record_id}: {ex}")
+
             lat, lng = None, None
             name_raw = record.get(title_field, record.get('Name',
                                   record.get('Full_Name', f"{module_name} {record.get('id')}")))
