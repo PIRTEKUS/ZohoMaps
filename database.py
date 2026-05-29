@@ -14,17 +14,27 @@ DB_URI = os.environ.get('DATABASE_URI') or _app_cfg.get('database_uri', 'sqlite:
 IS_POSTGRES = DB_URI.startswith('postgres')
 if IS_POSTGRES:
     import pg8000.dbapi
-    from urllib.parse import urlparse
+    import ssl
+    from urllib.parse import urlparse, parse_qs
 
 def get_db_connection():
     if IS_POSTGRES:
         parsed = urlparse(DB_URI)
+        # pg8000 does not parse sslmode from the URL automatically.
+        # Build an ssl_context if sslmode=require is in the query string.
+        qs = parse_qs(parsed.query)
+        ssl_ctx = None
+        if qs.get('sslmode', [''])[0] in ('require', 'verify-ca', 'verify-full'):
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
         conn = pg8000.dbapi.connect(
             user=parsed.username,
             password=parsed.password,
             host=parsed.hostname,
             port=parsed.port or 5432,
-            database=parsed.path.lstrip('/')
+            database=parsed.path.lstrip('/'),
+            ssl_context=ssl_ctx
         )
         conn.autocommit = True
         return conn
