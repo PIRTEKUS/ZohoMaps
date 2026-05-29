@@ -57,9 +57,11 @@ sudo cp /var/www/zohomap/zohomap-secrets.service /etc/systemd/system/
 sudo chmod +x /var/www/zohomap/load_aws_secrets.sh
 sudo systemctl daemon-reload
 
-# Detect whether this is an AWS instance (has IMDSv2 metadata service)
+# Detect whether this is an AWS instance using IMDSv2
 IS_AWS=false
-if curl -sf --max-time 2 http://169.254.169.254/latest/meta-data/ > /dev/null 2>&1; then
+_IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 2 2>/dev/null || true)
+if [ -n "$_IMDS_TOKEN" ]; then
     IS_AWS=true
 fi
 

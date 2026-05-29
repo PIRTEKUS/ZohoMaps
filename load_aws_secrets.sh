@@ -17,7 +17,16 @@ set -e
 
 SECRET_NAME="zohomap/production"
 ENV_FILE="/etc/zohomap/app.env"
-REGION="${AWS_DEFAULT_REGION:-$(curl -sf http://169.254.169.254/latest/meta-data/placement/region || echo 'us-east-1')}"
+
+# Detect region using IMDSv2 (required on instances with IMDSv2 enforced)
+_IMDS_TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+if [ -n "$_IMDS_TOKEN" ]; then
+    REGION=$(curl -sf -H "X-aws-ec2-metadata-token: $_IMDS_TOKEN" \
+        "http://169.254.169.254/latest/meta-data/placement/region" 2>/dev/null || true)
+fi
+# Fallback: check AWS_DEFAULT_REGION env var, then default to us-east-1
+REGION="${REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
 
 echo "[load_aws_secrets] Fetching secret '${SECRET_NAME}' from AWS Secrets Manager (region: ${REGION})..."
 
