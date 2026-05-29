@@ -1,13 +1,18 @@
 [Unit]
 Description=Gunicorn instance to serve ZohoMap
 After=network.target zohomap-secrets.service
-Requires=zohomap-secrets.service
+# Wants= is a soft dependency — zohomap-secrets.service is skipped gracefully
+# on standalone servers that don't use AWS Secrets Manager.
+Wants=zohomap-secrets.service
 
 [Service]
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/zohomap
-EnvironmentFile=/etc/zohomap/app.env
+# The leading '-' makes EnvironmentFile optional — the service starts even if
+# the file is missing (standalone servers using setup_secrets.sh write this file;
+# AWS instances get it from load_aws_secrets.sh via zohomap-secrets.service).
+EnvironmentFile=-/etc/zohomap/app.env
 ExecStart=/var/www/zohomap/venv/bin/gunicorn --workers 3 --worker-class gthread --threads 4 --timeout 120 --bind unix:zohomap.sock -m 007 app:app
 Restart=on-failure
 RestartSec=5s

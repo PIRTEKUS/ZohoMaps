@@ -46,20 +46,39 @@ sudo chown -R www-data:www-data /var/www/zohomap
 # Re-apply execute permissions on shell scripts so they can still be run with sudo
 sudo chmod +x /var/www/zohomap/*.sh
 
-# 4. Install AWS secrets loader service (runs before zohomap at every boot)
-echo "[4/4] Installing AWS secrets loader service..."
+# 4. Install service files from repo
+echo "[4/4] Installing service files..."
+sudo cp /var/www/zohomap/zohomap.service /etc/systemd/system/zohomap.service
+sudo chmod 644 /etc/systemd/system/zohomap.service
+echo "  ✅ zohomap.service installed"
+
+# 4a. Install AWS secrets loader service (only activates on AWS — skipped gracefully on standalone)
 sudo cp /var/www/zohomap/zohomap-secrets.service /etc/systemd/system/
 sudo chmod +x /var/www/zohomap/load_aws_secrets.sh
 sudo systemctl daemon-reload
-sudo systemctl enable zohomap-secrets.service
 
-# Load secrets now so the app can start immediately
-echo "  Fetching secrets from AWS Secrets Manager..."
-if sudo /var/www/zohomap/load_aws_secrets.sh; then
-    echo "  ✅ Secrets loaded into /etc/zohomap/app.env"
+# Detect whether this is an AWS instance (has IMDSv2 metadata service)
+IS_AWS=false
+if curl -sf --max-time 2 http://169.254.169.254/latest/meta-data/ > /dev/null 2>&1; then
+    IS_AWS=true
+fi
+
+if $IS_AWS; then
+    echo "  🟦 AWS environment detected — loading secrets from Secrets Manager..."
+    sudo systemctl enable zohomap-secrets.service
+    if sudo /var/www/zohomap/load_aws_secrets.sh; then
+        echo "  ✅ Secrets loaded into /etc/zohomap/app.env"
+    else
+        echo "  ❌ Failed to load secrets from AWS — check IAM role has secretsmanager:GetSecretValue on zohomap/production"
+    fi
 else
-    echo "  ❌ Failed to load secrets from AWS — check IAM role and secret name."
-    echo "     Instance IAM role needs: secretsmanager:GetSecretValue on zohomap/production"
+    echo "  🟩 Standalone environment detected."
+    if [ -f "/etc/zohomap/app.env" ]; then
+        echo "  ✅ /etc/zohomap/app.env found — secrets already configured"
+    else
+        echo "  ⚠️  /etc/zohomap/app.env is MISSING"
+        echo "     Run: sudo ./setup_secrets.sh   (only needed once per server)"
+    fi
 fi
 
 # 4.1 Restart the main app (now that secrets are loaded)
