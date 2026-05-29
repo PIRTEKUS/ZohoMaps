@@ -46,11 +46,27 @@ sudo chown -R www-data:www-data /var/www/zohomap
 # Re-apply execute permissions on shell scripts so they can still be run with sudo
 sudo chmod +x /var/www/zohomap/*.sh
 
-# 4. Restart the service
-echo "[4/4] Restarting ZohoMap service (may prompt for sudo password)..."
+# 4. Install AWS secrets loader service (runs before zohomap at every boot)
+echo "[4/4] Installing AWS secrets loader service..."
+sudo cp /var/www/zohomap/zohomap-secrets.service /etc/systemd/system/
+sudo chmod +x /var/www/zohomap/load_aws_secrets.sh
+sudo systemctl daemon-reload
+sudo systemctl enable zohomap-secrets.service
+
+# Load secrets now so the app can start immediately
+echo "  Fetching secrets from AWS Secrets Manager..."
+if sudo /var/www/zohomap/load_aws_secrets.sh; then
+    echo "  ✅ Secrets loaded into /etc/zohomap/app.env"
+else
+    echo "  ❌ Failed to load secrets from AWS — check IAM role and secret name."
+    echo "     Instance IAM role needs: secretsmanager:GetSecretValue on zohomap/production"
+fi
+
+# 4.1 Restart the main app (now that secrets are loaded)
+echo "Restarting ZohoMap service..."
 sudo systemctl restart zohomap
 
-# 4.1 Update Nginx configuration and reload
+# 4.2 Update Nginx configuration and reload
 echo "Updating Nginx configuration and reloading..."
 sudo cp /var/www/zohomap/zohomap.nginx.conf /etc/nginx/sites-available/zohomap
 sudo ln -sf /etc/nginx/sites-available/zohomap /etc/nginx/sites-enabled/zohomap
@@ -64,17 +80,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable zohomap-sync.timer --now
 echo "  ✅ Nightly sync timer active. Next run:"
 systemctl list-timers zohomap-sync.timer --no-pager 2>/dev/null | tail -2 || true
-
-# 4.6 Check for env file required by the nightly sync service
-echo "[4.6/4] Checking for /etc/zohomap/app.env (required by nightly sync)..."
-if [ -f "/etc/zohomap/app.env" ]; then
-    echo "  ✅ /etc/zohomap/app.env found — nightly sync will have correct env vars"
-else
-    echo "  ❌ /etc/zohomap/app.env is MISSING"
-    echo "     The nightly sync job will FAIL at 4am without it."
-    echo "     FIX: Run: sudo ./setup_secrets.sh"
-    echo "     (This only needs to be done once per server)"
-fi
 
 
 echo "=========================================="
