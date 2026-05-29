@@ -780,7 +780,7 @@ window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
         const data = await res.json();
         if (res.ok && data.success) {
             btnElement.style.color = '#10b981';
-            btnElement.innerHTML = '✓ Synced!';
+            btnElement.innerHTML = data.hidden ? 'Removed!' : '✓ Synced!';
             setTimeout(() => {
                 if (window.activeInfoWindow) window.activeInfoWindow.close();
                 // Refresh map + list

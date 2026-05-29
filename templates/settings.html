@@ -1488,17 +1488,26 @@ async function loadTokenStatus() {
         const data = await res.json();
         if (data.error) { rows.innerHTML = `<span style="color:#fca5a5;">${data.error}</span>`; return; }
 
-        function badge(status) {
+        function badge(status, isEnv = false) {
             const ok = status === 'ok' || status === 'present';
-            const color = ok ? '#6ee7b7' : '#fca5a5';
-            const bg    = ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
-            const icon  = ok ? '✅' : '❌';
-            return `<span style="background:${bg}; color:${color}; padding:0.1rem 0.5rem; border-radius:12px; font-size:0.75rem;">${icon} ${status}</span>`;
+            let color = ok ? '#6ee7b7' : '#fca5a5';
+            let bg    = ok ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
+            let icon  = ok ? '✅' : '❌';
+            let displayStatus = status;
+
+            if (isEnv && status === 'missing') {
+                color = '#94a3b8';
+                bg = 'rgba(148,163,184,0.15)';
+                icon = 'ℹ️';
+                displayStatus = 'Optional (Using DB)';
+            }
+
+            return `<span style="background:${bg}; color:${color}; padding:0.1rem 0.5rem; border-radius:12px; font-size:0.75rem;">${icon} ${displayStatus}</span>`;
         }
 
         rows.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="color:#94a3b8;">Service file (env)</span> ${badge(data.env_token)}
+                <span style="color:#94a3b8;">Service file (env)</span> ${badge(data.env_token, true)}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <span style="color:#94a3b8;">Database token</span> ${badge(data.db_token)}

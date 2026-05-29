@@ -7,6 +7,7 @@ import json
 import time
 import datetime
 import os
+import hashlib
 from datetime import timedelta
 
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -589,55 +590,70 @@ def preview_record(module_name):
 
 def _get_admin_access_token():
     """Get a fresh admin access token using the best available refresh token.
-
-    Priority order:
-      1. ZOHO_REFRESH_TOKEN env var (set in systemd service — permanent, no browser login needed)
-      2. DB-stored encrypted refresh token (set when an admin user logs in via OAuth)
-
-    If Zoho returns a rotated refresh token (token rotation), it is saved back to the DB
-    automatically so the next call succeeds.
-
-    The access token is NEVER exposed to the frontend or sent to the client.
+    Uses database-backed caching to prevent concurrent requests from rotating
+    and invalidating the refresh token, and to avoid Zoho API rate limits.
     """
-    def _save_rotated_token(token_data, source):
-        """If Zoho returned a new refresh token (rotation), persist it to the DB."""
-        new_rt = token_data.get('refresh_token', '').strip()
-        if new_rt:
-            try:
-                database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
-                log_debug(f"[admin_token] Refresh token rotated ({source}) — new token saved to DB.")
-            except Exception as _e:
-                log_debug(f"[admin_token] WARNING: Could not save rotated token: {_e}")
-
-    # ── Priority 1: env-var refresh token (server config, no human login needed) ──
     env_refresh = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
-    if env_refresh:
-        try:
-            token_data = zoho_api.refresh_access_token(env_refresh)
-            if 'access_token' in token_data:
-                _save_rotated_token(token_data, 'env-var')
-                return token_data['access_token']
-            log_debug(f"[admin_token] ZOHO_REFRESH_TOKEN exchange failed: {token_data.get('error')} — "
-                      "check the token is valid and has the correct scopes.")
-        except Exception as e:
-            log_debug(f"[admin_token] ZOHO_REFRESH_TOKEN exception: {e}")
+    db_encrypted = database.get_global_setting('admin_refresh_token', '')
+    db_refresh = decrypt_token(db_encrypted) if db_encrypted else ''
 
-    # ── Priority 2: DB-stored encrypted token (set when admin logs in via browser) ──
-    encrypted = database.get_global_setting('admin_refresh_token', '')
-    if not encrypted:
-        return None
-    refresh_token = decrypt_token(encrypted)
+    # Best available refresh token and its source identifier
+    refresh_token = env_refresh or db_refresh
+    source = 'env-var' if env_refresh else ('db-token' if db_refresh else None)
+
     if not refresh_token:
-        log_debug("Admin token decryption failed — token may have been stored before encryption was enabled.")
         return None
+
+    # Compute a hash of the current refresh token to detect rotation or manual changes
+    ref_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+
+    # Try to load cached access token
+    try:
+        cached_atk_enc = database.get_global_setting('cached_admin_access_token', '')
+        cached_expires_at = database.get_global_setting('cached_admin_access_token_expires_at', '0')
+        cached_ref_hash = database.get_global_setting('cached_admin_access_token_ref_hash', '')
+
+        if cached_atk_enc and cached_expires_at and cached_ref_hash == ref_hash:
+            if time.time() < float(cached_expires_at) - 60:
+                decrypted = decrypt_token(cached_atk_enc)
+                if decrypted:
+                    return decrypted
+    except Exception as e:
+        log_debug(f"[admin_token] Error checking access token cache: {e}")
+
+    # No valid cache. Refresh token from Zoho
     try:
         token_data = zoho_api.refresh_access_token(refresh_token)
         if 'access_token' in token_data:
-            _save_rotated_token(token_data, 'db-token')
-            return token_data['access_token']
-        log_debug(f"Admin token refresh failed: {token_data.get('error', 'unknown error')}")
+            new_access_token = token_data['access_token']
+            expires_in = token_data.get('expires_in', 3600)
+            new_rt = token_data.get('refresh_token', '').strip()
+
+            # Handle token rotation: save the new refresh token to DB if from DB,
+            # and update the refresh token reference to compute correct hash
+            used_rt = refresh_token
+            if new_rt:
+                if source == 'db-token':
+                    database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
+                    log_debug(f"[admin_token] Refresh token rotated ({source}) — new token saved to DB.")
+                    used_rt = new_rt
+                else:
+                    log_debug(f"[admin_token] Refresh token rotated ({source}) but cannot write to env var.")
+
+            # Compute new hash of the active refresh token
+            new_ref_hash = hashlib.sha256(used_rt.encode()).hexdigest()
+
+            # Cache the new access token
+            database.set_global_setting('cached_admin_access_token', encrypt_token(new_access_token))
+            database.set_global_setting('cached_admin_access_token_expires_at', str(time.time() + expires_in))
+            database.set_global_setting('cached_admin_access_token_ref_hash', new_ref_hash)
+
+            return new_access_token
+        else:
+            log_debug(f"[admin_token] Token refresh failed: {token_data.get('error', 'unknown error')}")
     except Exception as e:
-        log_debug(f"Admin token refresh exception: {e}")
+        log_debug(f"[admin_token] Token refresh exception: {e}")
+
     return None
 
 def _require_admin_token(context='sync'):
@@ -985,18 +1001,22 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
                 if 'data' in owner_data and owner_data['data']:
                     data = owner_data
                 else:
-                    log_debug(f"Admin fallback returned 0 records for {module_name}/{record_id}.")
-                    return False
+                    log_debug(f"Admin fallback returned 0 records for {module_name}/{record_id}. Recording as hidden.")
+                    # Save tombstone to database to hide this record for the user
+                    database.save_module_records_batch(user_id, [(record_id, module_name, "Hidden Record", None, None, "", {'_hidden': True})])
+                    return 'hidden'
             else:
-                log_debug("No admin token available for fallback.")
-                return False
+                log_debug("No admin token available for fallback. Recording as hidden.")
+                database.save_module_records_batch(user_id, [(record_id, module_name, "Hidden Record", None, None, "", {'_hidden': True})])
+                return 'hidden'
         else:
             return False
 
     records_list = data.get('data', [])
     if not records_list:
-        log_debug(f"Single sync failed: No records returned for {module_name} {record_id}. Raw response: {data}")
-        return False
+        log_debug(f"Single sync failed: No records returned for {module_name} {record_id}. Raw response: {data}. Recording as hidden.")
+        database.save_module_records_batch(user_id, [(record_id, module_name, "Hidden Record", None, None, "", {'_hidden': True})])
+        return 'hidden'
         
     record = records_list[0]
     
@@ -1077,7 +1097,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
         log_debug(f"--------------------------------------------------")
         
         log_debug(f"Successfully synced and saved single record: {name} ({record_id})")
-        return True
+        return 'synced'
     else:
         log_debug(f"Single sync failed: No valid location found for {name} ({record_id}). Record data: {record}")
         return False
@@ -1100,10 +1120,13 @@ def sync_single_record(module_name, record_id):
         return jsonify({'error': 'Server not configured: no admin token available'}), 503
 
     try:
-        success = do_sync_single_record(session.get('user_id'), sync_token, module_name, record_id, config)
-        if success:
-            log_debug(f"API /api/sync-record/{module_name}/{record_id} success.")
+        result = do_sync_single_record(session.get('user_id'), sync_token, module_name, record_id, config)
+        if result == 'synced' or result is True:
+            log_debug(f"API /api/sync-record/{module_name}/{record_id} success (synced).")
             return jsonify({'success': True})
+        elif result == 'hidden':
+            log_debug(f"API /api/sync-record/{module_name}/{record_id} hidden.")
+            return jsonify({'success': True, 'hidden': True})
         else:
             log_debug(f"API /api/sync-record/{module_name}/{record_id} failed.")
             return jsonify({'error': 'Failed to sync record (not found or no valid location)'}), 400
@@ -1948,6 +1971,13 @@ def get_map_data():
             else:
                 log_debug(f"[map] Admin token unavailable and no franchise cache for {user_id} — degraded mode.")
 
+    # Fetch hidden records to filter them out of the visible set
+    try:
+        hidden_records = database.get_hidden_records(user_id)
+    except Exception as e:
+        log_debug(f"[map] Error fetching hidden records: {e}")
+        hidden_records = set()
+
     # Query global cache
     global_records = database.get_records_in_bounds_global(
         franchise_ids_for_filter, min_lat, max_lat, min_lng, max_lng, is_admin
@@ -1956,15 +1986,18 @@ def get_map_data():
     # Query user's own cache (updated by on-demand syncs, viewport syncs, single record syncs)
     user_records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
 
-    # Merge: user_records takes priority over global_records because they are on-demand / newer
+    # Merge: user_records takes priority over global_records because they are on-demand / newer.
+    # Filter out hidden records.
     record_map = {}
     for r in global_records:
-        record_map[(r['id'], r['module_name'])] = r
+        if (r['id'], r['module_name']) not in hidden_records:
+            record_map[(r['id'], r['module_name'])] = r
     for r in user_records:
-        record_map[(r['id'], r['module_name'])] = r
+        if (r['id'], r['module_name']) not in hidden_records:
+            record_map[(r['id'], r['module_name'])] = r
         
     records = list(record_map.values())
-    log_debug(f"[map] Served {len(records)} records (global={len(global_records)}, user_cache={len(user_records)}, franchise_filter={franchise_ids_for_filter is not None}).")
+    log_debug(f"[map] Served {len(records)} records (global={len(global_records)}, user_cache={len(user_records)}, franchise_filter={franchise_ids_for_filter is not None}, hidden={len(hidden_records)}).")
     # ─────────────────────────────────────────────────────────────────────────
 
 
@@ -2343,22 +2376,49 @@ def get_token_status():
 
     env_token   = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
     db_encrypted = database.get_global_setting('admin_refresh_token', '')
+    db_token = decrypt_token(db_encrypted) if db_encrypted else ''
     session_token = session.get('refresh_token', '').strip()
 
-    def _test(token):
+    def _test(token, source_name):
         if not token:
             return 'missing'
+        
+        # Optimization: if this token is currently active and cached in DB, and valid, return 'ok'
+        ref_hash = hashlib.sha256(token.encode()).hexdigest()
+        try:
+            cached_expires_at = database.get_global_setting('cached_admin_access_token_expires_at', '0')
+            cached_ref_hash = database.get_global_setting('cached_admin_access_token_ref_hash', '')
+            if cached_ref_hash == ref_hash and time.time() < float(cached_expires_at) - 60:
+                return 'ok'
+        except:
+            pass
+
+        # Otherwise, perform a real refresh check
         try:
             r = zoho_api.refresh_access_token(token)
-            return 'ok' if 'access_token' in r else f"invalid ({r.get('error', '?')})"
+            if 'access_token' in r:
+                # If rotation occurred, save the rotated refresh token back to DB if applicable
+                new_rt = r.get('refresh_token', '').strip()
+                if new_rt:
+                    if source_name == 'db_token':
+                        database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
+                        log_debug("[admin_token_status] Saved rotated DB token during status check.")
+                        new_ref_hash = hashlib.sha256(new_rt.encode()).hexdigest()
+                    else:
+                        new_ref_hash = hashlib.sha256(new_rt.encode()).hexdigest()
+                    
+                    # Update cache values to make it valid
+                    database.set_global_setting('cached_admin_access_token', encrypt_token(r['access_token']))
+                    database.set_global_setting('cached_admin_access_token_expires_at', str(time.time() + r.get('expires_in', 3600)))
+                    database.set_global_setting('cached_admin_access_token_ref_hash', new_ref_hash)
+                return 'ok'
+            return f"invalid ({r.get('error', '?')})"
         except Exception as e:
             return f'error ({e})'
 
-    db_token = decrypt_token(db_encrypted) if db_encrypted else ''
-
     return jsonify({
-        'env_token':     _test(env_token),
-        'db_token':      _test(db_token),
+        'env_token':     _test(env_token, 'env_token'),
+        'db_token':      _test(db_token, 'db_token'),
         'session_token': 'present' if session_token else 'missing',
         'has_session_token': bool(session_token),
     })

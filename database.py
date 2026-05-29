@@ -484,3 +484,11 @@ def get_all_module_configs_all_users():
         r['field_mappings'] = json.loads(r['field_mappings'])
         results.append(r)
     return results
+
+def get_hidden_records(user_id):
+    """Query and return a set of (id, module_name) tuples representing records that the user has marked as hidden (NULL lat/lng)."""
+    conn = get_db_connection()
+    rows = exec_query(conn, 'SELECT id, module_name FROM module_records WHERE user_id = ? AND (lat IS NULL OR lng IS NULL)', (str(user_id),), fetchall=True)
+    conn.close()
+    return {(r['id'], r['module_name']) for r in rows}
+
