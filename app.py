@@ -572,6 +572,31 @@ def save_global_setting():
     return jsonify({'success': True})
 
 
+@app.route('/favicon.ico')
+def favicon():
+    fav_base64 = database.get_global_setting('site_favicon', '')
+    if fav_base64:
+        try:
+            import base64
+            if ',' in fav_base64:
+                header, data_str = fav_base64.split(',', 1)
+                mime = header.split(';')[0].split(':')[1]
+                img_data = base64.b64decode(data_str)
+            else:
+                mime = 'image/x-icon'
+                img_data = base64.b64decode(fav_base64)
+            return app.response_class(img_data, mimetype=mime)
+        except Exception as e:
+            log_debug(f"Error serving db-cached favicon: {e}")
+            
+    try:
+        from flask import send_from_directory
+        return send_from_directory(os.path.join(app.root_path, 'static'),
+                                   'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    except Exception:
+        return '', 204
+
+
 
 
 @app.route('/api/preview-record/<module_name>')

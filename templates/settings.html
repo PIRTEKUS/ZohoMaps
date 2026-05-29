@@ -394,6 +394,37 @@
                 <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
             </div>
 
+            <!-- Site Branding & Favicon -->
+            <div class="settings-card glass" style="border-color: rgba(99,102,241,0.2);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+                    Website Favicon
+                    <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span>
+                </h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                    Upload a custom favicon image (.ico, .png, .jpg, .svg) to display in the browser tab.
+                </p>
+                <div style="display:flex; flex-direction:column; gap:1rem; max-width:400px;">
+                    <div style="display:flex; align-items:center; gap:1.5rem;">
+                        <div id="favicon-preview-container" style="width: 48px; height: 48px; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; overflow:hidden;">
+                            <img id="favicon-preview" src="/favicon.ico" style="max-width:32px; max-height:32px; object-fit:contain;" alt="Favicon Preview">
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                            <span style="font-size:0.85rem; font-weight:500; color:#e2e8f0;">Favicon Preview</span>
+                            <span style="font-size:0.75rem; color:#94a3b8;">Reflected on save</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <input type="file" id="favicon-upload-input" accept=".ico,.png,.jpg,.jpeg,.svg" style="display:none;" onchange="handleFaviconUpload(this)">
+                        <button class="btn-secondary" onclick="document.getElementById('favicon-upload-input').click()" style="padding:0.5rem 1.25rem; font-size:0.85rem; color:#fff;">Choose Image</button>
+                        <button id="save-favicon-btn" class="btn-primary" onclick="saveFavicon()" style="padding:0.5rem 1.25rem; font-size:0.85rem; opacity:0.4;" disabled>Save Favicon</button>
+                        <button id="reset-favicon-btn" class="btn-secondary" onclick="resetFavicon()" style="padding:0.5rem 1.25rem; font-size:0.85rem; color:#ef4444; border-color:rgba(239,68,68,0.2);">Reset Default</button>
+                    </div>
+                    <span id="favicon-status" style="font-size:0.75rem; color:#94a3b8;"></span>
+                </div>
+            </div>
+
             <!-- Export / Import Configuration -->
             <div class="settings-card glass" style="border-color: rgba(99,102,241,0.35);">
                 <h2 style="display:flex; align-items:center; gap:0.75rem;">
@@ -1717,6 +1748,88 @@ async function doImportConfig() {
         statusEl.style.display = 'block';
         btn.textContent = 'Import Now';
         btn.disabled = false;
+    }
+}
+
+async function handleFaviconUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    if (file.size > 512 * 1024) {
+        alert("Favicon image must be smaller than 500 KB.");
+        input.value = "";
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const dataUri = e.target.result;
+        document.getElementById('favicon-preview').src = dataUri;
+
+        const status = document.getElementById('favicon-status');
+        status.textContent = "Image loaded (unsaved). Click 'Save Favicon' to apply.";
+        status.style.color = "#f59e0b";
+        
+        window.tempFaviconDataUri = dataUri;
+        document.getElementById('save-favicon-btn').disabled = false;
+        document.getElementById('save-favicon-btn').style.opacity = '1';
+    };
+    reader.readAsDataURL(file);
+}
+
+async function saveFavicon() {
+    if (!window.tempFaviconDataUri) {
+        alert("Please choose a new favicon image first.");
+        return;
+    }
+    const status = document.getElementById('favicon-status');
+    status.textContent = "Saving favicon...";
+    status.style.color = "#94a3b8";
+
+    try {
+        const res = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: 'site_favicon', value: window.tempFaviconDataUri})
+        });
+        if (res.ok) {
+            status.textContent = "✓ Favicon saved successfully!";
+            status.style.color = "#10b981";
+            window.tempFaviconDataUri = null;
+            document.getElementById('save-favicon-btn').disabled = true;
+            document.getElementById('save-favicon-btn').style.opacity = '0.4';
+            setTimeout(() => { window.location.reload(); }, 1200);
+        } else {
+            throw new Error("Failed to save");
+        }
+    } catch (e) {
+        status.textContent = "✗ Failed to save favicon.";
+        status.style.color = "#ef4444";
+    }
+}
+
+async function resetFavicon() {
+    if (!confirm("Are you sure you want to restore the default browser favicon?")) return;
+    const status = document.getElementById('favicon-status');
+    status.textContent = "Resetting favicon...";
+    status.style.color = "#94a3b8";
+
+    try {
+        const res = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({key: 'site_favicon', value: ''})
+        });
+        if (res.ok) {
+            status.textContent = "✓ Favicon reset to default!";
+            status.style.color = "#10b981";
+            setTimeout(() => { window.location.reload(); }, 1200);
+        } else {
+            throw new Error("Failed to reset");
+        }
+    } catch (e) {
+        status.textContent = "✗ Failed to reset favicon.";
+        status.style.color = "#ef4444";
     }
 }
 </script>
