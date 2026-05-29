@@ -35,7 +35,7 @@ get_current() {
 
     # Fallback: old-style service file with inline Environment= lines
     local SERVICE_FILE="/etc/systemd/system/zohomap.service"
-    VAL=$(sudo grep -oP "(?<=${KEY}=)[^\"]+\" "$SERVICE_FILE" 2>/dev/null | head -1 || true)
+    VAL=$(sudo grep -oP "(?<=${KEY}=)[^\"]+" "$SERVICE_FILE" 2>/dev/null | head -1 || true)
     if [ -n "$VAL" ]; then echo "$VAL"; return; fi
 
     # Fallback: config.ini
