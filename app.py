@@ -622,62 +622,62 @@ def _get_admin_access_token():
     db_encrypted = database.get_global_setting('admin_refresh_token', '')
     db_refresh = decrypt_token(db_encrypted) if db_encrypted else ''
 
-    # Best available refresh token and its source identifier
-    refresh_token = env_refresh or db_refresh
-    source = 'env-var' if env_refresh else ('db-token' if db_refresh else None)
+    tokens_to_try = []
+    if env_refresh:
+        tokens_to_try.append((env_refresh, 'env-var'))
+    if db_refresh:
+        tokens_to_try.append((db_refresh, 'db-token'))
 
-    if not refresh_token:
-        return None
+    for refresh_token, source in tokens_to_try:
+        # Compute a hash of the current refresh token to detect rotation or manual changes
+        ref_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
 
-    # Compute a hash of the current refresh token to detect rotation or manual changes
-    ref_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
+        # Try to load cached access token
+        try:
+            cached_atk_enc = database.get_global_setting('cached_admin_access_token', '')
+            cached_expires_at = database.get_global_setting('cached_admin_access_token_expires_at', '0')
+            cached_ref_hash = database.get_global_setting('cached_admin_access_token_ref_hash', '')
 
-    # Try to load cached access token
-    try:
-        cached_atk_enc = database.get_global_setting('cached_admin_access_token', '')
-        cached_expires_at = database.get_global_setting('cached_admin_access_token_expires_at', '0')
-        cached_ref_hash = database.get_global_setting('cached_admin_access_token_ref_hash', '')
+            if cached_atk_enc and cached_expires_at and cached_ref_hash == ref_hash:
+                if time.time() < float(cached_expires_at) - 60:
+                    decrypted = decrypt_token(cached_atk_enc)
+                    if decrypted:
+                        return decrypted
+        except Exception as e:
+            log_debug(f"[admin_token] Error checking access token cache: {e}")
 
-        if cached_atk_enc and cached_expires_at and cached_ref_hash == ref_hash:
-            if time.time() < float(cached_expires_at) - 60:
-                decrypted = decrypt_token(cached_atk_enc)
-                if decrypted:
-                    return decrypted
-    except Exception as e:
-        log_debug(f"[admin_token] Error checking access token cache: {e}")
+        # No valid cache. Refresh token from Zoho
+        try:
+            token_data = zoho_api.refresh_access_token(refresh_token)
+            if 'access_token' in token_data:
+                new_access_token = token_data['access_token']
+                expires_in = token_data.get('expires_in', 3600)
+                new_rt = token_data.get('refresh_token', '').strip()
 
-    # No valid cache. Refresh token from Zoho
-    try:
-        token_data = zoho_api.refresh_access_token(refresh_token)
-        if 'access_token' in token_data:
-            new_access_token = token_data['access_token']
-            expires_in = token_data.get('expires_in', 3600)
-            new_rt = token_data.get('refresh_token', '').strip()
+                # Handle token rotation: save the new refresh token to DB if from DB,
+                # and update the refresh token reference to compute correct hash
+                used_rt = refresh_token
+                if new_rt:
+                    if source == 'db-token':
+                        database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
+                        log_debug(f"[admin_token] Refresh token rotated ({source}) — new token saved to DB.")
+                        used_rt = new_rt
+                    else:
+                        log_debug(f"[admin_token] Refresh token rotated ({source}) but cannot write to env var.")
 
-            # Handle token rotation: save the new refresh token to DB if from DB,
-            # and update the refresh token reference to compute correct hash
-            used_rt = refresh_token
-            if new_rt:
-                if source == 'db-token':
-                    database.set_global_setting('admin_refresh_token', encrypt_token(new_rt))
-                    log_debug(f"[admin_token] Refresh token rotated ({source}) — new token saved to DB.")
-                    used_rt = new_rt
-                else:
-                    log_debug(f"[admin_token] Refresh token rotated ({source}) but cannot write to env var.")
+                # Compute new hash of the active refresh token
+                new_ref_hash = hashlib.sha256(used_rt.encode()).hexdigest()
 
-            # Compute new hash of the active refresh token
-            new_ref_hash = hashlib.sha256(used_rt.encode()).hexdigest()
+                # Cache the new access token
+                database.set_global_setting('cached_admin_access_token', encrypt_token(new_access_token))
+                database.set_global_setting('cached_admin_access_token_expires_at', str(time.time() + expires_in))
+                database.set_global_setting('cached_admin_access_token_ref_hash', new_ref_hash)
 
-            # Cache the new access token
-            database.set_global_setting('cached_admin_access_token', encrypt_token(new_access_token))
-            database.set_global_setting('cached_admin_access_token_expires_at', str(time.time() + expires_in))
-            database.set_global_setting('cached_admin_access_token_ref_hash', new_ref_hash)
-
-            return new_access_token
-        else:
-            log_debug(f"[admin_token] Token refresh failed: {token_data.get('error', 'unknown error')}")
-    except Exception as e:
-        log_debug(f"[admin_token] Token refresh exception: {e}")
+                return new_access_token
+            else:
+                log_debug(f"[admin_token] Token refresh failed for {source}: {token_data.get('error', 'unknown error')}")
+        except Exception as e:
+            log_debug(f"[admin_token] Token refresh exception for {source}: {e}")
 
     return None
 
