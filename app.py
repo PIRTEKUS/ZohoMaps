@@ -1585,6 +1585,7 @@ def _nightly_sync_module(admin_token, module_name, config):
     log_debug(f"[nightly] {module_name}: fetching all records (full global cache).")
 
     while more_records:
+        log_debug(f"[nightly] {module_name}: fetching page {page}...")
         data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
                                              page=page, page_token=page_token)
 
@@ -1593,10 +1594,16 @@ def _nightly_sync_module(admin_token, module_name, config):
             break
 
         if 'data' not in data or not data['data']:
+            log_debug(f"[nightly] {module_name}: no data returned for page {page}.")
             break
+
+        records_fetched = len(data['data'])
+        log_debug(f"[nightly] {module_name}: fetched {records_fetched} records for page {page}.")
 
         page_records = []
         should_fetch_details = (module_name != 'Ship_To_Addresses')
+        cache_hits = 0
+        cache_misses = 0
         for record in data['data']:
             record_id = record.get('id')
             if not record_id:
@@ -1619,8 +1626,10 @@ def _nightly_sync_module(admin_token, module_name, config):
                 ))
                 active_ids.add(str(record_id))
                 count += 1
+                cache_hits += 1
                 continue
 
+            cache_misses += 1
             # Cache miss: fetch details and geocode
             if should_fetch_details and record_id:
                 try:
@@ -1708,6 +1717,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                 active_ids.add(str(record.get('id')))
                 count += 1
 
+        log_debug(f"[nightly] {module_name} page {page} summary: {cache_hits} cache hits, {cache_misses} cache misses. Saving batch of {len(page_records)} records...")
         if page_records:
             database.save_global_records_batch(page_records)
 
