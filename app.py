@@ -1552,6 +1552,7 @@ def _nightly_sync_module(admin_token, module_name, config):
 
     fetch_fields.add(name_field)
     fetch_fields.add('id')
+    fetch_fields.add('Modified_Time')
 
     # Include franchise lookup field so we can store it for per-user filtering
     franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
@@ -1567,8 +1568,10 @@ def _nightly_sync_module(admin_token, module_name, config):
         for f in field_metadata['fields']:
             field_label_map[f['api_name']] = f['display_label']
 
-    # Wipe old global cache for this module before re-populating
-    database.clear_global_module_records(module_name)
+    # Load existing global cache to optimize geocoding/sync costs
+    cached_records = database.get_global_records_by_module(module_name)
+    cache_by_id = {str(r['id']): r for r in cached_records}
+    active_ids = set()
 
     count = 0
     page = 1
@@ -1596,6 +1599,29 @@ def _nightly_sync_module(admin_token, module_name, config):
         should_fetch_details = (module_name != 'Ship_To_Addresses')
         for record in data['data']:
             record_id = record.get('id')
+            if not record_id:
+                continue
+
+            zoho_modified = record.get('Modified_Time')
+            cached_item = cache_by_id.get(str(record_id))
+
+            use_cache = False
+            if cached_item:
+                cached_modified = cached_item['record_data'].get('_modified_time')
+                if cached_modified and zoho_modified and cached_modified == zoho_modified:
+                    if cached_item['lat'] is not None and cached_item['lng'] is not None:
+                        use_cache = True
+
+            if use_cache:
+                page_records.append((
+                    record_id, module_name, cached_item['name'], cached_item['lat'], cached_item['lng'],
+                    config['marker_color'], cached_item['record_data'], cached_item['franchise_id']
+                ))
+                active_ids.add(str(record_id))
+                count += 1
+                continue
+
+            # Cache miss: fetch details and geocode
             if should_fetch_details and record_id:
                 try:
                     detail_res = zoho_api.fetch_single_record(module_name, record_id, admin_token, fetch_fields_list)
@@ -1671,10 +1697,15 @@ def _nightly_sync_module(admin_token, module_name, config):
                         label = field_label_map.get(k, k.replace('_', ' '))
                         record_data[label] = str(extract_val(val))
 
+                # Store Modified_Time in record_data for future caching
+                if record.get('Modified_Time'):
+                    record_data['_modified_time'] = str(record.get('Modified_Time'))
+
                 page_records.append((
                     record.get('id'), module_name, name, lat, lng,
                     config['marker_color'], record_data, franchise_id
                 ))
+                active_ids.add(str(record.get('id')))
                 count += 1
 
         if page_records:
@@ -1687,6 +1718,9 @@ def _nightly_sync_module(admin_token, module_name, config):
             page += 1
         if page > 500:
             break
+
+    # Soft deletion cleanup of stale records (not returned by Zoho)
+    database.delete_stale_global_records(module_name, active_ids)
 
     log_debug(f"[nightly] {module_name}: {count} records saved to global cache.")
     return count

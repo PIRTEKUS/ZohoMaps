@@ -378,7 +378,55 @@ def clear_global_module_records(module_name):
     conn.commit()
     conn.close()
 
+def delete_stale_global_records(module_name, active_ids):
+    """Delete all global cache records for a module that are NOT in the active_ids list."""
+    conn = get_db_connection()
+    active_ids_set = {str(aid) for aid in active_ids}
+    try:
+        if not active_ids_set:
+            exec_query(conn, "DELETE FROM module_records WHERE user_id = ? AND module_name = ?", (GLOBAL_USER, module_name))
+        else:
+            # Select current database record IDs for this module to find candidates for deletion
+            rows = exec_query(conn, "SELECT id FROM module_records WHERE user_id = ? AND module_name = ?", (GLOBAL_USER, module_name), fetchall=True)
+            db_ids = {str(row['id']) for row in rows}
+            stale_ids = db_ids - active_ids_set
+            
+            if stale_ids:
+                stale_ids_list = list(stale_ids)
+                chunk_size = 500
+                if not IS_POSTGRES:
+                    exec_query(conn, 'BEGIN TRANSACTION')
+                for i in range(0, len(stale_ids_list), chunk_size):
+                    chunk = stale_ids_list[i:i+chunk_size]
+                    placeholders = ', '.join(['?' for _ in chunk])
+                    exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND module_name = ? AND id IN ({placeholders})", (GLOBAL_USER, module_name) + tuple(chunk))
+                if not IS_POSTGRES:
+                    conn.commit()
+    except Exception as e:
+        if not IS_POSTGRES:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise e
+    finally:
+        conn.close()
+
+def get_global_records_by_module(module_name):
+    """Retrieve all global cache records for a specific module."""
+    conn = get_db_connection()
+    rows = exec_query(conn, "SELECT id, lat, lng, color, record_data, franchise_id, name FROM module_records WHERE user_id = ? AND module_name = ?", (GLOBAL_USER, module_name), fetchall=True)
+    conn.close()
+    
+    results = []
+    for row in rows:
+        r = dict(row)
+        r['record_data'] = json.loads(r['record_data'])
+        results.append(r)
+    return results
+
 def save_global_records_batch(records):
+
     """Batch-save records into the global cache (user_id='__global__').
     Each record is a tuple: (id, module_name, name, lat, lng, color, record_data_dict, franchise_id)
     """
