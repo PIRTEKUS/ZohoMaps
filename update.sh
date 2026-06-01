@@ -11,6 +11,8 @@ cd /var/www/zohomap || { echo "Error: /var/www/zohomap directory not found"; exi
 echo "[1/4] Pulling latest changes from GitHub..."
 # Allow root (sudo) to access the repo even if owned by a different user
 sudo git config --global --add safe.directory /var/www/zohomap
+# Stash any local changes (e.g. from local configuration tests) to ensure a clean pull
+sudo git stash || true
 sudo git pull origin main
 
 # 2. Ensure virtual environment exists and is activated
@@ -84,8 +86,13 @@ else
 fi
 
 # 4.1 Restart the main app (now that secrets are loaded)
+echo "Stopping background syncs and releasing database locks..."
+sudo pkill -f run_nightly_sync.py || true
+sudo systemctl stop zohomap || true
+sudo killall gunicorn || true
+
 echo "Restarting ZohoMap service..."
-sudo systemctl restart zohomap
+sudo systemctl start zohomap
 
 # 4.2 Update Nginx configuration and reload
 echo "Updating Nginx configuration and reloading..."
