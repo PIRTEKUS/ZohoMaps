@@ -469,8 +469,8 @@ def get_records_in_bounds_global(franchise_ids, min_lat, max_lat, min_lng, max_l
     """Query the global cache. Admins see all; non-admins filtered by their franchise IDs.
     Returns [] if global cache is empty (caller should fall back to per-user records).
     """
-    if not is_admin and franchise_ids is not None and len(franchise_ids) == 0:
-        return []  # User has no franchises → no records
+    if not is_admin and (franchise_ids is None or len(franchise_ids) == 0):
+        return []  # User has no franchises or list is unknown → no records (secure by default)
 
     conn = get_db_connection()
 

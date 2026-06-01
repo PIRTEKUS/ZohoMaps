@@ -86,13 +86,12 @@ else
 fi
 
 # 4.1 Restart the main app (now that secrets are loaded)
-echo "Stopping background syncs and releasing database locks..."
+echo "Stopping background syncs..."
 sudo pkill -f run_nightly_sync.py || true
-sudo systemctl stop zohomap || true
-sudo killall gunicorn || true
 
 echo "Restarting ZohoMap service..."
-sudo systemctl start zohomap
+sudo systemctl daemon-reload
+sudo systemctl restart zohomap
 
 # 4.2 Update Nginx configuration and reload
 echo "Updating Nginx configuration and reloading..."

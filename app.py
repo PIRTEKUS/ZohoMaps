@@ -379,19 +379,17 @@ def callback():
                         log_debug(f"Could not resolve team user CRM ID: {e}")
 
                 # Pre-cache franchise memberships for this user so the first sync is fast.
-                # Run in background thread to avoid slowing down the login redirect.
-                def _prefetch_franchises(uid):
-                    try:
-                        tok = _get_admin_access_token()
-                        if tok:
-                            result = _get_user_franchise_ids(uid, tok, force_refresh=True)
-                            log_debug(f"[login] Franchise pre-cache for {uid}: {result.get('names', [])}")
-                    except Exception as ex:
-                        log_debug(f"[login] Franchise pre-cache failed: {ex}")
-
-                import threading
-                threading.Thread(target=_prefetch_franchises,
-                                 args=(session['user_id'],), daemon=True).start()
+                # Run synchronously to check access and prevent map race conditions.
+                uid = session['user_id']
+                try:
+                    tok = _get_admin_access_token()
+                    if tok:
+                        result = _get_user_franchise_ids(uid, tok, force_refresh=True)
+                        log_debug(f"[login] Franchise synchronous cache check for {uid}: {result.get('names', [])}")
+                    else:
+                        log_debug(f"[login] Warning: admin access token not available during login callback for {uid}")
+                except Exception as ex:
+                    log_debug(f"[login] Franchise synchronous cache check failed: {ex}")
 
             return redirect(url_for('index'))
         else:
@@ -1226,11 +1224,12 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
             franchise_field = FRANCHISE_FIELD_MAP.get(module_name)
 
         if franchise_info is None:
-            # Admin token unavailable, email-based ID, or no cache — degrade gracefully
-            if '@' not in str(user_id):
-                log_debug(f"[franchise filter] WARNING: Cannot determine franchises for {user_id}. "
-                          "Admin token is invalid (Access Denied). "
-                          "Log in as admin to ZohoMap to refresh it. Proceeding without franchise filter.")
+            # Admin token unavailable, email-based ID, or no cache — fail safely.
+            # Standard users must never see markers outside their territory, so if we can't
+            # determine their franchise list, we must not sync everything.
+            log_debug(f"[franchise filter] ERROR: Cannot determine franchises for user {user_id}. "
+                      "Admin token is invalid or cache is missing. Sync failed to prevent data leakage.")
+            return 0
         else:
             # Only use real Zoho record IDs (territory_ prefixed are fallback placeholders)
             franchise_ids = [fid for fid in franchise_info.get('ids', [])
@@ -2001,10 +2000,11 @@ def get_map_data():
             except Exception as _e:
                 log_debug(f"[map] Email→ID resolution failed: {_e}")
 
-    franchise_ids_for_filter = None   # None = admin or degraded (no filter)
+    franchise_ids_for_filter = None   # None = admin
     franchise_lookup_succeeded = False  # True once we have a definitive answer
 
     if not is_admin:
+        franchise_ids_for_filter = [] # Default to empty list for standard users to prevent unrestricted access
         _atk = _get_admin_access_token()
         if _atk:
             _fi = _get_user_franchise_ids(user_id, _atk)
