@@ -62,8 +62,21 @@ def exchange_code_for_token(code, redirect_uri: str = None):
         'redirect_uri': uri,
         'code': code
     }
-    response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data)
-    return response.json()
+    try:
+        response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data, timeout=15)
+        if response.status_code != 200:
+            print(f"[ZOHO API ERROR] exchange_code_for_token returned status {response.status_code}: {response.text[:500]}")
+        return response.json()
+    except Exception as e:
+        print(f"[ZOHO API ERROR] exchange_code_for_token exception: {e}")
+        status_str = f"HTTP {response.status_code}" if 'response' in locals() else "Connection Error"
+        err_msg = ""
+        if 'response' in locals():
+            try:
+                err_msg = f": {response.text[:200]}"
+            except:
+                pass
+        return {'error': f"{status_str}{err_msg} ({e})"}
 
 def refresh_access_token(refresh_token):
     data = {
@@ -72,8 +85,21 @@ def refresh_access_token(refresh_token):
         'client_secret': ZOHO_CLIENT_SECRET,
         'refresh_token': refresh_token
     }
-    response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data)
-    return response.json()
+    try:
+        response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token", data=data, timeout=15)
+        if response.status_code != 200:
+            print(f"[ZOHO API ERROR] refresh_access_token returned status {response.status_code}: {response.text[:500]}")
+        return response.json()
+    except Exception as e:
+        print(f"[ZOHO API ERROR] refresh_access_token exception: {e}")
+        status_str = f"HTTP {response.status_code}" if 'response' in locals() else "Connection Error"
+        err_msg = ""
+        if 'response' in locals():
+            try:
+                err_msg = f": {response.text[:200]}"
+            except:
+                pass
+        return {'error': f"{status_str}{err_msg} ({e})"}
 
 def revoke_token(token):
     """Revoke a refresh or access token at Zoho's accounts server.
