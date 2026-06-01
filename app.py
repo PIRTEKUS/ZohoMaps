@@ -1540,8 +1540,17 @@ def _nightly_sync_module(admin_token, module_name, config):
             if v:
                 fetch_fields.add(v)
 
-    title_field = fields.get('title_field', 'Name')
-    fetch_fields.add(title_field)
+    title_field = fields.get('title_field')
+    if title_field:
+        name_field = title_field
+    else:
+        name_field = 'Name'
+        if module_name == 'Accounts':
+            name_field = 'Account_Name'
+        elif module_name == 'Leads' or module_name == 'Contacts':
+            name_field = 'Full_Name'
+
+    fetch_fields.add(name_field)
     fetch_fields.add('id')
 
     # Include franchise lookup field so we can store it for per-user filtering
@@ -1596,7 +1605,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                     log_debug(f"[nightly] Detail fetch failed for {module_name}/{record_id}: {ex}")
 
             lat, lng = None, None
-            name_raw = record.get(title_field, record.get('Name',
+            name_raw = record.get(name_field, record.get('Name',
                                   record.get('Full_Name', f"{module_name} {record.get('id')}")))
             name = str(extract_val(name_raw))
 
@@ -1655,7 +1664,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                         record_data[label] = str(val)
 
                 for k in fetch_fields_list:
-                    if k in ('id', title_field, franchise_field) or k in fields.values():
+                    if k in ('id', name_field, franchise_field) or k in fields.values():
                         continue
                     val = record.get(k)
                     if val is not None and val != '':
