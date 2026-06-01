@@ -107,7 +107,7 @@ def revoke_token(token):
     IMPORTANT: Without revoking, Zoho keeps issuing tokens with OLD, limited scopes
     even if the user clicks logout and logs back in. Always revoke on logout."""
     data = {'token': token}
-    response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token/revoke", data=data)
+    response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token/revoke", data=data, timeout=10)
     return response.status_code == 200
 
 def fetch_module_records(module_name, access_token, fields=None, page=1, page_token=None):
@@ -126,7 +126,7 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
         params['fields'] = ','.join(fields)
         
     url = f"{ZOHO_API_URL}/crm/v3/{module_name}"
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=12)
     if response.status_code == 204:
         return {'data': []} # No content
     if response.status_code != 200:
@@ -139,7 +139,7 @@ def fetch_single_record(module_name, record_id, access_token, fields=None):
     params = {}
     if fields:
         params['fields'] = ",".join(fields)
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=10)
     if not response.content:
         return {'status': 'error', 'code': 'EMPTY_RESPONSE',
                 'message': f'Zoho returned HTTP {response.status_code} with empty body for {module_name}/{record_id}'}
@@ -154,14 +154,14 @@ def fetch_module_metadata(access_token):
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
     url = f"{ZOHO_API_URL}/crm/v3/settings/modules"
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=10)
     return response.json()
 
 def fetch_module_fields(module_name, access_token):
     headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
     url = f"{ZOHO_API_URL}/crm/v3/settings/fields"
     params = {'module': module_name}
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=10)
     if not response.content:
         return {}
     try:
@@ -195,7 +195,7 @@ def search_records(module_name, criteria, access_token, fields=None, page=1, pag
         
     if fields:
         params['fields'] = ",".join(fields)
-    response = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params, timeout=12)
     if response.status_code == 200:
         return response.json()
     if response.status_code != 204:
@@ -215,7 +215,7 @@ def coql_query(select_query, access_token):
     url = f"{ZOHO_API_URL}/crm/v5/coql"
     try:
         response = requests.post(url, headers=headers,
-                                 json={'select_query': select_query}, timeout=15)
+                                 json={'select_query': select_query}, timeout=25)
         if response.status_code == 200 and response.content:
             return response.json()
         if response.status_code not in (200, 204):
