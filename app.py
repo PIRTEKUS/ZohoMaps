@@ -121,8 +121,8 @@ def extract_val(val):
         return val.get('name', val.get('display_value', str(val)))
     return val
 
-def geocode_address(address):
-    cached = database.get_cached_geocode(address)
+def geocode_address(address, conn=None):
+    cached = database.get_cached_geocode(address, conn=conn)
     if cached:
         return cached['lat'], cached['lng']
     
@@ -132,7 +132,7 @@ def geocode_address(address):
         resp = requests.get(url, timeout=5).json()
         if resp.get('status') == 'OK' and len(resp.get('results', [])) > 0:
             loc = resp['results'][0]['geometry']['location']
-            database.set_cached_geocode(address, loc['lat'], loc['lng'])
+            database.set_cached_geocode(address, loc['lat'], loc['lng'], conn=conn)
             log_debug(f"Success! Cached coordinates for {address}.")
             return loc['lat'], loc['lng']
         else:
@@ -1584,6 +1584,7 @@ def _nightly_sync_module(admin_token, module_name, config):
     # discarded locally when geocoding fails (see address_parts logic below).
     log_debug(f"[nightly] {module_name}: fetching all records (full global cache).")
 
+    db_conn = database.get_db_connection()
     while more_records:
         log_debug(f"[nightly] {module_name}: fetching page {page}...")
         data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
@@ -1663,7 +1664,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                         address_parts.append(str(val))
                 full_address = ', '.join(address_parts)
                 if full_address:
-                    lat, lng = geocode_address(full_address)
+                    lat, lng = geocode_address(full_address, conn=db_conn)
 
             if lat is not None and lng is not None:
                 # Extract franchise ID — handles regular lookup (dict) AND
@@ -1731,6 +1732,9 @@ def _nightly_sync_module(admin_token, module_name, config):
 
     # Soft deletion cleanup of stale records (not returned by Zoho)
     database.delete_stale_global_records(module_name, active_ids)
+
+    # Close persistent database connection
+    db_conn.close()
 
     log_debug(f"[nightly] {module_name}: {count} records saved to global cache.")
     return count

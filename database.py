@@ -34,7 +34,8 @@ def get_db_connection():
             host=parsed.hostname,
             port=parsed.port or 5432,
             database=parsed.path.lstrip('/'),
-            ssl_context=ssl_ctx
+            ssl_context=ssl_ctx,
+            timeout=10
         )
         conn.autocommit = True
         return conn
@@ -285,22 +286,31 @@ def delete_module_config(user_id, module_name):
     conn.commit()
     conn.close()
 
-def get_cached_geocode(address):
-    conn = get_db_connection()
+def get_cached_geocode(address, conn=None):
+    should_close = False
+    if conn is None:
+        conn = get_db_connection()
+        should_close = True
     row = exec_query(conn, 'SELECT lat, lng FROM geocode_cache WHERE address = ?', (address,), fetchone=True)
-    conn.close()
+    if should_close:
+        conn.close()
     if row:
         return {'lat': row['lat'], 'lng': row['lng']}
     return None
 
-def set_cached_geocode(address, lat, lng):
-    conn = get_db_connection()
+def set_cached_geocode(address, lat, lng, conn=None):
+    should_close = False
+    if conn is None:
+        conn = get_db_connection()
+        should_close = True
     exec_query(conn, '''
         INSERT OR REPLACE INTO geocode_cache (address, lat, lng)
         VALUES (?, ?, ?)
     ''', (address, lat, lng))
-    conn.commit()
-    conn.close()
+    if not IS_POSTGRES:
+        conn.commit()
+    if should_close:
+        conn.close()
 
 def save_module_record(user_id, id, module_name, name, lat, lng, color, record_data):
     save_module_records_batch(user_id, [(id, module_name, name, lat, lng, color, record_data)])
