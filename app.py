@@ -1631,14 +1631,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                 continue
 
             cache_misses += 1
-            # Cache miss: fetch details and geocode
-            if should_fetch_details and record_id:
-                try:
-                    detail_res = zoho_api.fetch_single_record(module_name, record_id, admin_token, fetch_fields_list)
-                    if 'data' in detail_res and detail_res['data']:
-                        record = detail_res['data'][0]
-                except Exception as ex:
-                    log_debug(f"[nightly] Detail fetch failed for {module_name}/{record_id}: {ex}")
+            # Cache miss: geocode (record already has all fields fetched by fetch_module_records)
 
             lat, lng = None, None
             name_raw = record.get(name_field, record.get('Name',
