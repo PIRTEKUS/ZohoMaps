@@ -284,6 +284,19 @@ main.container { padding: 0 !important; overflow: hidden; }
     </button>
     {% endif %}
 
+    <!-- Call Selector Modal -->
+    <div class="call-modal-overlay" id="call-modal-overlay">
+        <div class="call-modal-dialog">
+            <div class="call-modal-header">
+                <div class="call-modal-title" id="call-modal-title">Call Contact</div>
+                <button class="call-modal-close" onclick="closeCallModal()">✕</button>
+            </div>
+            <div class="call-modal-body" id="call-modal-body">
+                <!-- Dynamically populated buttons -->
+            </div>
+        </div>
+    </div>
+
 </div><!-- end .map-full -->
 
 {% if is_admin %}
@@ -530,7 +543,28 @@ function _buildListDetail(item) {
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const zohoAppLink = `zohocrm://crm/${encodeURIComponent(item.api_module_name || item.module)}/${item.id}`;
 
+    // Extract phone fields
+    const phoneFields = [];
+    Object.entries(item.record_data || {}).forEach(([key, val]) => {
+        if (!addressKeys.includes(key) && !key.startsWith('_') && val) {
+            const lowerKey = key.toLowerCase();
+            if (lowerKey.includes('phone') || lowerKey.includes('mobile')) {
+                phoneFields.push({ label: key, value: String(val).trim() });
+            }
+        }
+    });
+
+    const phoneFieldsJson = JSON.stringify(phoneFields).replace(/"/g, '&quot;');
+    const callButtonHtml = phoneFields.length > 0 ? `
+        <button class="btn-primary" style="font-size:.73rem;padding:.35rem;grid-column:span 2;background-color:#10b981;box-shadow: 0 4px 14px 0 rgba(16, 185, 129, 0.39);"
+            onclick="window.makePhoneCall('${safeName}', '${phoneFieldsJson}')">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:2px;vertical-align:middle;"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            Call Contact
+        </button>
+    ` : '';
+
     html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:10px;">
+        ${callButtonHtml}
         <button class="btn-primary" style="font-size:.73rem;padding:.35rem;grid-column:span 2;"
             onclick="window.focusMapMarker('${item.id}'); if(window.innerWidth<=600) window.toggleListDrawer();">
             <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -596,6 +630,67 @@ window.showSearchButton = function() {
     const btn = document.getElementById('search-area-btn');
     if (btn) btn.style.display = 'inline-flex';
 };
+
+// Tap-to-Call Selector logic
+window.makePhoneCall = function(itemName, phoneFieldsJson) {
+    const phoneFields = typeof phoneFieldsJson === 'string' ? JSON.parse(phoneFieldsJson) : phoneFieldsJson;
+    if (!phoneFields || phoneFields.length === 0) return;
+
+    if (phoneFields.length === 1) {
+        // Strip out non-numeric characters for tel link, keeping optional leading plus
+        const cleanNum = phoneFields[0].value.replace(/(?!^\+)[^\d]/g, '');
+        window.location.href = 'tel:' + cleanNum;
+        return;
+    }
+
+    // Multiple fields: show selector modal
+    const overlay = document.getElementById('call-modal-overlay');
+    const title = document.getElementById('call-modal-title');
+    const body = document.getElementById('call-modal-body');
+
+    title.textContent = `Call ${itemName}`;
+    body.innerHTML = '';
+
+    phoneFields.forEach(f => {
+        const btn = document.createElement('button');
+        btn.className = 'call-option-btn';
+        const cleanNum = f.value.replace(/(?!^\+)[^\d]/g, '');
+        btn.onclick = function() {
+            window.location.href = 'tel:' + cleanNum;
+            closeCallModal();
+        };
+
+        btn.innerHTML = `
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+            <div style="flex:1;">
+                <div style="font-size:0.72rem; color:#94a3b8; font-weight:500; margin-bottom:2px;">${f.label}</div>
+                <div style="font-size:0.88rem; font-weight:600; color:#fff;">${f.value}</div>
+            </div>
+        `;
+        body.appendChild(btn);
+    });
+
+    overlay.classList.add('open');
+};
+
+window.closeCallModal = function() {
+    const overlay = document.getElementById('call-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+};
+
+// Close modal when clicking outside the dialog content
+document.addEventListener('DOMContentLoaded', () => {
+    const overlay = document.getElementById('call-modal-overlay');
+    if (overlay) {
+        overlay.addEventListener('click', function(e) {
+            if (e.target === this) {
+                window.closeCallModal();
+            }
+        });
+    }
+});
 
 // Sync all data
 window.syncAllMyData = async function() {
