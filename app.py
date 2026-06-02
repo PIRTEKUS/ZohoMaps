@@ -1465,8 +1465,14 @@ def sync_module(module_name):
         return jsonify({'error': 'Server not configured: no admin token available'}), 503
 
     try:
-        count = do_sync_module(session.get('user_id'), sync_token, module_name, config,
-                               is_admin=session.get('is_admin', False))
+        is_admin = session.get('is_admin', False)
+        if is_admin:
+            # Admins trigger the optimized, nightly sync logic for this specific module
+            # which updates the global cache (__global__) and avoids redundant geocoding.
+            count = _nightly_sync_module(sync_token, module_name, config)
+        else:
+            count = do_sync_module(session.get('user_id'), sync_token, module_name, config,
+                                   is_admin=False)
         return jsonify({'success': True, 'synced': count})
     except Exception as e:
         log_debug(f"Sync error for {module_name}: {str(e)}")
