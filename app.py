@@ -287,7 +287,7 @@ def index():
     # show_console is a per-user session setting — admins can toggle it in Settings;
     # it is intentionally NOT a global setting so team users never see the console.
     show_console = session.get('show_console', False) and session.get('is_admin', False)
-    effective_configs = database.get_effective_configs(session.get('user_id'))
+    effective_configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
     
     # Enrich configs with module_label (display name) from cached module list
     # so the data legend can match colors even when item.module shows display labels
@@ -1131,7 +1131,7 @@ def sync_single_record(module_name, record_id):
         log_debug("Sync record failed: Unauthorized (no access_token in session)")
         return jsonify({'error': 'Unauthorized'}), 401
     
-    configs = database.get_effective_configs(session.get('user_id'))
+    configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
     config = next((c for c in configs if c['module_name'] == module_name), None)
     if not config:
         log_debug(f"Sync record failed: Module {module_name} not configured for user. Available: {[c['module_name'] for c in configs]}")
@@ -1454,7 +1454,7 @@ def sync_module(module_name):
         return jsonify({'error': 'Unauthorized'}), 401
     
     # Use effective configs so admins and team users can sync shared configs manually if needed
-    configs = database.get_effective_configs(session.get('user_id'))
+    configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
     config = next((c for c in configs if c['module_name'] == module_name), None)
     if not config:
         return jsonify({'error': 'Module not configured'}), 404
@@ -1485,7 +1485,7 @@ def sync_all_modules():
         return jsonify({'error': 'Unauthorized'}), 401
     
     # Use effective configs so team users can sync shared configs
-    configs = database.get_effective_configs(session.get('user_id'))
+    configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
     if not configs:
         return jsonify({'error': 'No modules configured to sync'}), 404
 
@@ -1844,7 +1844,7 @@ def get_nightly_sync_status():
     })
 
 
-def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng):
+def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng, is_admin=False):
     """
     Background sync for records in the current map viewport.
 
@@ -1863,7 +1863,7 @@ def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max
     # get_effective_configs returns the user's own configs merged with any
     # shared module configurations (field mappings, colors, etc.).
     # This tells us WHAT to sync — not WHOSE data to show.
-    configs = database.get_effective_configs(user_id)
+    configs = database.get_effective_configs(user_id, is_admin)
     total_new = 0
     
     for config in configs:
@@ -1960,7 +1960,7 @@ def get_map_data():
         
         try:
             log_debug(f"Triggering background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
-            sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng)
+            sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng, session.get('is_admin', False))
         except Exception as e:
             log_debug(f"WARNING: Area sync failed but continuing with local data: {str(e)}")
     
@@ -2136,7 +2136,7 @@ def get_map_data():
             pass
 
     # Build a config lookup dict: for team users this includes shared configs automatically
-    configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'))}
+    configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))}
     
 
     map_points = []

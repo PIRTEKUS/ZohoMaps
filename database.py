@@ -265,20 +265,38 @@ def get_shared_configs():
         results.append(r)
     return results
 
-def get_effective_configs(user_id):
+def get_effective_configs(user_id, is_admin=False):
     conn = get_db_connection()
-    own = exec_query(conn, 'SELECT * FROM module_config WHERE user_id = ?', (str(user_id),), fetchall=True)
-    own_modules = {r['module_name'] for r in own}
-    
-    shared = exec_query(conn, 'SELECT * FROM module_config WHERE is_shared = 1 AND user_id != ?', (str(user_id),), fetchall=True)
-    conn.close()
-    
-    results = []
-    for row in list(own) + [r for r in shared if r['module_name'] not in own_modules]:
-        r = dict(row)
-        r['field_mappings'] = json.loads(r['field_mappings'])
-        results.append(r)
-    return results
+    if not is_admin:
+        # Standard users ONLY get configurations set and shared by admins.
+        # Flushes any old private configs they might have to enforce the admin shared defaults.
+        try:
+            exec_query(conn, 'DELETE FROM module_config WHERE user_id = ?', (str(user_id),))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        shared = exec_query(conn, 'SELECT * FROM module_config WHERE is_shared = 1', fetchall=True)
+        conn.close()
+        results = []
+        for row in shared:
+            r = dict(row)
+            r['field_mappings'] = json.loads(r['field_mappings'])
+            results.append(r)
+        return results
+    else:
+        # Admin gets their own configs, plus any shared configs they don't own
+        own = exec_query(conn, 'SELECT * FROM module_config WHERE user_id = ?', (str(user_id),), fetchall=True)
+        own_modules = {r['module_name'] for r in own}
+        shared = exec_query(conn, 'SELECT * FROM module_config WHERE is_shared = 1 AND user_id != ?', (str(user_id),), fetchall=True)
+        conn.close()
+        
+        results = []
+        for row in list(own) + [r for r in shared if r['module_name'] not in own_modules]:
+            r = dict(row)
+            r['field_mappings'] = json.loads(r['field_mappings'])
+            results.append(r)
+        return results
 
 def delete_module_config(user_id, module_name):
     conn = get_db_connection()
