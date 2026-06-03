@@ -607,6 +607,13 @@
                                color:#fca5a5; border-radius:7px; cursor:pointer; font-size:0.82rem;">
                         🔄 Force Refresh (bust 4h cache)
                     </button>
+                    {% if is_admin %}
+                    <button type="button" onclick="clearAllFranchiseCaches()" id="fd-clear-cache-btn"
+                        style="padding:0.45rem 1rem; background:rgba(239,68,68,0.2); border:1px solid rgba(239,68,68,0.5);
+                               color:#fca5a5; border-radius:7px; cursor:pointer; font-size:0.82rem; font-weight:600;">
+                        🗑️ Clear All Franchise Caches
+                    </button>
+                    {% endif %}
                 </div>
 
                 <div id="franchise-debug-output" style="background:rgba(0,0,0,0.25); border-radius:10px; padding:1rem; font-size:0.82rem; display:none;">
@@ -1444,6 +1451,35 @@ async function loadFranchiseDebug(forceRefresh) {
         renderFranchiseDebug(inner, d);
     } catch (e) {
         inner.innerHTML = `<span style="color:#fca5a5;">Network error: ${e}</span>`;
+    }
+}
+
+async function clearAllFranchiseCaches() {
+    const btn = document.getElementById('fd-clear-cache-btn');
+    if (!btn) return;
+
+    if (!confirm("Are you sure you want to clear the franchise cache for all users? This will force them to rebuild mappings on their next request.")) {
+        return;
+    }
+
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⌛ Clearing...';
+
+    try {
+        const res = await fetch('/api/admin/clear-all-franchise-caches', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            alert("✓ " + data.message);
+            loadFranchiseDebug(false);
+        } else {
+            alert("❌ Failed to clear caches: " + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert("❌ Network error: " + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
     }
 }
 

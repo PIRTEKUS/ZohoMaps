@@ -2699,22 +2699,34 @@ def debug_franchise():
 
     # Global cache franchise_id distribution
     try:
-        with database._get_db() as conn:
-            rows = conn.execute(
+        conn = database.get_db_connection()
+        try:
+            rows = database.exec_query(conn,
                 "SELECT franchise_id, COUNT(*) as cnt FROM module_records "
                 "WHERE user_id='__global__' AND franchise_id IS NOT NULL AND franchise_id != '' "
-                "GROUP BY franchise_id ORDER BY cnt DESC LIMIT 30"
-            ).fetchall()
-            cache_franchise_counts = {r[0]: r[1] for r in rows}
+                "GROUP BY franchise_id ORDER BY cnt DESC LIMIT 30",
+                fetchall=True
+            )
+            cache_franchise_counts = {}
+            for r in rows:
+                fid = r['franchise_id']
+                cnt = r['cnt']
+                cache_franchise_counts[fid] = cnt
 
-            total_global = conn.execute(
-                "SELECT COUNT(*) FROM module_records WHERE user_id='__global__'"
-            ).fetchone()[0]
+            row_total = database.exec_query(conn,
+                "SELECT COUNT(*) as count FROM module_records WHERE user_id='__global__'",
+                fetchone=True
+            )
+            total_global = row_total['count'] if row_total else 0
 
-            no_franchise = conn.execute(
-                "SELECT COUNT(*) FROM module_records "
-                "WHERE user_id='__global__' AND (franchise_id IS NULL OR franchise_id='')"
-            ).fetchone()[0]
+            row_no_franchise = database.exec_query(conn,
+                "SELECT COUNT(*) as count FROM module_records "
+                "WHERE user_id='__global__' AND (franchise_id IS NULL OR franchise_id='')",
+                fetchone=True
+            )
+            no_franchise = row_no_franchise['count'] if row_no_franchise else 0
+        finally:
+            conn.close()
     except Exception as e:
         cache_franchise_counts = {}
         total_global = 0
@@ -2763,6 +2775,28 @@ def debug_franchise_refresh():
         'names':         fi.get('names', []) if fi else [],
         'debug':         fi.get('debug', []) if fi else ['returned None'],
     })
+
+
+@app.route('/api/admin/clear-all-franchise-caches', methods=['POST'])
+@limiter.limit("5 per minute")
+def clear_all_franchise_caches():
+    """Admin-only endpoint to clear franchise cache for all users."""
+    if 'access_token' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized — admin access required'}), 403
+
+    try:
+        conn = database.get_db_connection()
+        try:
+            database.exec_query(conn, "DELETE FROM global_settings WHERE key LIKE 'franchise_ids_%'")
+            conn.commit()
+        finally:
+            conn.close()
+        return jsonify({'success': True, 'message': 'All franchise caches cleared successfully.'})
+    except Exception as e:
+        return jsonify({'error': f'Database error: {str(e)}'}), 500
+
 
 @app.route('/admin/refresh-token-setup')
 def admin_refresh_token_setup():
