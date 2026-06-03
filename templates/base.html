@@ -27,12 +27,25 @@
         <!-- Desktop nav links -->
         <div class="nav-links nav-links-desktop">
             {% if user_franchises and user_franchises|length > 1 %}
-            <select class="nav-select" id="franchise-filter" onchange="window.filterByFranchise(this.value)">
-                <option value="all">All Franchises</option>
-                {% for f in user_franchises %}
-                <option value="{{ f.id }}">{{ f.name }}</option>
-                {% endfor %}
-            </select>
+            <!-- Franchise filter dropdown -->
+            <div class="nav-dropdown-wrap">
+                <button class="nav-dropdown-btn" id="franchise-dropdown-btn" onclick="window.toggleFranchiseDropdown(event)">
+                    <span id="franchise-filter-label">All Franchises</span>
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="nav-dropdown-menu" id="franchise-dropdown-menu">
+                    <div class="nav-dropdown-item" onclick="window.toggleFranchiseSelection('all', event)">
+                        <input type="checkbox" id="chk-all" checked>
+                        <label for="chk-all">All Franchises</label>
+                    </div>
+                    {% for f in user_franchises %}
+                    <div class="nav-dropdown-item" onclick="window.toggleFranchiseSelection('{{ f.id }}', event)">
+                        <input type="checkbox" id="chk-{{ f.id }}" checked>
+                        <label for="chk-{{ f.id }}">{{ f.name }}</label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
             {% endif %}
             <span class="nav-user">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
@@ -68,13 +81,24 @@
             {{ session.get('user_name', 'User') }}
         </div>
         {% if user_franchises and user_franchises|length > 1 %}
+        <!-- Mobile Franchise checklist -->
         <div style="padding: 10px 16px;">
-            <select class="nav-select" id="franchise-filter-mobile" onchange="window.filterByFranchise(this.value); closeMobileNav();" style="width: 100%; margin-right: 0;">
-                <option value="all">All Franchises</option>
+            <div onclick="window.toggleMobileFranchiseList()" style="color:#e2e8f0; font-size:0.85rem; font-weight:600; display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding:6px 0;">
+                <span>Franchises (<span id="mobile-franchise-count">All</span>)</span>
+                <svg id="mobile-franchise-caret" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" style="transition:transform .2s;"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div id="mobile-franchise-list" style="display:none; max-height:200px; overflow-y:auto; margin-top:6px; padding-left:8px; border-left:1px solid rgba(255,255,255,0.1);">
+                <div class="nav-dropdown-item" onclick="window.toggleFranchiseSelection('all', event)">
+                    <input type="checkbox" id="chk-m-all" checked>
+                    <label for="chk-m-all">All Franchises</label>
+                </div>
                 {% for f in user_franchises %}
-                <option value="{{ f.id }}">{{ f.name }}</option>
+                <div class="nav-dropdown-item" onclick="window.toggleFranchiseSelection('{{ f.id }}', event)">
+                    <input type="checkbox" id="chk-m-{{ f.id }}" checked>
+                    <label for="chk-m-{{ f.id }}">{{ f.name }}</label>
+                </div>
                 {% endfor %}
-            </select>
+            </div>
         </div>
         {% endif %}
         <a href="{{ url_for('index') }}" class="mobile-nav-link" onclick="closeMobileNav()">
@@ -118,6 +142,20 @@
             hIcon.style.display = 'block';
             cIcon.style.display = 'none';
         }
+
+        window.configuredFranchises = {{ user_franchises | tojson | safe if user_franchises else '[]' }};
+        
+        window.toggleMobileFranchiseList = function() {
+            const list = document.getElementById('mobile-franchise-list');
+            const caret = document.getElementById('mobile-franchise-caret');
+            if (list) {
+                const isHidden = list.style.display === 'none';
+                list.style.display = isHidden ? 'block' : 'none';
+                if (caret) {
+                    caret.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+                }
+            }
+        };
     </script>
     {% endif %}
 

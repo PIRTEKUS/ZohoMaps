@@ -97,36 +97,85 @@ p {
 .nav-link:hover {
     color: #fff;
 }
-.nav-select {
+.nav-dropdown-wrap {
+    position: relative;
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+.nav-dropdown-btn {
     outline: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    padding: 0.35rem 2rem 0.35rem 0.75rem;
-    border-radius: 20px;
     border: 1px solid rgba(255, 255, 255, 0.15);
     background: rgba(15, 23, 42, 0.55);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     color: #e2e8f0;
-    background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="%2394a3b8" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>');
-    background-repeat: no-repeat;
-    background-position: right 10px center;
+    padding: 0.35rem 1rem;
+    border-radius: 20px;
     cursor: pointer;
     font-family: inherit;
     font-size: 0.8rem;
     font-weight: 500;
-    transition: border-color 0.2s, background 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     height: 32px;
-    margin-right: 0.5rem;
+    transition: border-color 0.2s, background 0.2s;
 }
-.nav-select:hover {
+.nav-dropdown-btn:hover {
     border-color: rgba(255, 255, 255, 0.3);
     background: rgba(15, 23, 42, 0.75);
 }
-.nav-select option {
-    background: #0f172a;
+.nav-dropdown-btn svg {
+    transition: transform 0.2s;
+    color: #94a3b8;
+}
+.nav-dropdown-btn.open svg {
+    transform: rotate(180deg);
+}
+.nav-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 260px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 0.5rem 0;
+    z-index: 300;
+    display: none;
+}
+.nav-dropdown-menu.open {
+    display: block;
+}
+.nav-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0.5rem 1rem;
     color: #cbd5e1;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+    user-select: none;
+}
+.nav-dropdown-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+.nav-dropdown-item input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: var(--primary);
+    width: 14px;
+    height: 14px;
+}
+.nav-dropdown-item label {
+    cursor: pointer;
+    flex: 1;
 }
 
 /* Hamburger button — hidden on desktop */

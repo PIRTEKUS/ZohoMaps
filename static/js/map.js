@@ -4,23 +4,132 @@ window.mapInitialized = false;
 window.isProgrammaticMove = false;
 let programmaticTimeout = null;
 
-window.selectedFranchiseId = 'all';
+window.selectedFranchiseIds = new Set(['all']);
 window.filterMapData = function(data) {
     if (!data) return [];
-    if (!window.selectedFranchiseId || window.selectedFranchiseId === 'all') {
+    if (!window.selectedFranchiseIds || window.selectedFranchiseIds.has('all')) {
         return data;
     }
-    return data.filter(item => String(item.franchise_id) === String(window.selectedFranchiseId));
+    return data.filter(item => window.selectedFranchiseIds.has(String(item.franchise_id)));
 };
 
-window.filterByFranchise = function(franchiseId) {
-    window.selectedFranchiseId = franchiseId;
+window.toggleFranchiseDropdown = function(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('franchise-dropdown-menu');
+    const btn = document.getElementById('franchise-dropdown-btn');
+    if (menu) {
+        const isOpen = menu.classList.toggle('open');
+        if (btn) btn.classList.toggle('open', isOpen);
+    }
+};
+
+window.toggleFranchiseSelection = function(id, event) {
+    if (event.target.tagName === 'INPUT') {
+        event.stopPropagation();
+    } else {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const checkboxId = id === 'all' ? 'chk-all' : `chk-${id}`;
+    const mCheckboxId = id === 'all' ? 'chk-m-all' : `chk-m-${id}`;
     
-    // Sync dropdown values across desktop/mobile views
-    const dtFilter = document.getElementById('franchise-filter');
-    if (dtFilter) dtFilter.value = franchiseId;
-    const mbFilter = document.getElementById('franchise-filter-mobile');
-    if (mbFilter) mbFilter.value = franchiseId;
+    const chk = document.getElementById(checkboxId);
+    const chkM = document.getElementById(mCheckboxId);
+
+    let newCheckedState;
+    if (event.target.tagName === 'INPUT') {
+        newCheckedState = event.target.checked;
+    } else {
+        newCheckedState = chk ? !chk.checked : (chkM ? !chkM.checked : false);
+    }
+
+    if (chk) chk.checked = newCheckedState;
+    if (chkM) chkM.checked = newCheckedState;
+
+    const list = window.configuredFranchises || [];
+    
+    if (id === 'all') {
+        if (newCheckedState) {
+            window.selectedFranchiseIds = new Set(['all']);
+            list.forEach(f => {
+                const c = document.getElementById(`chk-${f.id}`);
+                const cm = document.getElementById(`chk-m-${f.id}`);
+                if (c) c.checked = true;
+                if (cm) cm.checked = true;
+            });
+        } else {
+            window.selectedFranchiseIds = new Set();
+            list.forEach(f => {
+                const c = document.getElementById(`chk-${f.id}`);
+                const cm = document.getElementById(`chk-m-${f.id}`);
+                if (c) c.checked = false;
+                if (cm) cm.checked = false;
+            });
+        }
+    } else {
+        if (newCheckedState) {
+            if (window.selectedFranchiseIds.has('all')) {
+                window.selectedFranchiseIds.delete('all');
+            }
+            window.selectedFranchiseIds.add(id);
+        } else {
+            window.selectedFranchiseIds.delete('all');
+            window.selectedFranchiseIds.delete(id);
+            const call = document.getElementById('chk-all');
+            const callM = document.getElementById('chk-m-all');
+            if (call) call.checked = false;
+            if (callM) callM.checked = false;
+        }
+
+        let allChecked = true;
+        list.forEach(f => {
+            const c = document.getElementById(`chk-${f.id}`);
+            if (c && !c.checked) allChecked = false;
+        });
+
+        if (allChecked && list.length > 0) {
+            window.selectedFranchiseIds = new Set(['all']);
+            const call = document.getElementById('chk-all');
+            const callM = document.getElementById('chk-m-all');
+            if (call) call.checked = true;
+            if (callM) callM.checked = true;
+        }
+    }
+
+    window.updateFranchiseFilterUI();
+};
+
+window.updateFranchiseFilterUI = function() {
+    const list = window.configuredFranchises || [];
+    const label = document.getElementById('franchise-filter-label');
+    const mLabelCount = document.getElementById('mobile-franchise-count');
+    
+    let labelText = 'All Franchises';
+    let mobileText = 'All';
+
+    if (window.selectedFranchiseIds.has('all')) {
+        labelText = 'All Franchises';
+        mobileText = 'All';
+    } else {
+        const selectedList = list.filter(f => window.selectedFranchiseIds.has(f.id));
+        if (selectedList.length === 0) {
+            labelText = '0 Franchises';
+            mobileText = '0';
+        } else if (selectedList.length === 1) {
+            labelText = selectedList[0].name;
+            mobileText = '1';
+        } else if (selectedList.length === list.length) {
+            labelText = 'All Franchises';
+            mobileText = 'All';
+        } else {
+            labelText = `${selectedList.length} Selected`;
+            mobileText = String(selectedList.length);
+        }
+    }
+
+    if (label) label.textContent = labelText;
+    if (mLabelCount) mLabelCount.textContent = mobileText;
 
     if (window.lastMapData) {
         plotData(window.lastMapData);
@@ -28,6 +137,16 @@ window.filterByFranchise = function(franchiseId) {
         if (window.updateRecordList) window.updateRecordList(window.lastMapData);
     }
 };
+
+// Close dropdown on clicking outside
+document.addEventListener('click', function(e) {
+    const menu = document.getElementById('franchise-dropdown-menu');
+    const btn = document.getElementById('franchise-dropdown-btn');
+    if (menu && !menu.contains(e.target) && btn && !btn.contains(e.target)) {
+        menu.classList.remove('open');
+        btn.classList.remove('open');
+    }
+});
 
 async function initMap() {
     // Default fallback to US
