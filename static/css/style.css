@@ -97,6 +97,37 @@ p {
 .nav-link:hover {
     color: #fff;
 }
+.nav-select {
+    outline: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    padding: 0.35rem 2rem 0.35rem 0.75rem;
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #e2e8f0;
+    background-image: url('data:image/svg+xml;utf8,<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="%2394a3b8" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: border-color 0.2s, background 0.2s;
+    height: 32px;
+    margin-right: 0.5rem;
+}
+.nav-select:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(15, 23, 42, 0.75);
+}
+.nav-select option {
+    background: #0f172a;
+    color: #cbd5e1;
+}
 
 /* Hamburger button — hidden on desktop */
 .hamburger-btn {

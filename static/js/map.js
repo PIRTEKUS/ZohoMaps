@@ -15,6 +15,13 @@ window.filterMapData = function(data) {
 
 window.filterByFranchise = function(franchiseId) {
     window.selectedFranchiseId = franchiseId;
+    
+    // Sync dropdown values across desktop/mobile views
+    const dtFilter = document.getElementById('franchise-filter');
+    if (dtFilter) dtFilter.value = franchiseId;
+    const mbFilter = document.getElementById('franchise-filter-mobile');
+    if (mbFilter) mbFilter.value = franchiseId;
+
     if (window.lastMapData) {
         plotData(window.lastMapData);
         updateLegend(window.lastMapData);

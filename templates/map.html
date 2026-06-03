@@ -41,7 +41,6 @@ main.container { padding: 0 !important; overflow: hidden; }
 .ctrl-btn.primary { background:rgba(79,70,229,.92); color:#fff; }
 .ctrl-btn.success { background:rgba(16,185,129,.92); color:#fff; }
 .ctrl-btn.active  { background:rgba(251,191,36,.92); color:#0f172a; }
-select.ctrl-btn option { background: #0f172a; color: #cbd5e1; }
 
 /* ── Category dropdown ────────────────────────────────────────────────── */
 .cat-wrap { position:relative; }
@@ -187,15 +186,7 @@ select.ctrl-btn option { background: #0f172a; color: #cbd5e1; }
             Show list
         </button>
 
-        {% if user_franchises and user_franchises|length > 1 %}
-        <!-- Franchise filter dropdown -->
-        <select class="ctrl-btn dark" id="franchise-filter" onchange="window.filterByFranchise(this.value)" style="outline: none; -webkit-appearance: none; -moz-appearance: none; appearance: none; padding-right: 28px; background-image: url('data:image/svg+xml;utf8,<svg viewBox=\"0 0 24 24\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"%23cbd5e1\" stroke-width=\"2.5\"><polyline points=\"6 9 12 15 18 9\"/></svg>'); background-repeat: no-repeat; background-position: right 10px center; cursor: pointer; font-family: inherit;">
-            <option value="all">All Franchises</option>
-            {% for f in user_franchises %}
-            <option value="{{ f.id }}">{{ f.name }}</option>
-            {% endfor %}
-        </select>
-        {% endif %}
+
 
         <!-- Category filter -->
         <div class="cat-wrap">
