@@ -1084,9 +1084,9 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     else:
         debug_log.append(f"User '{user_id}' not found in territory user mapping cache.")
 
-    # ── Strategy 1: COQL fallback (if Franchise name mapping didn't find anything or is not set)
+    # ── Strategy 1: COQL lookup
     # Check if the user is listed in any Franchise record's "Franchise_Standard_Users" or "Franchise_Admin_User" field.
-    if not found and resolved_id:
+    if resolved_id:
         for coql in [
             f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Standard_Users = '{resolved_id}'",
             f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Admin_User = '{resolved_id}'"
@@ -1105,9 +1105,9 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
             except Exception as e:
                 debug_log.append(f'COQL error: {e}')
 
-    # ── Strategy 2: Territory-based fallback (if still nothing found)
+    # ── Strategy 2: Territory-based matching
     # Match territory name to franchise name
-    if not found and user_detail and user_territories:
+    if user_detail and user_territories:
         franchises = _get_all_franchises(admin_token)
         for tname in user_territories:
             matched = False
