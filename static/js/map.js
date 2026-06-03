@@ -64,29 +64,53 @@ async function initMap() {
 
     // Also keep direct click on the button (handled in map.html as searchArea())
     window.fetchData = loadMapData;
-    // Try HTML5 geolocation
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                const pos = {
-                    lat: position.coords.latitude,
-                    lng: position.coords.longitude,
-                };
-                // Store for distance-sort in record list
-                window.userLat = pos.lat;
-                window.userLng = pos.lng;
-                setTimeout(() => {
-                    google.maps.event.trigger(map, 'resize');
-                    map.setCenter(pos);
-                    map.setZoom(10);
-                    google.maps.event.addListenerOnce(map, 'idle', loadMapData);
-                }, 150);
-            },
-            () => { tryIPFallback(); },
-            { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-        );
+    // Check if target coordinates are provided for deep-linking
+    if (window.targetLat !== null && window.targetLng !== null && !isNaN(window.targetLat) && !isNaN(window.targetLng)) {
+        const targetPos = {
+            lat: parseFloat(window.targetLat),
+            lng: parseFloat(window.targetLng)
+        };
+        // Store for distance-sort in record list
+        window.userLat = targetPos.lat;
+        window.userLng = targetPos.lng;
+
+        setTimeout(() => {
+            google.maps.event.trigger(map, 'resize');
+            map.setCenter(targetPos);
+            map.setZoom(14);
+            google.maps.event.addListenerOnce(map, 'idle', () => {
+                loadMapData().then(() => {
+                    if (window.targetRecordId) {
+                        window.focusMapMarker(window.targetRecordId);
+                    }
+                });
+            });
+        }, 150);
     } else {
-        tryIPFallback();
+        // Try HTML5 geolocation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    const pos = {
+                        lat: position.coords.latitude,
+                        lng: position.coords.longitude,
+                    };
+                    // Store for distance-sort in record list
+                    window.userLat = pos.lat;
+                    window.userLng = pos.lng;
+                    setTimeout(() => {
+                        google.maps.event.trigger(map, 'resize');
+                        map.setCenter(pos);
+                        map.setZoom(10);
+                        google.maps.event.addListenerOnce(map, 'idle', loadMapData);
+                    }, 150);
+                },
+                () => { tryIPFallback(); },
+                { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+            );
+        } else {
+            tryIPFallback();
+        }
     }
 }
 

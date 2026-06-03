@@ -270,10 +270,68 @@ def check_token_refresh():
                     log_debug("WARNING: org/domain not found via API or global settings. Admin must log in or set manually in Settings.")
 
 
+def _get_target_record_coordinates(module_name, record_id, effective_configs, user_id):
+    """Try to find the target record coordinates in database, or sync on-the-fly if not found."""
+    if not module_name or not record_id:
+        return None, None, None
+        
+    matched_config = next((c for c in effective_configs if c['module_name'].lower() == module_name.lower()), None)
+    if not matched_config:
+        matched_config = next((c for c in effective_configs if c.get('module_label', '').lower() == module_name.lower()), None)
+        
+    resolved_module_name = matched_config['module_name'] if matched_config else module_name
+    
+    conn = database.get_db_connection()
+    try:
+        row = database.exec_query(
+            conn,
+            "SELECT lat, lng FROM module_records WHERE id = ? LIMIT 1",
+            (record_id,),
+            fetchone=True
+        )
+    except Exception as e:
+        log_debug(f"Database error querying record ID {record_id}: {e}")
+        row = None
+    finally:
+        conn.close()
+    
+    target_lat = None
+    target_lng = None
+    if row:
+        target_lat = row['lat'] if isinstance(row, dict) else row[0]
+        target_lng = row['lng'] if isinstance(row, dict) else row[1]
+    else:
+        if matched_config:
+            sync_token = _require_admin_token(f'sync-deep-link/{resolved_module_name}')
+            if sync_token:
+                try:
+                    result = do_sync_single_record(user_id, sync_token, resolved_module_name, record_id, matched_config)
+                    if result == 'synced' or result is True:
+                        conn = database.get_db_connection()
+                        try:
+                            row2 = database.exec_query(
+                                conn,
+                                "SELECT lat, lng FROM module_records WHERE id = ? LIMIT 1",
+                                (record_id,),
+                                fetchone=True
+                            )
+                        except Exception:
+                            row2 = None
+                        finally:
+                            conn.close()
+                        if row2:
+                            target_lat = row2['lat'] if isinstance(row2, dict) else row2[0]
+                            target_lng = row2['lng'] if isinstance(row2, dict) else row2[1]
+                except Exception as e:
+                    log_debug(f"Failed to sync deep link record: {e}")
+                    
+    return resolved_module_name, target_lat, target_lng
+
+
 @app.route('/')
 def index():
     if 'access_token' not in session or not session.get('user_id'):
-        return redirect(url_for('login'))
+        return redirect(url_for('login', next=request.full_path if request.query_string else request.path))
     
     # Priority: Manual Global Setting > Session Cache
     org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', 'Unknown')
@@ -298,25 +356,77 @@ def index():
             c['module_label'] = module_labels.get(c['module_name'], c['module_name'])
     except Exception:
         pass
+        
+    target_module = request.args.get('module')
+    target_record_id = request.args.get('id') or request.args.get('record_id')
+    resolved_module, target_lat, target_lng = _get_target_record_coordinates(
+        target_module, target_record_id, effective_configs, session.get('user_id')
+    )
     
     is_admin = session.get('is_admin', False)
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
-        is_admin=is_admin
+        is_admin=is_admin,
+        target_module=resolved_module,
+        target_record_id=target_record_id,
+        target_lat=target_lat,
+        target_lng=target_lng
+    )
+
+
+@app.route('/<module_name>/<record_id>')
+def index_with_record(module_name, record_id):
+    if 'access_token' not in session or not session.get('user_id'):
+        return redirect(url_for('login', next=request.path))
+        
+    org_id = database.get_global_setting('crmplus_orgid', '') or session.get('org_id', 'Unknown')
+    domain_name = database.get_global_setting('crmplus_domain', '') or session.get('domain_name', 'Unknown')
+    is_manual = database.get_global_setting('crmplus_orgid', '') != '' or database.get_global_setting('crmplus_domain', '') != ''
+    
+    log_debug(f"--- MAP SESSION CONNECTED (DEEP LINK PATH) ---")
+    log_debug(f"User: {session.get('user_name')} ({'Administrator' if session.get('is_admin') else 'Standard User'})")
+    log_debug(f"CRM Plus Config: Domain={domain_name}, OrgID={org_id} ({'Manual Override' if is_manual else 'Auto-Detected'})")
+    
+    show_console = session.get('show_console', False) and session.get('is_admin', False)
+    effective_configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
+    
+    cached_modules_json = database.get_global_setting('cached_modules', '[]')
+    try:
+        module_labels = {m['api_name']: m.get('plural_label', m['api_name']) for m in json.loads(cached_modules_json) if 'api_name' in m}
+        for c in effective_configs:
+            c['module_label'] = module_labels.get(c['module_name'], c['module_name'])
+    except Exception:
+        pass
+        
+    resolved_module, target_lat, target_lng = _get_target_record_coordinates(
+        module_name, record_id, effective_configs, session.get('user_id')
+    )
+        
+    is_admin = session.get('is_admin', False)
+    return render_template('map.html',
+        google_maps_api_key=GOOGLE_MAPS_API_KEY,
+        configs=effective_configs,
+        is_admin=is_admin,
+        target_module=resolved_module,
+        target_record_id=record_id,
+        target_lat=target_lat,
+        target_lng=target_lng
     )
 
 @app.route('/login')
 def login():
     # Dynamically select the redirect URI matching the current request host
     matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
-    auth_url = zoho_api.get_authorization_url(redirect_uri=matched_uri)
-    log_debug(f"Login initiated — using redirect_uri: {matched_uri}")
+    next_url = request.args.get('next')
+    auth_url = zoho_api.get_authorization_url(redirect_uri=matched_uri, state=next_url)
+    log_debug(f"Login initiated — using redirect_uri: {matched_uri}, state: {next_url}")
     return render_template('login.html', auth_url=auth_url)
 
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
+    state = request.args.get('state')
     if code:
         # Pick the redirect URI that matches the host the callback arrived on
         matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
@@ -391,6 +501,9 @@ def callback():
                 except Exception as ex:
                     log_debug(f"[login] Franchise synchronous cache check failed: {ex}")
 
+            if state and state.startswith('/') and not state.startswith('//'):
+                log_debug(f"Redirecting user to preserved state target: {state}")
+                return redirect(state)
             return redirect(url_for('index'))
         else:
             log_debug(f"OAuth token exchange failed! token_data response: {token_data}")

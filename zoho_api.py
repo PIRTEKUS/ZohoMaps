@@ -39,7 +39,7 @@ def get_matching_redirect_uri(request_host_url: str) -> str:
     # Fallback: return first URI
     return ZOHO_REDIRECT_URI
 
-def get_authorization_url(redirect_uri: str = None):
+def get_authorization_url(redirect_uri: str = None, state: str = None):
     uri = redirect_uri or ZOHO_REDIRECT_URI
     params = {
         # AaaServer.profile.Read allows /oauth/user/info fallback for team users
@@ -51,6 +51,8 @@ def get_authorization_url(redirect_uri: str = None):
         'redirect_uri': uri,
         'prompt': 'consent'
     }
+    if state:
+        params['state'] = state
     return f"{ZOHO_ACCOUNTS_URL}/oauth/v2/auth?{urlencode(params)}"
 
 def exchange_code_for_token(code, redirect_uri: str = None):
