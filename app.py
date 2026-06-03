@@ -328,6 +328,55 @@ def _get_target_record_coordinates(module_name, record_id, effective_configs, us
     return resolved_module_name, target_lat, target_lng
 
 
+def _get_franchises_for_ui(user_id, is_admin):
+    """Get the list of franchises to display in the UI filter dropdown."""
+    franchises = []
+    
+    if is_admin:
+        # Load from cache first
+        raw = database.get_global_setting('cached_all_franchises', '')
+        if raw:
+            try:
+                franchises = json.loads(raw)
+            except Exception:
+                pass
+        
+        # If still empty, try to fetch using admin token on-the-fly
+        if not franchises:
+            token = _get_admin_access_token()
+            if token:
+                data = _get_all_franchises(token)
+                if data:
+                    franchises = [{'id': str(f['id']), 'name': f.get('Name')} for f in data if f.get('Name') and f.get('id')]
+                    # cache it
+                    database.set_global_setting('cached_all_franchises', json.dumps(franchises))
+    else:
+        # Standard user: load from their cached franchise info
+        _cache_key = f"franchise_ids_{user_id}"
+        _cached_raw = database.get_global_setting(_cache_key, '')
+        _fi = None
+        if _cached_raw:
+            try:
+                _fi = json.loads(_cached_raw)
+            except Exception:
+                pass
+        
+        # If cache not found or expired, try to fetch using admin token
+        if not _fi:
+            token = _get_admin_access_token()
+            if token:
+                _fi = _get_user_franchise_ids(user_id, token)
+        
+        if _fi:
+            for fid, fname in zip(_fi.get('ids', []), _fi.get('names', [])):
+                if not str(fid).startswith('territory_'):
+                    franchises.append({'id': str(fid), 'name': fname})
+                    
+    # Sort franchises by name alphabetically for UI convenience
+    franchises = sorted(franchises, key=lambda x: x['name'].lower() if x.get('name') else '')
+    return franchises
+
+
 @app.route('/')
 def index():
     if 'access_token' not in session or not session.get('user_id'):
@@ -364,6 +413,7 @@ def index():
     )
     
     is_admin = session.get('is_admin', False)
+    user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -371,7 +421,8 @@ def index():
         target_module=resolved_module,
         target_record_id=target_record_id,
         target_lat=target_lat,
-        target_lng=target_lng
+        target_lng=target_lng,
+        user_franchises=user_franchises
     )
 
 
@@ -404,6 +455,7 @@ def index_with_record(module_name, record_id):
     )
         
     is_admin = session.get('is_admin', False)
+    user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -411,7 +463,8 @@ def index_with_record(module_name, record_id):
         target_module=resolved_module,
         target_record_id=record_id,
         target_lat=target_lat,
-        target_lng=target_lng
+        target_lng=target_lng,
+        user_franchises=user_franchises
     )
 
 @app.route('/login')
@@ -926,7 +979,14 @@ def _get_all_franchises(admin_token):
             timeout=10
         )
         if resp.ok:
-            return resp.json().get('data', [])
+            data = resp.json().get('data', [])
+            if data:
+                try:
+                    simple_list = [{'id': str(f['id']), 'name': f.get('Name')} for f in data if f.get('Name') and f.get('id')]
+                    database.set_global_setting('cached_all_franchises', json.dumps(simple_list))
+                except Exception as cache_err:
+                    log_debug(f"[franchises] Cache write failed: {cache_err}")
+            return data
         log_debug(f"[franchises] Failed to fetch custom module records: {resp.status_code}")
     except Exception as e:
         log_debug(f"[franchises] Error fetching franchises: {e}")
@@ -2290,7 +2350,8 @@ def get_map_data():
             'icon': cfg.get('marker_icon', 'pin'),
             'record_data': r['record_data'],
             'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),
-            'field_mappings': cfg.get('field_mappings', {})
+            'field_mappings': cfg.get('field_mappings', {}),
+            'franchise_id': r.get('franchise_id')
         })
 
     return jsonify(map_points)

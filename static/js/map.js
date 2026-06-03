@@ -4,6 +4,24 @@ window.mapInitialized = false;
 window.isProgrammaticMove = false;
 let programmaticTimeout = null;
 
+window.selectedFranchiseId = 'all';
+window.filterMapData = function(data) {
+    if (!data) return [];
+    if (!window.selectedFranchiseId || window.selectedFranchiseId === 'all') {
+        return data;
+    }
+    return data.filter(item => String(item.franchise_id) === String(window.selectedFranchiseId));
+};
+
+window.filterByFranchise = function(franchiseId) {
+    window.selectedFranchiseId = franchiseId;
+    if (window.lastMapData) {
+        plotData(window.lastMapData);
+        updateLegend(window.lastMapData);
+        if (window.updateRecordList) window.updateRecordList(window.lastMapData);
+    }
+};
+
 async function initMap() {
     // Default fallback to US
     let initialCenter = { lat: 39.8283, lng: -98.5795 };
@@ -277,6 +295,7 @@ let markerCluster;
 window.activeInfoWindow = null;
 
 function plotData(data) {
+    if (window.filterMapData) data = window.filterMapData(data);
     // Clear existing markers
     markers.forEach(m => m.setMap(null));
     markers = [];
@@ -524,6 +543,7 @@ window.focusMapMarker = function(id) {
 
 
 function updateLegend(data) {
+    if (window.filterMapData) data = window.filterMapData(data);
     const legend = document.getElementById('cat-list');
     if (!legend) return;
     legend.innerHTML = '';
