@@ -2160,6 +2160,7 @@ def build_display_record_data(raw_record, config, field_label_map):
     # If the record is already in the display format (e.g. from an old cache), return it as is.
     # Display format records do not have the Zoho 'id' field in their dictionary payload.
     if 'id' not in raw_record:
+        log_debug(f"[display_filter] BYPASS: 'id' not in raw_record. keys: {list(raw_record.keys())}")
         return raw_record
 
     display_data = {}
@@ -2204,6 +2205,8 @@ def build_display_record_data(raw_record, config, field_label_map):
     # Include Modified_Time as _modified_time if not already set
     if 'Modified_Time' in raw_record and '_modified_time' not in display_data:
         display_data['_modified_time'] = str(raw_record['Modified_Time'])
+
+    log_debug(f"[display_filter] Filtered record. Raw keys: {list(raw_record.keys())[:10]}... | config: {fields} | result keys: {list(display_data.keys())}")
 
     return display_data
 
