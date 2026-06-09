@@ -386,6 +386,7 @@ def _get_cluster_config():
         cluster_config = {}
     
     defaults = {
+        'b1_from': 2,
         'b1_to': 10,
         'b1_color': '#3b82f6', # Blue
         'b2_to': 50,
@@ -396,9 +397,11 @@ def _get_cluster_config():
         cluster_config.setdefault(k, v)
     
     try:
+        cluster_config['b1_from'] = int(cluster_config.get('b1_from', 2))
         cluster_config['b1_to'] = int(cluster_config['b1_to'])
         cluster_config['b2_to'] = int(cluster_config['b2_to'])
     except (ValueError, TypeError):
+        cluster_config['b1_from'] = 2
         cluster_config['b1_to'] = 10
         cluster_config['b2_to'] = 50
         

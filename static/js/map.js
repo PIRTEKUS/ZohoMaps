@@ -530,6 +530,7 @@ function plotData(data) {
     // Initialize or Update Clusterer only if visible markers >= 50
     if (typeof markerClusterer !== 'undefined' && markers.length >= 50) {
         const config = window.clusterConfig || {
+            b1_from: 2,
             b1_to: 10,
             b1_color: '#3b82f6',
             b2_to: 50,
@@ -577,6 +578,9 @@ function plotData(data) {
         markerCluster = new markerClusterer.MarkerClusterer({ 
             markers, 
             map,
+            algorithm: new markerClusterer.SuperClusterAlgorithm({
+                minPoints: parseInt(config.b1_from) || 2
+            }),
             renderer: customRenderer,
             onClusterClick: (event, cluster, map) => {
                 // Prevent auto-zoom on click as requested
