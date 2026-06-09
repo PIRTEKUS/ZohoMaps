@@ -770,8 +770,25 @@ def preview_record(module_name):
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
     
-    # Fetch 1 record to use for preview. We don't specify fields so we get all fields.
-    data = zoho_api.fetch_module_records(module_name, session['access_token'], page=1)
+    # Fetch 1 record to use for preview. Custom modules require fields parameter (max 50).
+    field_metadata = zoho_api.fetch_module_fields(module_name, session['access_token'])
+    fields_list = None
+    if field_metadata and 'fields' in field_metadata:
+        excluded_keywords = ['_s', 'Locked__s', 'Tag', 'Currency', 'Exchange_Rate']
+        api_names = [f['api_name'] for f in field_metadata['fields'] if not any(kw in f['api_name'] for kw in excluded_keywords)]
+        fields_list = api_names[:50]
+        if 'id' not in fields_list:
+            if len(fields_list) >= 50:
+                fields_list.pop()
+            fields_list.append('id')
+    else:
+        # Fallback to config if metadata fetching failed or was empty
+        configs = database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))
+        config = next((c for c in configs if c['module_name'] == module_name), None)
+        if config:
+            fields_list = build_fields_list(module_name, config, None)
+
+    data = zoho_api.fetch_module_records(module_name, session['access_token'], fields=fields_list, page=1)
     if 'data' not in data or len(data['data']) == 0:
         return jsonify({'error': 'No records found'}), 404
         
@@ -794,11 +811,9 @@ def _get_admin_access_token():
     if db_refresh:
         tokens_to_try.append((db_refresh, 'db-token'))
 
+    # First loop: Try to load from cache without making any Zoho network calls
     for refresh_token, source in tokens_to_try:
-        # Compute a hash of the current refresh token to detect rotation or manual changes
         ref_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
-
-        # Try to load cached access token
         try:
             cached_atk_enc = database.get_global_setting('cached_admin_access_token', '')
             cached_expires_at = database.get_global_setting('cached_admin_access_token_expires_at', '0')
@@ -810,9 +825,10 @@ def _get_admin_access_token():
                     if decrypted:
                         return decrypted
         except Exception as e:
-            log_debug(f"[admin_token] Error checking access token cache: {e}")
+            log_debug(f"[admin_token] Error checking access token cache for {source}: {e}")
 
-        # No valid cache. Refresh token from Zoho
+    # Second loop: No valid cache matches, so refresh token from Zoho
+    for refresh_token, source in tokens_to_try:
         try:
             token_data = zoho_api.refresh_access_token(refresh_token)
             if 'access_token' in token_data:
@@ -1153,24 +1169,78 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
     return results
 
+def build_fields_list(module_name, config, field_metadata):
+    """Build a list of up to 50 field API names to fetch from Zoho, prioritizing configured ones."""
+    fields = config.get('field_mappings', {})
+    priority_fields = set()
+    
+    # Add mapped address and location fields
+    for key in ['address1', 'address2', 'city', 'state', 'zip', 'country', 'latitude', 'longitude']:
+        v = fields.get(key)
+        if v:
+            priority_fields.add(v)
+            
+    # Add title field
+    title_field = fields.get('title_field')
+    if title_field:
+        priority_fields.add(title_field)
+    else:
+        priority_fields.add('Account_Name' if module_name == 'Accounts' else ('Full_Name' if module_name in ['Leads', 'Contacts'] else 'Name'))
+        
+    # Add duplicate filter fields
+    df = fields.get('duplicate_filter', {})
+    if df.get('enabled'):
+        for key in ['parent_link_field', 'primary_code_field', 'override_checkbox_field']:
+            v = df.get(key)
+            if v:
+                priority_fields.add(v)
+                
+    # Add standard/system fields we always need
+    priority_fields.update(['id', 'Modified_Time'])
+    
+    # Add franchise lookup field
+    franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
+    if franchise_field:
+        priority_fields.add(franchise_field)
+
+    # Add configured additional fields
+    additional = fields.get('additional_fields', [])
+    priority_fields.update([f for f in additional if f])
+
+    if not field_metadata or 'fields' not in field_metadata:
+        return list(priority_fields)
+        
+    # Get all available API names from metadata
+    all_api_fields = [f['api_name'] for f in field_metadata['fields']]
+    
+    # We want to fill the list up to 50. Filter out unneeded system subforms
+    excluded_keywords = ['_s', 'Locked__s', 'Tag', 'Currency', 'Exchange_Rate']
+    
+    available_fields = []
+    for f in all_api_fields:
+        if f in priority_fields:
+            continue
+        if any(kw in f for kw in excluded_keywords):
+            continue
+        available_fields.append(f)
+        
+    final_fields = list(priority_fields)
+    for f in available_fields:
+        if len(final_fields) >= 50:
+            break
+        if f not in final_fields:
+            final_fields.append(f)
+            
+    return final_fields
+
+
 def do_sync_single_record(user_id, access_token, module_name, record_id, config):
     log_debug(f"Starting single sync for module: {module_name}, record: {record_id} for user {user_id}...")
     
     fields = config['field_mappings']
-    fetch_fields = set()
-    for k, v in fields.items():
-        if k == 'additional_fields' and isinstance(v, list):
-            fetch_fields.update([f for f in v if f])
-        elif isinstance(v, str) and v:
-            fetch_fields.add(v)
-            
     title_field = fields.get('title_field')
     name_field = title_field if title_field else ('Account_Name' if module_name == 'Accounts' else ('Full_Name' if module_name in ['Leads', 'Contacts'] else 'Name'))
             
-    fetch_fields.add(name_field)
-    fetch_fields.add('id')
-    fetch_fields_list = list(fetch_fields)
-        
     field_metadata = zoho_api.fetch_module_fields(module_name, access_token)
     field_label_map = {}
     if 'fields' in field_metadata:
@@ -1184,7 +1254,9 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
                     field_label_map[f['api_name']] = f['display_label']
             except: pass
 
-    data = zoho_api.fetch_single_record(module_name, record_id, access_token, fields=None)
+    sync_fields_list = build_fields_list(module_name, config, field_metadata)
+
+    data = zoho_api.fetch_single_record(module_name, record_id, access_token, fields=sync_fields_list)
     
     if 'code' in data and data.get('status') == 'error':
         error_code = data.get('code')
@@ -1195,7 +1267,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
             admin_token = _get_admin_access_token()
             if admin_token and user_id:
                 criteria = f"((Owner.id:equals:{user_id})and(id:equals:{record_id}))"
-                owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=None)
+                owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=sync_fields_list)
                 if 'data' in owner_data and owner_data['data']:
                     data = owner_data
                 else:
@@ -1438,6 +1510,8 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
             log_debug(f"Metadata error: {field_metadata.get('code')} - {field_metadata.get('message')}")
     
     log_debug(f"Mapped {len(field_label_map)} labels for {module_name}. Samples: {list(field_label_map.keys())[:5]}")
+    
+    sync_fields_list = build_fields_list(module_name, config, field_metadata)
         
     count = 0
     page = 1
@@ -1456,9 +1530,9 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
 
         if franchise_criteria:
             data = zoho_api.search_records(module_name, franchise_criteria, access_token,
-                                           fields=None, page=page, page_token=page_token)
+                                           fields=sync_fields_list, page=page, page_token=page_token)
         else:
-            data = zoho_api.fetch_module_records(module_name, access_token, fields=None,
+            data = zoho_api.fetch_module_records(module_name, access_token, fields=sync_fields_list,
                                                  page=page, page_token=page_token)
 
         log_debug(f"[SYNC DIAG] module={module_name} page={page} "
@@ -1495,7 +1569,7 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                             None
                         )
                         owner_data = zoho_api.search_records(module_name, criteria, admin_token,
-                                                             fields=None, page=page, page_token=page_token)
+                                                             fields=sync_fields_list, page=page, page_token=page_token)
                         if 'data' in owner_data and owner_data['data']:
                             data = owner_data
                             log_debug(f"Admin fallback returned {len(owner_data['data'])} records for {module_name} owned by {user_id}")
@@ -1719,6 +1793,8 @@ def _nightly_sync_module(admin_token, module_name, config):
         except Exception as e:
             log_debug(f"Failed to cache fields in nightly sync for {module_name}: {e}")
 
+    sync_fields_list = build_fields_list(module_name, config, field_metadata)
+
     # Load existing global cache to optimize geocoding/sync costs
     cached_records = database.get_global_records_by_module(module_name)
     cache_by_id = {str(r['id']): r for r in cached_records}
@@ -1738,7 +1814,7 @@ def _nightly_sync_module(admin_token, module_name, config):
     db_conn = database.get_db_connection()
     while more_records:
         log_debug(f"[nightly] {module_name}: fetching page {page}...")
-        data = zoho_api.fetch_module_records(module_name, admin_token, fields=None,
+        data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
                                              page=page, page_token=page_token)
 
         if 'code' in data and data.get('status') == 'error':
