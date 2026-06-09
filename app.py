@@ -2157,8 +2157,9 @@ def build_display_record_data(raw_record, config, field_label_map):
     if not isinstance(raw_record, dict):
         return raw_record
 
-    # If the record is already in the display format (e.g. from an old cache), return it as is
-    if 'Address' in raw_record or ('id' not in raw_record and 'Modified_Time' not in raw_record):
+    # If the record is already in the display format (e.g. from an old cache), return it as is.
+    # Display format records do not have the Zoho 'id' field in their dictionary payload.
+    if 'id' not in raw_record:
         return raw_record
 
     display_data = {}
