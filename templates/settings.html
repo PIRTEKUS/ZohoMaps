@@ -390,6 +390,12 @@
                         <input type="text" id="crmplus-orgid" placeholder="e.g. 897316137" value="{{ crm_org_id or '' }}" style="margin-top: 5px;">
                         <small style="color: #94a3b8; font-size: 0.75rem;">Only enter if links show the wrong Org ID.</small>
                     </div>
+
+                    <div class="form-group">
+                        <label>Zoho Webhook Token (Optional)</label>
+                        <input type="password" id="webhook-token" placeholder="e.g. MySuperSecretToken123!" value="{{ webhook_token or '' }}" style="margin-top: 5px;">
+                        <small style="color: #94a3b8; font-size: 0.75rem;">Secret token to validate real-time updates from Zoho CRM.</small>
+                    </div>
                 </div>
                 <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
             </div>
@@ -693,6 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const show_console = document.getElementById('toggle-console').checked ? 'true' : 'false';
             const crm_domain = document.getElementById('crmplus-domain').value;
             const crm_org_id = document.getElementById('crmplus-orgid').value;
+            const webhook_token = document.getElementById('webhook-token').value;
             
             try {
                 await fetch('/api/settings/global', {
@@ -709,6 +716,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({key: 'crmplus_orgid', value: crm_org_id})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'ZohoMap_Webhook_Token', value: webhook_token})
                 });
                 alert('Global settings saved!');
                 window.location.reload();

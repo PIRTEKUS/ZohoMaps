@@ -589,6 +589,7 @@ def settings():
     show_console = database.get_global_setting('show_console', 'false') == 'true'
     crm_domain = database.get_global_setting('crmplus_domain', '')
     crm_org_id = database.get_global_setting('crmplus_orgid', '')
+    webhook_token = database.get_global_setting('ZohoMap_Webhook_Token', '')
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -596,6 +597,7 @@ def settings():
                            show_console=show_console,
                            crm_domain=crm_domain,
                            crm_org_id=crm_org_id,
+                           webhook_token=webhook_token,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 
@@ -1182,7 +1184,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
                     field_label_map[f['api_name']] = f['display_label']
             except: pass
 
-    data = zoho_api.fetch_single_record(module_name, record_id, access_token, fetch_fields_list)
+    data = zoho_api.fetch_single_record(module_name, record_id, access_token, fields=None)
     
     if 'code' in data and data.get('status') == 'error':
         error_code = data.get('code')
@@ -1193,7 +1195,7 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
             admin_token = _get_admin_access_token()
             if admin_token and user_id:
                 criteria = f"((Owner.id:equals:{user_id})and(id:equals:{record_id}))"
-                owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=fetch_fields_list)
+                owner_data = zoho_api.search_records(module_name, criteria, admin_token, fields=None)
                 if 'data' in owner_data and owner_data['data']:
                     data = owner_data
                 else:
@@ -1241,29 +1243,11 @@ def do_sync_single_record(user_id, access_token, module_name, record_id, config)
             lat, lng = geocode_address(full_address)
     
     if lat is not None and lng is not None:
-        record_data = {}
-        lat_val = record.get(fields.get('latitude'))
-        lng_val = record.get(fields.get('longitude'))
-        if lat_val: record_data['Latitude'] = str(lat_val)
-        if lng_val: record_data['Longitude'] = str(lng_val)
-
-        addr1 = extract_val(record.get(fields.get('address1')))
-        addr2 = extract_val(record.get(fields.get('address2')))
-        full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
-        if full_addr: record_data['Address'] = full_addr
-        
-        for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
-            val = extract_val(record.get(fields.get(k)))
-            if val is not None and val != "": record_data[label] = str(val)
-
-        for k in fetch_fields_list:
-            if k in ['id', name_field] or k in fields.values():
-                continue
-            val = record.get(k)
-            if val is not None and val != "":
-                label = field_label_map.get(k, k.replace('_', ' '))
-                record_data[label] = str(extract_val(val))
-                
+        # Build record_data as the entire record payload (raw JSON)
+        record_data = record.copy()
+        if record.get('Modified_Time') and '_modified_time' not in record_data:
+            record_data['_modified_time'] = str(record.get('Modified_Time'))
+            
         # Store parent link ID for client-side deduplication (raw dict id, not display name)
         df = fields.get('duplicate_filter', {})
         if df.get('enabled') and df.get('parent_link_field'):
@@ -1472,9 +1456,9 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
 
         if franchise_criteria:
             data = zoho_api.search_records(module_name, franchise_criteria, access_token,
-                                           fields=fetch_fields_list, page=page, page_token=page_token)
+                                           fields=None, page=page, page_token=page_token)
         else:
-            data = zoho_api.fetch_module_records(module_name, access_token, fetch_fields_list,
+            data = zoho_api.fetch_module_records(module_name, access_token, fields=None,
                                                  page=page, page_token=page_token)
 
         log_debug(f"[SYNC DIAG] module={module_name} page={page} "
@@ -1511,7 +1495,7 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                             None
                         )
                         owner_data = zoho_api.search_records(module_name, criteria, admin_token,
-                                                             fields=fetch_fields_list, page=page, page_token=page_token)
+                                                             fields=None, page=page, page_token=page_token)
                         if 'data' in owner_data and owner_data['data']:
                             data = owner_data
                             log_debug(f"Admin fallback returned {len(owner_data['data'])} records for {module_name} owned by {user_id}")
@@ -1522,7 +1506,7 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                         log_debug(f"No admin token available for fallback. Admin must log in first.")
                         break
                 else:
-                    log_debug(f"Minimal fields SUCCEEDED for {module_name}! FLS issue — user cannot view one of: {fetch_fields_list}")
+                    log_debug(f"Minimal fields FAILED or FLS check succeeded for {module_name}!")
                     break
             else:
                 break
@@ -1559,35 +1543,19 @@ def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
                     lat, lng = geocode_address(full_address)
             
             if lat is not None and lng is not None:
-                record_data = {}
-                
-                # Add location info
-                lat_val = record.get(fields.get('latitude'))
-                lng_val = record.get(fields.get('longitude'))
-                if lat_val: record_data['Latitude'] = str(lat_val)
-                if lng_val: record_data['Longitude'] = str(lng_val)
+                record_data = record.copy()
+                if record.get('Modified_Time') and '_modified_time' not in record_data:
+                    record_data['_modified_time'] = str(record.get('Modified_Time'))
 
-                addr1 = extract_val(record.get(fields.get('address1')))
-                addr2 = extract_val(record.get(fields.get('address2')))
-                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
-                if full_addr: record_data['Address'] = full_addr
-                
-                for k, label in [('city', 'City'), ('state', 'State'), ('zip', 'Zip'), ('country', 'Country')]:
-                    val = extract_val(record.get(fields.get(k)))
-                    if val is not None and val != "": record_data[label] = str(val)
+                # Store parent link ID for client-side deduplication (raw dict id, not display name)
+                df = fields.get('duplicate_filter', {})
+                if df.get('enabled') and df.get('parent_link_field'):
+                    raw_parent = record.get(df['parent_link_field'])
+                    if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                        record_data['_dup_parent_id'] = raw_parent['id']
+                    elif raw_parent:
+                        record_data['_dup_parent_id'] = str(raw_parent)
 
-
-                # 2. Add additional fields
-                for k in fetch_fields_list:
-                    # Skip fields we already handled or standard IDs
-                    if k in ['id', name_field] or k in fields.values():
-                        continue
-                    
-                    val = record.get(k)
-                    if val is not None and val != "":
-                        label = field_label_map.get(k, k.replace('_', ' '))
-                        record_data[label] = str(extract_val(val))
-                        
                 page_records.append((
                     record.get('id'),
                     module_name,
@@ -1745,6 +1713,11 @@ def _nightly_sync_module(admin_token, module_name, config):
     if 'fields' in field_metadata:
         for f in field_metadata['fields']:
             field_label_map[f['api_name']] = f['display_label']
+        try:
+            fields_to_cache = [{'api_name': f['api_name'], 'display_label': f['display_label']} for f in field_metadata['fields']]
+            database.set_global_setting(f'cached_fields_{module_name}', json.dumps(fields_to_cache))
+        except Exception as e:
+            log_debug(f"Failed to cache fields in nightly sync for {module_name}: {e}")
 
     # Load existing global cache to optimize geocoding/sync costs
     cached_records = database.get_global_records_by_module(module_name)
@@ -1765,7 +1738,7 @@ def _nightly_sync_module(admin_token, module_name, config):
     db_conn = database.get_db_connection()
     while more_records:
         log_debug(f"[nightly] {module_name}: fetching page {page}...")
-        data = zoho_api.fetch_module_records(module_name, admin_token, fetch_fields_list,
+        data = zoho_api.fetch_module_records(module_name, admin_token, fields=None,
                                              page=page, page_token=page_token)
 
         if 'code' in data and data.get('status') == 'error':
@@ -1852,35 +1825,19 @@ def _nightly_sync_module(admin_token, module_name, config):
                     elif fval:
                         franchise_id = str(fval)
 
-                # Build record_data (display fields for popup)
-                record_data = {}
-                lat_val = record.get(fields.get('latitude'))
-                lng_val = record.get(fields.get('longitude'))
-                if lat_val: record_data['Latitude'] = str(lat_val)
-                if lng_val: record_data['Longitude'] = str(lng_val)
-
-                addr1 = extract_val(record.get(fields.get('address1')))
-                addr2 = extract_val(record.get(fields.get('address2')))
-                full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
-                if full_addr: record_data['Address'] = full_addr
-
-                for k, label in [('city', 'City'), ('state', 'State'),
-                                  ('zip', 'Zip'), ('country', 'Country')]:
-                    val = extract_val(record.get(fields.get(k)))
-                    if val is not None and val != '':
-                        record_data[label] = str(val)
-
-                for k in fetch_fields_list:
-                    if k in ('id', name_field, franchise_field) or k in fields.values():
-                        continue
-                    val = record.get(k)
-                    if val is not None and val != '':
-                        label = field_label_map.get(k, k.replace('_', ' '))
-                        record_data[label] = str(extract_val(val))
-
-                # Store Modified_Time in record_data for future caching
-                if record.get('Modified_Time'):
+                # Store raw payload
+                record_data = record.copy()
+                if record.get('Modified_Time') and '_modified_time' not in record_data:
                     record_data['_modified_time'] = str(record.get('Modified_Time'))
+
+                # Store parent link ID for client-side deduplication
+                df = fields.get('duplicate_filter', {})
+                if df.get('enabled') and df.get('parent_link_field'):
+                    raw_parent = record.get(df['parent_link_field'])
+                    if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                        record_data['_dup_parent_id'] = raw_parent['id']
+                    elif raw_parent:
+                        record_data['_dup_parent_id'] = str(raw_parent)
 
                 page_records.append((
                     record.get('id'), module_name, name, lat, lng,
@@ -2106,6 +2063,74 @@ def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max
     log_debug(f"Area sync finished. Added/Updated {total_new} records from Zoho.")
     return total_new
 
+def get_module_field_labels(module_name):
+    field_label_map = {}
+    cached = database.get_global_setting(f'cached_fields_{module_name}', '')
+    if cached:
+        try:
+            cached_fields = json.loads(cached)
+            for f in cached_fields:
+                field_label_map[f['api_name']] = f['display_label']
+        except Exception:
+            pass
+    return field_label_map
+
+
+def build_display_record_data(raw_record, config, field_label_map):
+    """Build a filtered display version of record_data containing only the configured fields."""
+    if not isinstance(raw_record, dict):
+        return raw_record
+
+    # If the record is already in the display format (e.g. from an old cache), return it as is
+    if 'Address' in raw_record or ('id' not in raw_record and 'Modified_Time' not in raw_record):
+        return raw_record
+
+    display_data = {}
+    fields = config.get('field_mappings', {})
+
+    # 1. Coordinates (if present)
+    lat_field = fields.get('latitude')
+    lng_field = fields.get('longitude')
+    if lat_field and raw_record.get(lat_field):
+        display_data['Latitude'] = str(raw_record[lat_field])
+    if lng_field and raw_record.get(lng_field):
+        display_data['Longitude'] = str(raw_record[lng_field])
+
+    # 2. Address fields
+    addr1 = extract_val(raw_record.get(fields.get('address1')))
+    addr2 = extract_val(raw_record.get(fields.get('address2')))
+    full_addr = f"{addr1 or ''} {addr2 or ''}".strip()
+    if full_addr:
+        display_data['Address'] = full_addr
+
+    for k, label in [('city', 'City'), ('state', 'State'),
+                      ('zip', 'Zip'), ('country', 'Country')]:
+        val = extract_val(raw_record.get(fields.get(k)))
+        if val is not None and val != '':
+            display_data[label] = str(val)
+
+    # 3. Additional fields
+    additional = fields.get('additional_fields', [])
+    for k in additional:
+        if not k:
+            continue
+        val = raw_record.get(k)
+        if val is not None and val != '':
+            label = field_label_map.get(k, k.replace('_', ' '))
+            display_data[label] = str(extract_val(val))
+
+    # Keep internal metadata keys prefixed with underscore
+    for k, val in raw_record.items():
+        if k.startswith('_'):
+            display_data[k] = val
+
+    # Include Modified_Time as _modified_time if not already set
+    if 'Modified_Time' in raw_record and '_modified_time' not in display_data:
+        display_data['_modified_time'] = str(raw_record['Modified_Time'])
+
+    return display_data
+
+
 @app.route('/api/map-data')
 @limiter.limit("120 per minute")
 def get_map_data():
@@ -2312,6 +2337,7 @@ def get_map_data():
     configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))}
     
 
+    module_labels_cache = {}
     map_points = []
     for r in records:
         cfg = configs.get(r['module_name'], {})
@@ -2338,6 +2364,11 @@ def get_map_data():
         else:
             zoho_link = f"https://crm.{ZOHO_TLD}/crm/tab/{link_module}/{r['id']}"
 
+        module_name = r['module_name']
+        if module_name not in module_labels_cache:
+            module_labels_cache[module_name] = get_module_field_labels(module_name)
+        field_label_map = module_labels_cache[module_name]
+
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
@@ -2348,7 +2379,7 @@ def get_map_data():
             'lng': r['lng'],
             'color': cfg.get('marker_color') or r['color'] or '#3b82f6',
             'icon': cfg.get('marker_icon', 'pin'),
-            'record_data': r['record_data'],
+            'record_data': build_display_record_data(r['record_data'], cfg, field_label_map),
             'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),
             'field_mappings': cfg.get('field_mappings', {}),
             'franchise_id': r.get('franchise_id')
@@ -2775,6 +2806,172 @@ def debug_franchise_refresh():
         'names':         fi.get('names', []) if fi else [],
         'debug':         fi.get('debug', []) if fi else ['returned None'],
     })
+
+
+@app.route('/api/webhooks/zoho-update', methods=['POST'])
+@limiter.exempt
+def webhook_zoho_update():
+    # Verify token
+    token = request.headers.get('X-ZohoMap-Token')
+    expected_token = database.get_global_setting('ZohoMap_Webhook_Token', '') or os.environ.get('ZOHOMAP_WEBHOOK_TOKEN', '')
+    if not token or not expected_token or token != expected_token:
+        log_debug(f"[webhook] Unauthorized access attempt: token={token}")
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        payload = request.get_json(silent=True)
+        if not payload or 'module' not in payload or 'data' not in payload:
+            return jsonify({'error': 'Invalid payload'}), 400
+
+        module_name = payload['module']
+        record = payload['data']
+        
+        record_id = record.get('id')
+        if not record_id:
+            return jsonify({'error': 'No record ID found'}), 400
+
+        log_debug(f"[webhook] Received upsert event for {module_name} ID {record_id}")
+
+        # Get module config
+        configs = database.get_all_module_configs_all_users()
+        config = next((c for c in configs if c['module_name'] == module_name), None)
+        if not config:
+            # Fallback defaults
+            config = {
+                'marker_color': '#3b82f6',
+                'marker_icon': 'pin',
+                'field_mappings': {
+                    'address1': 'Billing_Street',
+                    'city': 'Billing_City',
+                    'state': 'Billing_State',
+                    'zip': 'Billing_Code',
+                    'country': 'Billing_Country',
+                    'title_field': 'Account_Name' if module_name == 'Accounts' else 'Name'
+                }
+            }
+        else:
+            if isinstance(config['field_mappings'], str):
+                config['field_mappings'] = json.loads(config['field_mappings'])
+
+        fields = config['field_mappings']
+        
+        # Determine name field
+        title_field = fields.get('title_field')
+        if title_field:
+            name_field = title_field
+        else:
+            name_field = 'Name'
+            if module_name == 'Accounts':
+                name_field = 'Account_Name'
+            elif module_name == 'Leads' or module_name == 'Contacts':
+                name_field = 'Full_Name'
+                
+        name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record_id}")))
+        name = str(extract_val(name_raw))
+
+        # Geocoding
+        lat, lng = None, None
+        lat_field = fields.get('latitude')
+        lng_field = fields.get('longitude')
+        if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+            try:
+                lat = float(record[lat_field])
+                lng = float(record[lng_field])
+            except (ValueError, TypeError):
+                pass
+
+        if lat is None or lng is None:
+            address_parts = []
+            for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+                val = extract_val(record.get(fields.get(k)))
+                if val and not _is_null_string(val):
+                    address_parts.append(str(val))
+            full_address = ", ".join(address_parts)
+            if full_address:
+                db_conn = database.get_db_connection()
+                try:
+                    lat, lng = geocode_address(full_address, conn=db_conn)
+                finally:
+                    db_conn.close()
+
+        # Extract franchise ID
+        franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
+        franchise_id = None
+        if franchise_field:
+            fval = record.get(franchise_field)
+            if isinstance(fval, list):
+                first = next((item for item in fval if isinstance(item, dict)), None)
+                franchise_id = str(first.get('id', '')) or None if first else None
+            elif isinstance(fval, dict):
+                franchise_id = str(fval.get('id', '')) or None
+            elif fval:
+                franchise_id = str(fval)
+
+        # Build record_data (keep entire Zoho record payload raw)
+        record_data = record.copy()
+        if record.get('Modified_Time') and '_modified_time' not in record_data:
+            record_data['_modified_time'] = str(record.get('Modified_Time'))
+            
+        # Check for duplicate link
+        df = fields.get('duplicate_filter', {})
+        if df.get('enabled') and df.get('parent_link_field'):
+            raw_parent = record.get(df['parent_link_field'])
+            if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                record_data['_dup_parent_id'] = raw_parent['id']
+            elif raw_parent:
+                record_data['_dup_parent_id'] = str(raw_parent)
+
+        # Save to global cache
+        database.save_global_records_batch([(
+            record_id, module_name, name, lat, lng,
+            config.get('marker_color', '#3b82f6'), record_data, franchise_id
+        )])
+
+        log_debug(f"[webhook] Upserted record {record_id} in {module_name} (lat={lat}, lng={lng}, franchise={franchise_id})")
+        return jsonify({'success': True, 'message': 'Record upserted successfully'}), 200
+
+    except Exception as e:
+        log_debug(f"[webhook] Error processing upsert webhook: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/webhooks/zoho-delete', methods=['POST'])
+@limiter.exempt
+def webhook_zoho_delete():
+    # Verify token
+    token = request.headers.get('X-ZohoMap-Token')
+    expected_token = database.get_global_setting('ZohoMap_Webhook_Token', '') or os.environ.get('ZOHOMAP_WEBHOOK_TOKEN', '')
+    if not token or not expected_token or token != expected_token:
+        log_debug(f"[webhook] Unauthorized delete access attempt: token={token}")
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    try:
+        payload = request.get_json(silent=True)
+        if not payload or 'module' not in payload or 'id' not in payload:
+            return jsonify({'error': 'Invalid payload'}), 400
+
+        module_name = payload['module']
+        record_id = payload['id']
+
+        log_debug(f"[webhook] Received delete event for {module_name} ID {record_id}")
+
+        # Delete from local DB cache
+        conn = database.get_db_connection()
+        try:
+            database.exec_query(conn,
+                "DELETE FROM module_records WHERE id = ? AND module_name = ?",
+                (str(record_id), module_name)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        log_debug(f"[webhook] Deleted record {record_id} in {module_name} from local cache")
+        return jsonify({'success': True, 'message': 'Record deleted successfully'}), 200
+
+    except Exception as e:
+        log_debug(f"[webhook] Error processing delete webhook: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/admin/clear-all-franchise-caches', methods=['POST'])
