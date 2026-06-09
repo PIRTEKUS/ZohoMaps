@@ -529,9 +529,55 @@ function plotData(data) {
 
     // Initialize or Update Clusterer only if visible markers >= 50
     if (typeof markerClusterer !== 'undefined' && markers.length >= 50) {
+        const config = window.clusterConfig || {
+            b1_to: 10,
+            b1_color: '#3b82f6',
+            b2_to: 50,
+            b2_color: '#f59e0b',
+            b3_color: '#ef4444'
+        };
+
+        const customRenderer = {
+            render: ({ count, position }, stats, map) => {
+                let color = config.b3_color;
+                let size = 56;
+                let fontSize = 14;
+
+                if (count <= config.b1_to) {
+                    color = config.b1_color;
+                    size = 40;
+                    fontSize = 12;
+                } else if (count <= config.b2_to) {
+                    color = config.b2_color;
+                    size = 48;
+                    fontSize = 13;
+                }
+
+                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${size/2 - 2}" fill="${color}" fill-opacity="0.9" stroke="#ffffff" stroke-width="2"/></svg>`;
+
+                return new google.maps.Marker({
+                    label: {
+                        text: String(count),
+                        color: "white",
+                        fontSize: fontSize + "px",
+                        fontWeight: "bold"
+                    },
+                    position,
+                    icon: {
+                        url: 'data:image/svg+xml;base64,' + btoa(svg),
+                        scaledSize: new google.maps.Size(size, size),
+                        anchor: new google.maps.Point(size / 2, size / 2)
+                    },
+                    title: `Cluster of ${count} markers`,
+                    zIndex: Number(google.maps.Marker.MAX_ZINDEX) + count
+                });
+            }
+        };
+
         markerCluster = new markerClusterer.MarkerClusterer({ 
             markers, 
             map,
+            renderer: customRenderer,
             onClusterClick: (event, cluster, map) => {
                 // Prevent auto-zoom on click as requested
             }

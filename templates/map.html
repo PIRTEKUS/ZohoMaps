@@ -776,6 +776,7 @@ window.toggleMapType = function() {
 </script>
 <script>
     window.configuredModules = {{ configs | tojson | safe }};
+    window.clusterConfig = {{ cluster_config | tojson | safe }};
     window.targetModule = {{ target_module | tojson | safe if target_module else 'null' }};
     window.targetRecordId = {{ target_record_id | tojson | safe if target_record_id else 'null' }};
     window.targetLat = {{ target_lat | tojson | safe if target_lat is not none else 'null' }};

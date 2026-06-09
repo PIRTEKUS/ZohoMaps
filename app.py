@@ -377,6 +377,34 @@ def _get_franchises_for_ui(user_id, is_admin):
     return franchises
 
 
+def _get_cluster_config():
+    """Load the marker cluster configuration, with defaults."""
+    cluster_config_str = database.get_global_setting('cluster_config', '{}')
+    try:
+        cluster_config = json.loads(cluster_config_str)
+    except Exception:
+        cluster_config = {}
+    
+    defaults = {
+        'b1_to': 10,
+        'b1_color': '#3b82f6', # Blue
+        'b2_to': 50,
+        'b2_color': '#f59e0b', # Orange
+        'b3_color': '#ef4444'  # Red
+    }
+    for k, v in defaults.items():
+        cluster_config.setdefault(k, v)
+    
+    try:
+        cluster_config['b1_to'] = int(cluster_config['b1_to'])
+        cluster_config['b2_to'] = int(cluster_config['b2_to'])
+    except (ValueError, TypeError):
+        cluster_config['b1_to'] = 10
+        cluster_config['b2_to'] = 50
+        
+    return cluster_config
+
+
 @app.route('/')
 def index():
     if 'access_token' not in session or not session.get('user_id'):
@@ -414,6 +442,7 @@ def index():
     
     is_admin = session.get('is_admin', False)
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
+    cluster_config = _get_cluster_config()
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -422,7 +451,8 @@ def index():
         target_record_id=target_record_id,
         target_lat=target_lat,
         target_lng=target_lng,
-        user_franchises=user_franchises
+        user_franchises=user_franchises,
+        cluster_config=cluster_config
     )
 
 
@@ -456,6 +486,7 @@ def index_with_record(module_name, record_id):
         
     is_admin = session.get('is_admin', False)
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
+    cluster_config = _get_cluster_config()
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -464,7 +495,8 @@ def index_with_record(module_name, record_id):
         target_record_id=record_id,
         target_lat=target_lat,
         target_lng=target_lng,
-        user_franchises=user_franchises
+        user_franchises=user_franchises,
+        cluster_config=cluster_config
     )
 
 @app.route('/login')
@@ -590,6 +622,7 @@ def settings():
     crm_domain = database.get_global_setting('crmplus_domain', '')
     crm_org_id = database.get_global_setting('crmplus_orgid', '')
     webhook_token = database.get_global_setting('ZohoMap_Webhook_Token', '')
+    cluster_config = _get_cluster_config()
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -598,6 +631,7 @@ def settings():
                            crm_domain=crm_domain,
                            crm_org_id=crm_org_id,
                            webhook_token=webhook_token,
+                           cluster_config=cluster_config,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 

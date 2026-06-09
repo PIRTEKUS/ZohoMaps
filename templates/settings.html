@@ -400,6 +400,85 @@
                 <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
             </div>
 
+            <!-- Marker Clustering Config -->
+            <div class="settings-card glass" id="cluster-config-card" style="border-color: rgba(99,102,241,0.25);">
+                <h2>Marker Clustering Styles <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                    Configure style brackets and marker quantities for grouped circles on the map.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                    <!-- Bracket 1 -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem; align-items: center; background: rgba(255,255,255,0.02); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                        <strong style="color: #3b82f6; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+                            <span style="width: 12px; height: 12px; border-radius: 50%; background: {{ cluster_config.b1_color }}; display: inline-block;" id="cluster-b1-indicator"></span>
+                            Bracket 1 (Low)
+                        </strong>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">From (Fixed)</label>
+                            <input type="number" value="2" disabled style="background: rgba(0,0,0,0.3); color: #64748b; border-color: rgba(255,255,255,0.05); cursor: not-allowed; margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">To</label>
+                            <input type="number" id="cluster-b1-to" min="2" value="{{ cluster_config.b1_to }}" oninput="updateBracketBounds()" style="background: rgba(0,0,0,0.25); margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">Color</label>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                <input type="color" id="cluster-b1-color-picker" value="{{ cluster_config.b1_color }}" oninput="document.getElementById('cluster-b1-color').value = this.value; document.getElementById('cluster-b1-indicator').style.backgroundColor = this.value;" style="width: 34px; height: 34px; border: none; padding: 0; background: transparent; cursor: pointer; border-radius: 4px; overflow: hidden; flex-shrink: 0;">
+                                <input type="text" id="cluster-b1-color" value="{{ cluster_config.b1_color }}" oninput="document.getElementById('cluster-b1-color-picker').value = this.value; document.getElementById('cluster-b1-indicator').style.backgroundColor = this.value;" style="width: 90px; background: rgba(0,0,0,0.2); font-family: monospace; font-size: 0.85rem;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bracket 2 -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem; align-items: center; background: rgba(255,255,255,0.02); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                        <strong style="color: #f59e0b; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+                            <span style="width: 12px; height: 12px; border-radius: 50%; background: {{ cluster_config.b2_color }}; display: inline-block;" id="cluster-b2-indicator"></span>
+                            Bracket 2 (Medium)
+                        </strong>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">From</label>
+                            <input type="number" id="cluster-b2-from" disabled value="{{ cluster_config.b1_to + 1 }}" style="background: rgba(0,0,0,0.3); color: #64748b; border-color: rgba(255,255,255,0.05); cursor: not-allowed; margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">To</label>
+                            <input type="number" id="cluster-b2-to" min="3" value="{{ cluster_config.b2_to }}" oninput="updateBracketBounds()" style="background: rgba(0,0,0,0.25); margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">Color</label>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                <input type="color" id="cluster-b2-color-picker" value="{{ cluster_config.b2_color }}" oninput="document.getElementById('cluster-b2-color').value = this.value; document.getElementById('cluster-b2-indicator').style.backgroundColor = this.value;" style="width: 34px; height: 34px; border: none; padding: 0; background: transparent; cursor: pointer; border-radius: 4px; overflow: hidden; flex-shrink: 0;">
+                                <input type="text" id="cluster-b2-color" value="{{ cluster_config.b2_color }}" oninput="document.getElementById('cluster-b2-color-picker').value = this.value; document.getElementById('cluster-b2-indicator').style.backgroundColor = this.value;" style="width: 90px; background: rgba(0,0,0,0.2); font-family: monospace; font-size: 0.85rem;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bracket 3 -->
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem; align-items: center; background: rgba(255,255,255,0.02); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                        <strong style="color: #ef4444; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+                            <span style="width: 12px; height: 12px; border-radius: 50%; background: {{ cluster_config.b3_color }}; display: inline-block;" id="cluster-b3-indicator"></span>
+                            Bracket 3 (High)
+                        </strong>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">From</label>
+                            <input type="number" id="cluster-b3-from" disabled value="{{ cluster_config.b2_to + 1 }}" style="background: rgba(0,0,0,0.3); color: #64748b; border-color: rgba(255,255,255,0.05); cursor: not-allowed; margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">To</label>
+                            <input type="text" value="More than n" disabled style="background: rgba(0,0,0,0.3); color: #64748b; border-color: rgba(255,255,255,0.05); cursor: not-allowed; margin-top: 4px;">
+                        </div>
+                        <div class="form-group" style="margin: 0;">
+                            <label style="font-size: 0.8rem; color: #cbd5e1;">Color</label>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                                <input type="color" id="cluster-b3-color-picker" value="{{ cluster_config.b3_color }}" oninput="document.getElementById('cluster-b3-color').value = this.value; document.getElementById('cluster-b3-indicator').style.backgroundColor = this.value;" style="width: 34px; height: 34px; border: none; padding: 0; background: transparent; cursor: pointer; border-radius: 4px; overflow: hidden; flex-shrink: 0;">
+                                <input type="text" id="cluster-b3-color" value="{{ cluster_config.b3_color }}" oninput="document.getElementById('cluster-b3-color-picker').value = this.value; document.getElementById('cluster-b3-indicator').style.backgroundColor = this.value;" style="width: 90px; background: rgba(0,0,0,0.2); font-family: monospace; font-size: 0.85rem;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button id="save-cluster-config-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Clustering Settings</button>
+            </div>
+
             <!-- Site Branding & Favicon -->
             <div class="settings-card glass" style="border-color: rgba(99,102,241,0.2);">
                 <h2 style="display:flex; align-items:center; gap:0.75rem;">
@@ -643,6 +722,31 @@ function switchTab(tabId) {
     });
 }
 
+function updateBracketBounds() {
+    const b1ToInput = document.getElementById('cluster-b1-to');
+    const b2FromInput = document.getElementById('cluster-b2-from');
+    const b2ToInput = document.getElementById('cluster-b2-to');
+    const b3FromInput = document.getElementById('cluster-b3-from');
+    
+    if (b1ToInput && b2FromInput && b2ToInput && b3FromInput) {
+        let b1To = parseInt(b1ToInput.value) || 2;
+        if (b1To < 2) b1To = 2;
+        
+        const b2From = b1To + 1;
+        b2FromInput.value = b2From;
+        
+        b2ToInput.min = b2From;
+        let b2To = parseInt(b2ToInput.value) || b2From;
+        if (b2To < b2From) {
+            b2To = b2From;
+            b2ToInput.value = b2To;
+        }
+        
+        const b3From = b2To + 1;
+        b3FromInput.value = b3From;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     fetchModules();
     
@@ -727,6 +831,56 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 console.error('Failed to save settings', err);
                 alert('Error saving global settings');
+            }
+        });
+    }
+
+    const saveClusterBtn = document.getElementById('save-cluster-config-btn');
+    if (saveClusterBtn) {
+        saveClusterBtn.addEventListener('click', async () => {
+            const b1_to = parseInt(document.getElementById('cluster-b1-to').value) || 10;
+            const b1_color = document.getElementById('cluster-b1-color').value || '#3b82f6';
+            const b2_to = parseInt(document.getElementById('cluster-b2-to').value) || 50;
+            const b2_color = document.getElementById('cluster-b2-color').value || '#f59e0b';
+            const b3_color = document.getElementById('cluster-b3-color').value || '#ef4444';
+
+            // Validate
+            if (b1_to < 2) {
+                alert('Bracket 1 To must be at least 2.');
+                return;
+            }
+            if (b2_to <= b1_to) {
+                alert('Bracket 2 To must be greater than Bracket 1 To.');
+                return;
+            }
+
+            const clusterConfig = {
+                b1_to: b1_to,
+                b1_color: b1_color,
+                b2_to: b2_to,
+                b2_color: b2_color,
+                b3_color: b3_color
+            };
+
+            try {
+                const response = await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        key: 'cluster_config',
+                        value: JSON.stringify(clusterConfig)
+                    })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    alert('Clustering configuration saved successfully!');
+                    window.location.reload();
+                } else {
+                    alert('Error saving configuration: ' + (result.error || 'unknown error'));
+                }
+            } catch (err) {
+                console.error('Failed to save cluster configuration', err);
+                alert('Error saving cluster configuration');
             }
         });
     }
