@@ -2408,7 +2408,7 @@ def get_map_data():
             if stale_global_ids:
                 log_debug(f"[map] Deleting {len(stale_global_ids)} stale global records (old format)")
                 placeholders = ','.join(['?'] * len(stale_global_ids))
-                database.exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND id IN ({placeholders})", (GLOBAL_USER,) + tuple(stale_global_ids))
+                database.exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND id IN ({placeholders})", ('__global__',) + tuple(stale_global_ids))
             if stale_user_ids:
                 log_debug(f"[map] Deleting {len(stale_user_ids)} stale user records (old format) for {user_id}")
                 placeholders = ','.join(['?'] * len(stale_user_ids))
