@@ -2,6 +2,17 @@ import sys
 import os
 import json
 
+# If running on AWS Production/Ubuntu, auto-load secrets environment file
+env_path = '/etc/zohomap/app.env'
+if os.path.exists(env_path):
+    with open(env_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if '=' in line:
+                    key, val = line.split('=', 1)
+                    os.environ[key.strip()] = val.strip()
+
 # Ensure parent directory is in path to import database.py
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import database
