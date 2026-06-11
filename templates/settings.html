@@ -396,6 +396,12 @@
                         <input type="password" id="webhook-token" placeholder="e.g. MySuperSecretToken123!" value="{{ webhook_token or '' }}" style="margin-top: 5px;">
                         <small style="color: #94a3b8; font-size: 0.75rem;">Secret token to validate real-time updates from Zoho CRM.</small>
                     </div>
+
+                    <div class="form-group">
+                        <label>Max Stops per Route <span style="font-size:0.75rem; color:#64748b; font-weight:400;">(Optional)</span></label>
+                        <input type="number" id="route-max-stops" min="2" max="100" placeholder="e.g. 10" value="{{ route_max_stops or '10' }}" style="margin-top: 5px;">
+                        <small style="color: #94a3b8; font-size: 0.75rem;">Limit the number of stops allowed in the route planner.</small>
+                    </div>
                 </div>
                 <button id="save-global-btn" class="btn-primary" style="margin-top: 1.5rem; padding: 0.6rem 2rem;">Save Global Settings</button>
             </div>
@@ -822,6 +828,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const crm_domain = document.getElementById('crmplus-domain').value;
             const crm_org_id = document.getElementById('crmplus-orgid').value;
             const webhook_token = document.getElementById('webhook-token').value;
+            const route_max_stops = document.getElementById('route-max-stops').value || '10';
             
             try {
                 await fetch('/api/settings/global', {
@@ -843,6 +850,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({key: 'ZohoMap_Webhook_Token', value: webhook_token})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'route_max_stops', value: route_max_stops})
                 });
                 alert('Global settings saved!');
                 window.location.reload();

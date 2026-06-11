@@ -846,8 +846,9 @@ window.getDirections = function (lat, lng) {
 };
 
 window.addToRoute = function (id, name, lat, lng) {
-    if (window.routeStops.length >= 10) {
-        alert("Google Maps only supports a maximum of 10 stops per route.");
+    const maxStops = parseInt(window.routeMaxStops) || 10;
+    if (window.routeStops.length >= maxStops) {
+        alert(`You can only add up to ${maxStops} stops to a route.`);
         return;
     }
     if (window.routeStops.find(s => s.id === id)) {

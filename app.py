@@ -446,6 +446,7 @@ def index():
     is_admin = session.get('is_admin', False)
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     cluster_config = _get_cluster_config()
+    route_max_stops = database.get_global_setting('route_max_stops', '10')
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -455,7 +456,8 @@ def index():
         target_lat=target_lat,
         target_lng=target_lng,
         user_franchises=user_franchises,
-        cluster_config=cluster_config
+        cluster_config=cluster_config,
+        route_max_stops=route_max_stops
     )
 
 
@@ -490,6 +492,7 @@ def index_with_record(module_name, record_id):
     is_admin = session.get('is_admin', False)
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     cluster_config = _get_cluster_config()
+    route_max_stops = database.get_global_setting('route_max_stops', '10')
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -499,7 +502,8 @@ def index_with_record(module_name, record_id):
         target_lat=target_lat,
         target_lng=target_lng,
         user_franchises=user_franchises,
-        cluster_config=cluster_config
+        cluster_config=cluster_config,
+        route_max_stops=route_max_stops
     )
 
 @app.route('/login')
@@ -626,6 +630,7 @@ def settings():
     crm_org_id = database.get_global_setting('crmplus_orgid', '')
     webhook_token = database.get_global_setting('ZohoMap_Webhook_Token', '')
     cluster_config = _get_cluster_config()
+    route_max_stops = database.get_global_setting('route_max_stops', '10')
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -635,6 +640,7 @@ def settings():
                            crm_org_id=crm_org_id,
                            webhook_token=webhook_token,
                            cluster_config=cluster_config,
+                           route_max_stops=route_max_stops,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 
