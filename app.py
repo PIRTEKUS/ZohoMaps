@@ -377,6 +377,30 @@ def _get_franchises_for_ui(user_id, is_admin):
     return franchises
 
 
+def get_eastern_time():
+    """Returns the current datetime in US Eastern Time (adjusting for EST/EDT)."""
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    year = utc_now.year
+    
+    # DST in US: starts second Sunday of March, ends first Sunday of November
+    # March 1st can be any day. The first Sunday is March 1 + (6 - weekday(March 1st))
+    march_1 = datetime.datetime(year, 3, 1, tzinfo=datetime.timezone.utc)
+    first_sunday_march = march_1 + datetime.timedelta(days=(6 - march_1.weekday()) % 7)
+    dst_start = first_sunday_march + datetime.timedelta(days=7, hours=7) # 2 AM EST is 7 AM UTC
+    
+    # November first Sunday:
+    nov_1 = datetime.datetime(year, 11, 1, tzinfo=datetime.timezone.utc)
+    dst_end = nov_1 + datetime.timedelta(days=(6 - nov_1.weekday()) % 7, hours=6) # 2 AM EDT is 6 AM UTC
+    
+    # Eastern time offset: UTC-4 if in DST, else UTC-5
+    if dst_start <= utc_now < dst_end:
+        offset = datetime.timedelta(hours=-4)
+    else:
+        offset = datetime.timedelta(hours=-5)
+        
+    return utc_now.astimezone(datetime.timezone(offset))
+
+
 def _get_cluster_config():
     """Load the marker cluster configuration, with defaults."""
     cluster_config_str = database.get_global_setting('cluster_config', '{}')
@@ -631,6 +655,13 @@ def settings():
     webhook_token = database.get_global_setting('ZohoMap_Webhook_Token', '')
     cluster_config = _get_cluster_config()
     route_max_stops = database.get_global_setting('route_max_stops', '10')
+    nightly_sync_enabled = database.get_global_setting('nightly_sync_enabled', 'true')
+    nightly_sync_time = database.get_global_setting('nightly_sync_time', '23:00')
+    nightly_sync_schedule_str = database.get_global_setting('nightly_sync_schedule', '{}')
+    try:
+        nightly_sync_schedule = json.loads(nightly_sync_schedule_str)
+    except Exception:
+        nightly_sync_schedule = {}
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -641,6 +672,9 @@ def settings():
                            webhook_token=webhook_token,
                            cluster_config=cluster_config,
                            route_max_stops=route_max_stops,
+                           nightly_sync_enabled=nightly_sync_enabled,
+                           nightly_sync_time=nightly_sync_time,
+                           nightly_sync_schedule=nightly_sync_schedule,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 
@@ -1987,10 +2021,68 @@ def _nightly_sync_module(admin_token, module_name, config):
     return count
 
 
-def do_nightly_sync():
+def do_nightly_sync(is_manual=False):
     """Orchestrates the nightly full sync of all shared modules into the global cache.
     Called by the systemd timer (via run_nightly_sync.py) and the admin manual trigger."""
-    log_debug("[nightly] ========== Nightly sync started ==========")
+    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}) ==========")
+    
+    # 1. Load configuration settings
+    nightly_sync_enabled = database.get_global_setting('nightly_sync_enabled', 'true')
+    nightly_sync_time_str = database.get_global_setting('nightly_sync_time', '23:00')
+    nightly_sync_schedule_str = database.get_global_setting('nightly_sync_schedule', '{}')
+    
+    try:
+        schedule = json.loads(nightly_sync_schedule_str)
+    except Exception:
+        schedule = {}
+    
+    now_est = get_eastern_time()
+    
+    # Parse target run time (HH:MM)
+    try:
+        target_hour, target_minute = map(int, nightly_sync_time_str.split(':'))
+    except Exception:
+        target_hour, target_minute = 23, 0  # Fallback to 11pm EST
+        
+    # Determine the latest scheduled run time based on current time.
+    # If today's target time hasn't happened yet, the latest scheduled run was yesterday.
+    current_time_est = now_est.time()
+    target_time_obj = datetime.time(target_hour, target_minute)
+    
+    if current_time_est >= target_time_obj:
+        latest_scheduled_run = now_est.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+    else:
+        # Subtract one day to get yesterday's run time
+        yesterday_est = now_est - datetime.timedelta(days=1)
+        latest_scheduled_run = yesterday_est.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+        
+    # 2. If running automatically, enforce activation switch and scheduling window
+    if not is_manual:
+        # Check if enabled globally
+        if nightly_sync_enabled != 'true':
+            log_debug("[nightly] Auto-Sync is disabled globally. Exiting.")
+            return {'status': 'disabled', 'message': 'Auto-Sync is disabled globally.'}
+            
+        # Check if we already ran for this latest scheduled window
+        last_sync_str = database.get_global_setting('last_nightly_sync', '')
+        if last_sync_str:
+            try:
+                last_sync_dt = datetime.datetime.fromisoformat(last_sync_str)
+                # Convert both datetimes to UTC or compare them with timezone-awareness
+                if last_sync_dt.tzinfo is None:
+                    last_sync_utc = last_sync_dt.astimezone(datetime.timezone.utc)
+                else:
+                    last_sync_utc = last_sync_dt.astimezone(datetime.timezone.utc)
+                
+                latest_scheduled_run_utc = latest_scheduled_run.astimezone(datetime.timezone.utc)
+                
+                if last_sync_utc >= latest_scheduled_run_utc:
+                    log_debug(f"[nightly] Auto-sync already executed for the latest schedule window ({latest_scheduled_run.isoformat()}). Exiting.")
+                    return {'status': 'already_run', 'message': 'Auto-sync already executed for the latest schedule window.'}
+            except Exception as parse_err:
+                log_debug(f"[nightly] Error parsing last_nightly_sync timestamp '{last_sync_str}': {parse_err}. Proceeding anyway.")
+    
+    # 3. Retrieve auth token
     admin_token = _get_admin_access_token()
     if not admin_token:
         log_debug("[nightly] FAILED: No admin token. Admin must log in to ZohoMap first.")
@@ -2006,10 +2098,24 @@ def do_nightly_sync():
     results = {}
     total = 0
     start = datetime.datetime.now(datetime.timezone.utc)
+    
+    # Determine the day of the week to use for scheduling (e.g. 'Mon', 'Tue')
+    run_day = latest_scheduled_run.strftime('%a')
+    log_debug(f"[nightly] Running scheduler check for day of week: {run_day}")
 
     for config in configs:
         module_name = config['module_name']
+        
+        # Check scheduling for this module if it's an automatic run
+        if not is_manual:
+            module_schedule = schedule.get(module_name, [])
+            if run_day not in module_schedule:
+                log_debug(f"[nightly] {module_name}: Skipped (not scheduled for {run_day})")
+                results[module_name] = f'Skipped (not scheduled for {run_day})'
+                continue
+                
         try:
+            log_debug(f"[nightly] Syncing module: {module_name}")
             count = _nightly_sync_module(admin_token, module_name, config)
             results[module_name] = count
             total += count
@@ -2060,7 +2166,7 @@ def trigger_nightly_sync():
         _nightly_sync_running = True
         database.set_global_setting('nightly_sync_running', 'true')
         try:
-            do_nightly_sync()
+            do_nightly_sync(is_manual=True)
         finally:
             _nightly_sync_running = False
             database.set_global_setting('nightly_sync_running', 'false')

@@ -679,6 +679,70 @@
                         <div id="sync-message" style="font-size:0.8rem; color:#94a3b8; text-align:center; display:none;"></div>
                     </div>
                 </div>
+
+                <!-- Schedule Settings Section -->
+                <div style="margin-top: 2rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem; width: 100%;">
+                    <h3 style="font-size: 1.1rem; color: #f8fafc; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <svg viewBox="0 0 24 24" width="18" height="18" stroke="#10b981" stroke-width="2" fill="none">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                        </svg>
+                        Schedule Settings
+                    </h3>
+                    
+                    <div style="display: flex; gap: 2rem; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; background: rgba(0,0,0,0.15); padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03);">
+                        <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; color: #f1f5f9; font-weight: 500;">
+                            <input type="checkbox" id="sync-enabled-toggle" {% if nightly_sync_enabled == 'true' %}checked{% endif %} style="width: 1.25rem; height: 1.25rem; cursor: pointer; accent-color: #10b981;">
+                            Enable Auto-Sync Scheduler
+                        </label>
+                        
+                        <div style="display: flex; align-items: center; gap: 0.75rem;">
+                            <span style="color: #94a3b8; font-size: 0.9rem; font-weight: 500;">Run Time (EST):</span>
+                            <input type="time" id="sync-time-est" value="{{ nightly_sync_time }}" style="padding: 0.45rem 0.75rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.9rem; font-weight: 500; outline: none; width: 120px; text-align: center;">
+                        </div>
+                    </div>
+
+                    <!-- Table of modules & days -->
+                    <div style="overflow-x: auto; background: rgba(0,0,0,0.2); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 1.5rem;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02);">
+                                    <th style="padding: 0.9rem 1.25rem; color: #94a3b8; font-weight: 600;">Shared Module</th>
+                                    {% for day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+                                    <th style="padding: 0.9rem 0.5rem; text-align: center; color: #94a3b8; font-weight: 600; min-width: 65px;">{{ day }}</th>
+                                    {% endfor %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for config in shared_configs %}
+                                <tr class="sync-module-row" data-module="{{ config.module_name }}" style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
+                                    <td style="padding: 0.9rem 1.25rem; color: #f1f5f9; font-weight: 500;">
+                                        {{ config.module_name }}
+                                    </td>
+                                    {% for day in ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] %}
+                                    <td style="padding: 0.9rem 0.5rem; text-align: center;">
+                                        <input type="checkbox" class="day-checkbox" data-day="{{ day }}" style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: #10b981;">
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endfor %}
+                                {% if not shared_configs %}
+                                <tr>
+                                    <td colspan="8" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
+                                        No shared modules configured. Enable sharing for a module in the configurations below.
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div style="display: flex; justify-content: flex-end; gap: 1rem; align-items: center;">
+                        <span id="schedule-save-status" style="font-size: 0.85rem; color: #10b981; display: none;">✓ Configuration saved!</span>
+                        <button id="save-sync-schedule-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; background: linear-gradient(135deg,#10b981,#059669); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;">
+                            Save Auto-Sync Configuration
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -720,6 +784,7 @@
                 <div id="franchise-debug-output" style="background:rgba(0,0,0,0.25); border-radius:10px; padding:1rem; font-size:0.82rem; display:none;">
                     <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
    <script>
+window.nightlySyncSchedule = {{ nightly_sync_schedule | tojson | safe }};
 let currentFields = [];
 let previewRecord = null;
 
@@ -2070,5 +2135,79 @@ async function resetFavicon() {
         status.style.color = "#ef4444";
     }
 }
+
+// ── Auto-Sync Scheduler Settings ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    // Populate checkboxes from saved schedule
+    const schedule = window.nightlySyncSchedule || {};
+    document.querySelectorAll('.sync-module-row').forEach(row => {
+        const moduleName = row.getAttribute('data-module');
+        const days = schedule[moduleName] || [];
+        row.querySelectorAll('.day-checkbox').forEach(cb => {
+            const day = cb.getAttribute('data-day');
+            if (days.includes(day)) {
+                cb.checked = true;
+            }
+        });
+    });
+
+    const saveScheduleBtn = document.getElementById('save-sync-schedule-btn');
+    const saveStatusEl = document.getElementById('schedule-save-status');
+    if (saveScheduleBtn) {
+        saveScheduleBtn.addEventListener('click', async () => {
+            const enabled = document.getElementById('sync-enabled-toggle').checked ? 'true' : 'false';
+            const timeEst = document.getElementById('sync-time-est').value || '23:00';
+            
+            // Build schedule mapping
+            const schedule = {};
+            document.querySelectorAll('.sync-module-row').forEach(row => {
+                const moduleName = row.getAttribute('data-module');
+                const days = [];
+                row.querySelectorAll('.day-checkbox').forEach(cb => {
+                    if (cb.checked) {
+                        days.push(cb.getAttribute('data-day'));
+                    }
+                });
+                schedule[moduleName] = days;
+            });
+            
+            try {
+                saveScheduleBtn.disabled = true;
+                saveScheduleBtn.textContent = 'Saving...';
+                if (saveStatusEl) saveStatusEl.style.display = 'none';
+                
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'nightly_sync_enabled', value: enabled})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'nightly_sync_time', value: timeEst})
+                });
+                await fetch('/api/settings/global', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: 'nightly_sync_schedule', value: JSON.stringify(schedule)})
+                });
+                
+                if (saveStatusEl) {
+                    saveStatusEl.style.display = 'inline';
+                    setTimeout(() => { saveStatusEl.style.display = 'none'; }, 3000);
+                }
+                
+                alert('Auto-sync configuration saved!');
+                window.location.reload();
+            } catch (err) {
+                console.error('Failed to save auto-sync settings', err);
+                alert('Error saving auto-sync settings');
+            } finally {
+                saveScheduleBtn.disabled = false;
+                saveScheduleBtn.textContent = 'Save Auto-Sync Configuration';
+            }
+        });
+    }
+});
 </script>
 {% endblock %}
