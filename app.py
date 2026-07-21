@@ -856,25 +856,37 @@ def delete_config(module_name):
 
 @app.route('/api/settings/global', methods=['POST'])
 def save_global_setting():
-    if 'access_token' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    if not session.get('is_admin', False):
-        return jsonify({'error': 'Admin only'}), 403
-    data = request.json
-    key = data.get('key', '')
-    value = data.get('value', '')
+    try:
+        if 'access_token' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+        if not session.get('is_admin', False):
+            return jsonify({'error': 'Admin only'}), 403
+        
+        data = request.json
+        if not data:
+            log_debug("[save_global_setting] Error: Empty request payload or content-type is not application/json")
+            return jsonify({'error': 'Invalid JSON body'}), 400
+            
+        key = data.get('key', '')
+        value = data.get('value', '')
+        
+        log_debug(f"[save_global_setting] Saving key: {key} (length: {len(str(value))})")
 
-    # show_console is a per-user (session) setting, NOT a global DB setting.
-    # Storing it globally would enable the console for ALL users, including
-    # team users who should never see internal debug output.
-    if key == 'show_console':
-        session['show_console'] = (value == 'true')
-        session.modified = True  # Force Flask to commit the session cookie
+        # show_console is a per-user (session) setting, NOT a global DB setting.
+        # Storing it globally would enable the console for ALL users, including
+        # team users who should never see internal debug output.
+        if key == 'show_console':
+            session['show_console'] = (value == 'true')
+            session.modified = True  # Force Flask to commit the session cookie
+            return jsonify({'success': True})
+
+        # All other keys (crmplus_domain, crmplus_orgid, etc.) are admin-only globals
+        database.set_global_setting(key, value)
         return jsonify({'success': True})
-
-    # All other keys (crmplus_domain, crmplus_orgid, etc.) are admin-only globals
-    database.set_global_setting(key, value)
-    return jsonify({'success': True})
+    except Exception as e:
+        import traceback
+        log_debug(f"[save_global_setting] Exception occurred while saving key {data.get('key') if data else 'unknown'}: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/favicon.ico')
