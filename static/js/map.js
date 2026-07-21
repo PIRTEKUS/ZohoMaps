@@ -1053,24 +1053,35 @@ window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
 };
 
 // ── Franchise Territory Boundaries rendering & controls ───────────────────────────
+window.boundaryLabels = [];
+
 window.applyBoundaryStyles = function(hideOverride) {
     if (!window.map || !window.map.data) return;
     const hide = (typeof hideOverride === 'boolean') ? hideOverride : (window.boundariesHidden || false);
+    const config = window.boundaryStyleConfig || {
+        color: '#6366f1',
+        fillOpacity: 0.05,
+        strokeWeight: 2,
+        showLabels: true,
+        labelSize: 14,
+        labelColor: '#ffffff'
+    };
     
+    // 1. Update the Data layer styles
     window.map.data.setStyle(feature => {
         if (hide) {
             return { visible: false };
         }
         
         const franchiseId = feature.getId();
-        let color = '#6366f1'; // Default Indigo
+        let color = config.color || '#6366f1';
         let isHighlighted = false;
         let visible = true;
         
         if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
             if (window.selectedFranchiseIds.has(franchiseId)) {
                 isHighlighted = true;
-                color = '#10b981'; // Vibrant green highlight for active selection
+                color = '#10b981'; // Always highlight selection in vibrant green
             } else {
                 visible = false; // Hide non-selected franchise boundaries
             }
@@ -1078,31 +1089,118 @@ window.applyBoundaryStyles = function(hideOverride) {
         
         return {
             strokeColor: color,
-            strokeOpacity: isHighlighted ? 0.9 : 0.4,
-            strokeWeight: isHighlighted ? 4 : 2,
+            strokeOpacity: isHighlighted ? 0.95 : 0.65,
+            strokeWeight: isHighlighted ? Math.max(4, config.strokeWeight + 2) : config.strokeWeight,
             fillColor: color,
-            fillOpacity: isHighlighted ? 0.12 : 0.03,
+            fillOpacity: isHighlighted ? Math.max(0.15, config.fillOpacity + 0.05) : config.fillOpacity,
             visible: visible,
             clickable: true
         };
     });
+
+    // 2. Update centered text label visibility & style dynamically
+    if (window.boundaryLabels) {
+        window.boundaryLabels.forEach(lbl => {
+            if (hide) {
+                lbl.setMap(null);
+            } else {
+                const showL = config.showLabels;
+                if (!showL) {
+                    lbl.setMap(null);
+                    return;
+                }
+                
+                const franchiseId = lbl.franchiseId;
+                let labelVisible = true;
+                if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
+                    if (!window.selectedFranchiseIds.has(franchiseId)) {
+                        labelVisible = false;
+                    }
+                }
+                lbl.setMap(labelVisible ? window.map : null);
+            }
+        });
+    }
 };
+
+function getPolygonCentroid(coordinates, type) {
+    let sumLat = 0;
+    let sumLng = 0;
+    let count = 0;
+    
+    const processRing = (ring) => {
+        ring.forEach(pt => {
+            sumLng += pt[0];
+            sumLat += pt[1];
+            count++;
+        });
+    };
+    
+    if (type === 'Polygon') {
+        if (coordinates && coordinates[0]) {
+            processRing(coordinates[0]); // Outer boundary ring only
+        }
+    } else if (type === 'MultiPolygon') {
+        if (coordinates) {
+            coordinates.forEach(poly => {
+                if (poly && poly[0]) {
+                    processRing(poly[0]);
+                }
+            });
+        }
+    }
+    
+    if (count === 0) return null;
+    return { lat: sumLat / count, lng: sumLng / count };
+}
 
 function renderFranchiseBoundaries() {
     if (!window.franchiseBoundaries || Object.keys(window.franchiseBoundaries).length === 0) return;
     
-    const features = Object.entries(window.franchiseBoundaries).map(([id, boundary]) => ({
-        type: 'Feature',
-        id: id,
-        geometry: {
-            type: boundary.type,
-            coordinates: boundary.coordinates
-        },
-        properties: {
-            name: boundary.name,
-            franchiseId: id
+    const config = window.boundaryStyleConfig || {};
+    const features = [];
+    
+    // Clear any existing labels first
+    if (window.boundaryLabels) {
+        window.boundaryLabels.forEach(lbl => lbl.setMap(null));
+        window.boundaryLabels = [];
+    }
+
+    Object.entries(window.franchiseBoundaries).forEach(([id, boundary]) => {
+        features.push({
+            type: 'Feature',
+            id: id,
+            geometry: {
+                type: boundary.type,
+                coordinates: boundary.coordinates
+            },
+            properties: {
+                name: boundary.name,
+                franchiseId: id
+            }
+        });
+
+        // Add centered name label marker overlay
+        const centroid = getPolygonCentroid(boundary.coordinates, boundary.type);
+        if (centroid) {
+            const lbl = new google.maps.Marker({
+                position: centroid,
+                map: window.map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 0 // Invisible symbol icon
+                },
+                label: {
+                    text: boundary.name,
+                    color: config.labelColor || '#ffffff',
+                    fontSize: (config.labelSize || 14) + 'px',
+                    fontWeight: 'bold'
+                }
+            });
+            lbl.franchiseId = id;
+            window.boundaryLabels.push(lbl);
         }
-    }));
+    });
     
     const featureCollection = {
         type: 'FeatureCollection',

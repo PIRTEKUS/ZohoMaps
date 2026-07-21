@@ -432,6 +432,18 @@ def _get_cluster_config():
     return cluster_config
 
 
+def _get_boundary_style_config():
+    """Load boundary display styles with default fallbacks."""
+    return {
+        'boundary_color': database.get_global_setting('boundary_color', '#6366f1'),
+        'boundary_fill_opacity': database.get_global_setting('boundary_fill_opacity', '0.05'),
+        'boundary_stroke_weight': database.get_global_setting('boundary_stroke_weight', '2'),
+        'boundary_show_labels': database.get_global_setting('boundary_show_labels', 'true'),
+        'boundary_label_size': database.get_global_setting('boundary_label_size', '14'),
+        'boundary_label_color': database.get_global_setting('boundary_label_color', '#ffffff'),
+    }
+
+
 @app.route('/')
 def index():
     if 'access_token' not in session or not session.get('user_id'):
@@ -472,6 +484,7 @@ def index():
     cluster_config = _get_cluster_config()
     route_max_stops = database.get_global_setting('route_max_stops', '10')
     franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
+    boundary_styles = _get_boundary_style_config()
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -483,7 +496,8 @@ def index():
         user_franchises=user_franchises,
         cluster_config=cluster_config,
         route_max_stops=route_max_stops,
-        franchise_boundaries=franchise_boundaries
+        franchise_boundaries=franchise_boundaries,
+        **boundary_styles
     )
 
 
@@ -520,6 +534,7 @@ def index_with_record(module_name, record_id):
     cluster_config = _get_cluster_config()
     route_max_stops = database.get_global_setting('route_max_stops', '10')
     franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
+    boundary_styles = _get_boundary_style_config()
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -531,7 +546,8 @@ def index_with_record(module_name, record_id):
         user_franchises=user_franchises,
         cluster_config=cluster_config,
         route_max_stops=route_max_stops,
-        franchise_boundaries=franchise_boundaries
+        franchise_boundaries=franchise_boundaries,
+        **boundary_styles
     )
 
 @app.route('/login')
@@ -667,6 +683,20 @@ def settings():
     except Exception:
         nightly_sync_schedule = {}
     franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
+    try:
+        franchise_boundaries_dict = json.loads(franchise_boundaries)
+    except Exception:
+        franchise_boundaries_dict = {}
+        
+    all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
+    
+    boundary_color = database.get_global_setting('boundary_color', '#6366f1')
+    boundary_fill_opacity = database.get_global_setting('boundary_fill_opacity', '0.05')
+    boundary_stroke_weight = database.get_global_setting('boundary_stroke_weight', '2')
+    boundary_show_labels = database.get_global_setting('boundary_show_labels', 'true')
+    boundary_label_size = database.get_global_setting('boundary_label_size', '14')
+    boundary_label_color = database.get_global_setting('boundary_label_color', '#ffffff')
+
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -681,6 +711,14 @@ def settings():
                            nightly_sync_time=nightly_sync_time,
                            nightly_sync_schedule=nightly_sync_schedule,
                            franchise_boundaries=franchise_boundaries,
+                           franchise_boundaries_dict=franchise_boundaries_dict,
+                           all_franchises=all_franchises,
+                           boundary_color=boundary_color,
+                           boundary_fill_opacity=boundary_fill_opacity,
+                           boundary_stroke_weight=boundary_stroke_weight,
+                           boundary_show_labels=boundary_show_labels,
+                           boundary_label_size=boundary_label_size,
+                           boundary_label_color=boundary_label_color,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 

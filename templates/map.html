@@ -805,6 +805,14 @@ window.toggleFranchiseBoundaries = function() {
     window.clusterConfig = {{ cluster_config | tojson | safe }};
     window.routeMaxStops = {{ route_max_stops | tojson | safe }};
     window.franchiseBoundaries = {{ franchise_boundaries | safe }};
+    window.boundaryStyleConfig = {
+        color: {{ boundary_color | tojson | safe }},
+        fillOpacity: parseFloat({{ boundary_fill_opacity | tojson | safe }}),
+        strokeWeight: parseInt({{ boundary_stroke_weight | tojson | safe }}),
+        showLabels: {{ boundary_show_labels | tojson | safe }} === true || {{ boundary_show_labels | tojson | safe }} === 'true',
+        labelSize: parseInt({{ boundary_label_size | tojson | safe }}),
+        labelColor: {{ boundary_label_color | tojson | safe }}
+    };
     window.targetModule = {{ target_module | tojson | safe if target_module else 'null' }};
     window.targetRecordId = {{ target_record_id | tojson | safe if target_record_id else 'null' }};
     window.targetLat = {{ target_lat | tojson | safe if target_lat is not none else 'null' }};

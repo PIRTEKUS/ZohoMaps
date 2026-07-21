@@ -793,6 +793,118 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Boundary Style Configurations -->
+                <div style="margin-top: 2.5rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem;">
+                    <h3 style="font-size: 1.05rem; color: #f8fafc; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        🎨 Boundary Styling Settings
+                    </h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); margin-bottom: 1.5rem;">
+                        
+                        <div class="form-group" style="margin: 0;">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Outline Color</label>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                                <input type="color" id="boundary-color-picker" value="{{ boundary_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-color-text').value = this.value">
+                                <input type="text" id="boundary-color-text" value="{{ boundary_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#6366F1" oninput="document.getElementById('boundary-color-picker').value = this.value">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin: 0;">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Fill Transparency (0.0 - 1.0)</label>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                                <input type="range" id="boundary-fill-opacity" min="0" max="1" step="0.01" value="{{ boundary_fill_opacity }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-fill-opacity-val').textContent = parseFloat(this.value).toFixed(2)">
+                                <span id="boundary-fill-opacity-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 35px; text-align: right;">{{ boundary_fill_opacity }}</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin: 0;">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Stroke Weight (1px - 10px)</label>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                                <input type="range" id="boundary-stroke-weight" min="1" max="10" step="1" value="{{ boundary_stroke_weight }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-stroke-weight-val').textContent = this.value + 'px'">
+                                <span id="boundary-stroke-weight-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_stroke_weight }}px</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #f1f5f9; font-weight: 500;">
+                                <input type="checkbox" id="boundary-show-labels" {% if boundary_show_labels == 'true' %}checked{% endif %} style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: var(--primary);" onchange="toggleLabelSettings(this.checked)">
+                                Show Franchise Name on Map
+                            </label>
+                        </div>
+
+                        <div class="form-group label-settings-group" id="label-settings-size-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Label Font Size (10px - 24px)</label>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                                <input type="range" id="boundary-label-size" min="10" max="24" step="1" value="{{ boundary_label_size }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-label-size-val').textContent = this.value + 'px'">
+                                <span id="boundary-label-size-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_label_size }}px</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group label-settings-group" id="label-settings-color-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Label Color</label>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                                <input type="color" id="boundary-label-color-picker" value="{{ boundary_label_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-label-color-text').value = this.value">
+                                <input type="text" id="boundary-label-color-text" value="{{ boundary_label_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#FFFFFF" oninput="document.getElementById('boundary-label-color-picker').value = this.value">
+                            </div>
+                        </div>
+
+                    </div>
+                    <div style="display: flex; justify-content: flex-end; align-items: center;">
+                        <span id="boundary-styles-status" style="font-size: 0.85rem; color: #10b981; margin-right: 1rem; display: none;">✓ Styles saved!</span>
+                        <button id="save-boundary-styles-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; background: linear-gradient(135deg,var(--primary),#4f46e5); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;" onclick="saveBoundaryStyles()">
+                            Save Style Settings
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Franchise Boundaries Status List -->
+                <div style="margin-top: 2.5rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem;">
+                    <h3 style="font-size: 1.05rem; color: #f8fafc; margin-bottom: 0.75rem;">
+                        📋 Active Franchises & Boundary Status
+                    </h3>
+                    <div style="max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 1.5rem;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); position: sticky; top: 0; z-index: 1;">
+                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Franchise Name</th>
+                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 150px;">Status</th>
+                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; width: 220px;">CRM Franchise ID</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for f in all_franchises %}
+                                {% set has_boundary = f.id in franchise_boundaries_dict %}
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
+                                    <td style="padding: 0.75rem 1.25rem; color: #f1f5f9; font-weight: 500;">
+                                        {{ f.name }}
+                                    </td>
+                                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                                        {% if has_boundary %}
+                                        <span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                            ✅ Imported
+                                        </span>
+                                        {% else %}
+                                        <span style="background: rgba(100,116,139,0.15); color: #94a3b8; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                            ❌ Missing
+                                        </span>
+                                        {% endif %}
+                                    </td>
+                                    <td style="padding: 0.75rem 1.25rem; font-family: monospace; color: #94a3b8; font-size: 0.8rem;">
+                                        {{ f.id }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                                {% if not all_franchises %}
+                                <tr>
+                                    <td colspan="3" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
+                                        No active franchises found in CRM cache.
+                                    </td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -2517,6 +2629,61 @@ async function clearSavedBoundaries() {
     } finally {
         btn.disabled = false;
         btn.textContent = '🗑️ Delete All Boundaries';
+    }
+}
+
+// ── KML Boundaries Style Config Handlers ──────────────────────────────────────────
+function toggleLabelSettings(checked) {
+    document.querySelectorAll('.label-settings-group').forEach(el => {
+        el.style.display = checked ? 'block' : 'none';
+    });
+}
+
+async function saveBoundaryStyles() {
+    const btn = document.getElementById('save-boundary-styles-btn');
+    const statusEl = document.getElementById('boundary-styles-status');
+    if (!btn) return;
+    
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    if (statusEl) statusEl.style.display = 'none';
+
+    const color = document.getElementById('boundary-color-text').value || '#6366f1';
+    const fillOpacity = document.getElementById('boundary-fill-opacity').value || '0.05';
+    const strokeWeight = document.getElementById('boundary-stroke-weight').value || '2';
+    const showLabels = document.getElementById('boundary-show-labels').checked ? 'true' : 'false';
+    const labelSize = document.getElementById('boundary-label-size').value || '14';
+    const labelColor = document.getElementById('boundary-label-color-text').value || '#ffffff';
+
+    try {
+        const postData = async (key, val) => {
+            const res = await fetch('/api/settings/global', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ key: key, value: val })
+            });
+            if (!res.ok) throw new Error(`Failed to save ${key}`);
+        };
+
+        await postData('boundary_color', color);
+        await postData('boundary_fill_opacity', fillOpacity);
+        await postData('boundary_stroke_weight', strokeWeight);
+        await postData('boundary_show_labels', showLabels);
+        await postData('boundary_label_size', labelSize);
+        await postData('boundary_label_color', labelColor);
+
+        if (statusEl) {
+            statusEl.style.display = 'inline';
+            setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+        }
+        alert('Boundary styling settings saved successfully!');
+        window.location.reload();
+    } catch (err) {
+        console.error(err);
+        alert('Error saving styling settings: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Style Settings';
     }
 }
 </script>
