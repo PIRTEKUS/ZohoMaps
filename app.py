@@ -889,6 +889,70 @@ def save_global_setting():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/boundaries/save', methods=['POST'])
+def save_boundaries_incremental():
+    try:
+        if 'access_token' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+        if not session.get('is_admin', False):
+            return jsonify({'error': 'Admin only'}), 403
+            
+        data = request.json
+        if not data or 'boundaries' not in data:
+            return jsonify({'error': 'Missing boundaries data'}), 400
+            
+        new_boundaries = data.get('boundaries', {})
+        log_debug(f"[save_boundaries_incremental] Merging {len(new_boundaries)} new boundaries in backend")
+        
+        current_str = database.get_global_setting('franchise_boundaries', '{}')
+        try:
+            current_boundaries = json.loads(current_str)
+        except Exception:
+            current_boundaries = {}
+            
+        # Merge new boundaries in backend
+        current_boundaries.update(new_boundaries)
+        
+        database.set_global_setting('franchise_boundaries', json.dumps(current_boundaries))
+        return jsonify({'success': True})
+    except Exception as e:
+        import traceback
+        log_debug(f"[save_boundaries_incremental] Exception: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/boundaries/delete', methods=['POST'])
+def delete_boundary_individual():
+    try:
+        if 'access_token' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+        if not session.get('is_admin', False):
+            return jsonify({'error': 'Admin only'}), 403
+            
+        data = request.json
+        if not data or 'franchise_id' not in data:
+            return jsonify({'error': 'Missing franchise_id'}), 400
+            
+        franchise_id = str(data.get('franchise_id', ''))
+        log_debug(f"[delete_boundary_individual] Removing boundary for franchise ID: {franchise_id}")
+        
+        current_str = database.get_global_setting('franchise_boundaries', '{}')
+        try:
+            current_boundaries = json.loads(current_str)
+        except Exception:
+            current_boundaries = {}
+            
+        if franchise_id in current_boundaries:
+            del current_boundaries[franchise_id]
+            database.set_global_setting('franchise_boundaries', json.dumps(current_boundaries))
+            
+        return jsonify({'success': True})
+    except Exception as e:
+        import traceback
+        log_debug(f"[delete_boundary_individual] Exception: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/favicon.ico')
 def favicon():
     fav_base64 = database.get_global_setting('site_favicon', '')

@@ -2626,18 +2626,12 @@ async function saveKmlBoundaries() {
         btn.textContent = 'Saving...';
         if (statusEl) statusEl.style.display = 'none';
 
-        const saved = (window.savedFranchiseBoundaries && typeof window.savedFranchiseBoundaries === 'object') ? window.savedFranchiseBoundaries : {};
-        const mergedBoundaries = {
-            ...saved,
-            ...window.parsedKmlBoundaries
-        };
-
-        const res = await fetch('/api/settings/global', {
+        // POST only the parsed boundaries chunk to avoid HTTP 413 payload size limits
+        const res = await fetch('/api/admin/boundaries/save', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                key: 'franchise_boundaries',
-                value: JSON.stringify(mergedBoundaries)
+                boundaries: window.parsedKmlBoundaries
             })
         });
 
@@ -2669,16 +2663,13 @@ async function deleteIndividualBoundary(franchiseId, franchiseName) {
         return;
     }
 
-    const boundaries = { ...window.savedFranchiseBoundaries };
-    delete boundaries[franchiseId];
-
     try {
-        const res = await fetch('/api/settings/global', {
+        // POST only the franchise ID to delete to avoid sending full boundaries dictionary
+        const res = await fetch('/api/admin/boundaries/delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                key: 'franchise_boundaries',
-                value: JSON.stringify(boundaries)
+                franchise_id: franchiseId
             })
         });
 
@@ -2686,7 +2677,11 @@ async function deleteIndividualBoundary(franchiseId, franchiseName) {
             alert(`Boundary for "${franchiseName}" removed successfully!`);
             window.location.reload();
         } else {
-            throw new Error('Save API returned error status');
+            let errorBody = '';
+            try {
+                errorBody = await res.text();
+            } catch (e) {}
+            throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorBody || 'No response body'}`);
         }
     } catch (err) {
         console.error(err);
