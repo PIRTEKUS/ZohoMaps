@@ -868,7 +868,8 @@
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); position: sticky; top: 0; z-index: 1;">
                                     <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Franchise Name</th>
                                     <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 150px;">Status</th>
-                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; width: 220px;">CRM Franchise ID</th>
+                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; width: 180px;">CRM Franchise ID</th>
+                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 120px;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -891,6 +892,13 @@
                                     </td>
                                     <td style="padding: 0.75rem 1.25rem; font-family: monospace; color: #94a3b8; font-size: 0.8rem;">
                                         {{ f.id }}
+                                    </td>
+                                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                                        {% if has_boundary %}
+                                        <button type="button" onclick="deleteIndividualBoundary('{{ f.id }}', '{{ f.name | escape }}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                                            🗑️ Remove
+                                        </button>
+                                        {% endif %}
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -947,6 +955,7 @@
                     <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
    <script>
 window.nightlySyncSchedule = {{ nightly_sync_schedule | tojson | safe }};
+window.savedFranchiseBoundaries = {{ franchise_boundaries | safe }};
 let currentFields = [];
 let previewRecord = null;
 
@@ -2595,6 +2604,36 @@ async function saveKmlBoundaries() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Save Boundaries';
+    }
+}
+
+async function deleteIndividualBoundary(franchiseId, franchiseName) {
+    if (!confirm(`Are you sure you want to delete the boundary for "${franchiseName}"?`)) {
+        return;
+    }
+
+    const boundaries = { ...window.savedFranchiseBoundaries };
+    delete boundaries[franchiseId];
+
+    try {
+        const res = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                key: 'franchise_boundaries',
+                value: JSON.stringify(boundaries)
+            })
+        });
+
+        if (res.ok) {
+            alert(`Boundary for "${franchiseName}" removed successfully!`);
+            window.location.reload();
+        } else {
+            throw new Error('Save API returned error status');
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Error removing boundary: ' + err.message);
     }
 }
 
