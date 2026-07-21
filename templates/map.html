@@ -3,6 +3,9 @@
 {% block head %}
 <script>const GOOGLE_MAPS_API_KEY = "{{ google_maps_api_key }}";</script>
 <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
+{% if boundary_font_url %}
+<link rel="stylesheet" href="{{ boundary_font_url }}">
+{% endif %}
 <style>
 /* ── Full-screen map layout ───────────────────────────────────────────── */
 main.container { padding: 0 !important; overflow: hidden; }
@@ -805,6 +808,7 @@ window.toggleFranchiseBoundaries = function() {
     window.clusterConfig = {{ cluster_config | tojson | safe }};
     window.routeMaxStops = {{ route_max_stops | tojson | safe }};
     window.franchiseBoundaries = {{ franchise_boundaries | safe }};
+    window.userFranchiseIds = {{ user_franchises | map(attribute='id') | list | tojson | safe }};
     window.boundaryStyleConfig = {
         color: {{ boundary_color | tojson | safe }},
         fillOpacity: parseFloat({{ boundary_fill_opacity | tojson | safe }}),
@@ -814,7 +818,9 @@ window.toggleFranchiseBoundaries = function() {
         labelColor: {{ boundary_label_color | tojson | safe }},
         highlightColor: {{ boundary_highlight_color | tojson | safe }},
         neighborsMode: {{ boundary_neighbors_mode | tojson | safe }},
-        neighborsRadius: parseInt({{ boundary_neighbors_radius | tojson | safe }})
+        neighborsRadius: parseInt({{ boundary_neighbors_radius | tojson | safe }}),
+        highlightStrokeWeight: parseInt({{ boundary_highlight_stroke_weight | tojson | safe }}),
+        fontFamily: {{ boundary_label_font | tojson | safe }}
     };
     window.targetModule = {{ target_module | tojson | safe if target_module else 'null' }};
     window.targetRecordId = {{ target_record_id | tojson | safe if target_record_id else 'null' }};

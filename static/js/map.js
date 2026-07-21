@@ -1140,8 +1140,22 @@ window.applyBoundaryStyles = function(hideOverride) {
         labelColor: '#ffffff',
         highlightColor: '#10b981',
         neighborsMode: 'no_all',
-        neighborsRadius: 200
+        neighborsRadius: 200,
+        highlightStrokeWeight: 4,
+        fontFamily: "'Outfit', sans-serif"
     };
+
+    // Determine which franchise IDs should be highlighted
+    const activeHighlightIds = new Set();
+    const hasSpecificSelection = window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all');
+    
+    if (hasSpecificSelection) {
+        window.selectedFranchiseIds.forEach(id => activeHighlightIds.add(String(id)));
+    } else {
+        // "All Franchises" selected: highlight all of the user's permitted franchises!
+        const permitted = window.userFranchiseIds || [];
+        permitted.forEach(id => activeHighlightIds.add(String(id)));
+    }
     
     // 1. Update the Data layer styles
     window.map.data.setStyle(feature => {
@@ -1154,38 +1168,42 @@ window.applyBoundaryStyles = function(hideOverride) {
         let isHighlighted = false;
         let visible = true;
         
-        if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
-            if (window.selectedFranchiseIds.has(franchiseId)) {
-                isHighlighted = true;
-                color = config.highlightColor || '#10b981'; // Highlights selection in custom color
-            } else {
-                // Evaluate neighbor boundary filter modes
-                const mode = config.neighborsMode || 'no_all';
-                if (mode === 'no_all') {
-                    visible = false;
-                } else if (mode === 'yes_all') {
-                    visible = true;
-                } else if (mode === 'same_state') {
-                    visible = false;
-                    const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
-                    if (selectedFranchiseId) {
-                        const selectedState = window.franchiseStateCache[selectedFranchiseId];
-                        const otherState = window.franchiseStateCache[franchiseId];
-                        if (selectedState && otherState && selectedState === otherState) {
+        if (activeHighlightIds.has(String(franchiseId))) {
+            isHighlighted = true;
+            color = config.highlightColor || '#10b981'; // Highlights selection in custom color
+        } else {
+            // Evaluate neighbor boundary filter modes relative to the set of highlighted ones
+            const mode = config.neighborsMode || 'no_all';
+            if (mode === 'no_all') {
+                visible = false;
+            } else if (mode === 'yes_all') {
+                visible = true;
+            } else if (mode === 'same_state') {
+                visible = false;
+                const otherState = window.franchiseStateCache[franchiseId];
+                if (otherState) {
+                    for (const selId of activeHighlightIds) {
+                        const selState = window.franchiseStateCache[selId];
+                        if (selState && selState === otherState) {
                             visible = true;
+                            break;
                         }
                     }
-                } else if (mode === 'close_neighbors') {
-                    visible = false;
-                    const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
-                    if (selectedFranchiseId && window.franchiseBoundaries[selectedFranchiseId] && window.franchiseBoundaries[franchiseId]) {
-                        const selectedCentroid = getPolygonCentroid(window.franchiseBoundaries[selectedFranchiseId].coordinates, window.franchiseBoundaries[selectedFranchiseId].type);
-                        const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
-                        if (selectedCentroid && otherCentroid) {
-                            const dist = getHaversineDistance(selectedCentroid, otherCentroid);
-                            const maxDist = config.neighborsRadius || 200;
-                            if (dist <= maxDist) {
-                                visible = true;
+                }
+            } else if (mode === 'close_neighbors') {
+                visible = false;
+                const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
+                if (otherCentroid) {
+                    for (const selId of activeHighlightIds) {
+                        if (window.franchiseBoundaries[selId]) {
+                            const selCentroid = getPolygonCentroid(window.franchiseBoundaries[selId].coordinates, window.franchiseBoundaries[selId].type);
+                            if (selCentroid) {
+                                const dist = getHaversineDistance(selCentroid, otherCentroid);
+                                const maxDist = config.neighborsRadius || 200;
+                                if (dist <= maxDist) {
+                                    visible = true;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -1196,7 +1214,7 @@ window.applyBoundaryStyles = function(hideOverride) {
         return {
             strokeColor: color,
             strokeOpacity: isHighlighted ? 0.95 : 0.65,
-            strokeWeight: isHighlighted ? Math.max(4, config.strokeWeight + 2) : config.strokeWeight,
+            strokeWeight: isHighlighted ? (config.highlightStrokeWeight || 4) : config.strokeWeight,
             fillColor: color,
             fillOpacity: isHighlighted ? Math.max(0.15, config.fillOpacity + 0.05) : config.fillOpacity,
             visible: visible,
@@ -1219,36 +1237,40 @@ window.applyBoundaryStyles = function(hideOverride) {
                 const franchiseId = lbl.franchiseId;
                 let labelVisible = true;
                 
-                if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
-                    if (window.selectedFranchiseIds.has(franchiseId)) {
+                if (activeHighlightIds.has(String(franchiseId))) {
+                    labelVisible = true;
+                } else {
+                    const mode = config.neighborsMode || 'no_all';
+                    if (mode === 'no_all') {
+                        labelVisible = false;
+                    } else if (mode === 'yes_all') {
                         labelVisible = true;
-                    } else {
-                        const mode = config.neighborsMode || 'no_all';
-                        if (mode === 'no_all') {
-                            labelVisible = false;
-                        } else if (mode === 'yes_all') {
-                            labelVisible = true;
-                        } else if (mode === 'same_state') {
-                            labelVisible = false;
-                            const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
-                            if (selectedFranchiseId) {
-                                const selectedState = window.franchiseStateCache[selectedFranchiseId];
-                                const otherState = window.franchiseStateCache[franchiseId];
-                                if (selectedState && otherState && selectedState === otherState) {
+                    } else if (mode === 'same_state') {
+                        labelVisible = false;
+                        const otherState = window.franchiseStateCache[franchiseId];
+                        if (otherState) {
+                            for (const selId of activeHighlightIds) {
+                                const selState = window.franchiseStateCache[selId];
+                                if (selState && selState === otherState) {
                                     labelVisible = true;
+                                    break;
                                 }
                             }
-                        } else if (mode === 'close_neighbors') {
-                            labelVisible = false;
-                            const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
-                            if (selectedFranchiseId && window.franchiseBoundaries[selectedFranchiseId] && window.franchiseBoundaries[franchiseId]) {
-                                const selectedCentroid = getPolygonCentroid(window.franchiseBoundaries[selectedFranchiseId].coordinates, window.franchiseBoundaries[selectedFranchiseId].type);
-                                const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
-                                if (selectedCentroid && otherCentroid) {
-                                    const dist = getHaversineDistance(selectedCentroid, otherCentroid);
-                                    const maxDist = config.neighborsRadius || 200;
-                                    if (dist <= maxDist) {
-                                        labelVisible = true;
+                        }
+                    } else if (mode === 'close_neighbors') {
+                        labelVisible = false;
+                        const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
+                        if (otherCentroid) {
+                            for (const selId of activeHighlightIds) {
+                                if (window.franchiseBoundaries[selId]) {
+                                    const selCentroid = getPolygonCentroid(window.franchiseBoundaries[selId].coordinates, window.franchiseBoundaries[selId].type);
+                                    if (selCentroid) {
+                                        const dist = getHaversineDistance(selCentroid, otherCentroid);
+                                        const maxDist = config.neighborsRadius || 200;
+                                        if (dist <= maxDist) {
+                                            labelVisible = true;
+                                            break;
+                                        }
                                     }
                                 }
                             }
@@ -1335,7 +1357,8 @@ function renderFranchiseBoundaries() {
                     text: boundary.name,
                     color: config.labelColor || '#ffffff',
                     fontSize: (config.labelSize || 14) + 'px',
-                    fontWeight: 'bold'
+                    fontWeight: 'bold',
+                    fontFamily: config.fontFamily || "'Outfit', sans-serif"
                 }
             });
             lbl.franchiseId = id;

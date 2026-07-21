@@ -443,7 +443,10 @@ def _get_boundary_style_config():
         'boundary_label_color': database.get_global_setting('boundary_label_color', '#ffffff'),
         'boundary_highlight_color': database.get_global_setting('boundary_highlight_color', '#10b981'),
         'boundary_neighbors_mode': database.get_global_setting('boundary_neighbors_mode', 'no_all'),
-        'boundary_neighbors_radius': database.get_global_setting('boundary_neighbors_radius', '200')
+        'boundary_neighbors_radius': database.get_global_setting('boundary_neighbors_radius', '200'),
+        'boundary_label_font': database.get_global_setting('boundary_label_font', "'Outfit', sans-serif"),
+        'boundary_font_url': database.get_global_setting('boundary_font_url', ''),
+        'boundary_highlight_stroke_weight': database.get_global_setting('boundary_highlight_stroke_weight', '4')
     }
 
 
@@ -702,6 +705,9 @@ def settings():
     boundary_highlight_color = database.get_global_setting('boundary_highlight_color', '#10b981')
     boundary_neighbors_mode = database.get_global_setting('boundary_neighbors_mode', 'no_all')
     boundary_neighbors_radius = database.get_global_setting('boundary_neighbors_radius', '200')
+    boundary_label_font = database.get_global_setting('boundary_label_font', "'Outfit', sans-serif")
+    boundary_font_url = database.get_global_setting('boundary_font_url', '')
+    boundary_highlight_stroke_weight = database.get_global_setting('boundary_highlight_stroke_weight', '4')
 
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
@@ -728,6 +734,9 @@ def settings():
                            boundary_highlight_color=boundary_highlight_color,
                            boundary_neighbors_mode=boundary_neighbors_mode,
                            boundary_neighbors_radius=boundary_neighbors_radius,
+                           boundary_label_font=boundary_label_font,
+                           boundary_font_url=boundary_font_url,
+                           boundary_highlight_stroke_weight=boundary_highlight_stroke_weight,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 
