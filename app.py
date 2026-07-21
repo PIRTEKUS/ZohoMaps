@@ -2021,10 +2021,10 @@ def _nightly_sync_module(admin_token, module_name, config):
     return count
 
 
-def do_nightly_sync(is_manual=False):
+def do_nightly_sync(is_manual=False, module_filter=None):
     """Orchestrates the nightly full sync of all shared modules into the global cache.
     Called by the systemd timer (via run_nightly_sync.py) and the admin manual trigger."""
-    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}) ==========")
+    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}, filter={module_filter}) ==========")
     
     # 1. Load configuration settings
     nightly_sync_enabled = database.get_global_setting('nightly_sync_enabled', 'true')
@@ -2091,8 +2091,10 @@ def do_nightly_sync(is_manual=False):
         return {'error': 'No admin token available'}
 
     configs = database.get_shared_configs()
+    if module_filter:
+        configs = [c for c in configs if c['module_name'].lower() == module_filter.lower()]
     if not configs:
-        log_debug("[nightly] No shared module configs found — nothing to sync.")
+        log_debug(f"[nightly] No shared module configs found for filter '{module_filter}' — nothing to sync.")
         return {'error': 'No shared configs'}
 
     results = {}
