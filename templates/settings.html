@@ -999,7 +999,7 @@
                     <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
    <script>
 window.nightlySyncSchedule = {{ nightly_sync_schedule | tojson | safe }};
-window.savedFranchiseBoundaries = {{ franchise_boundaries | safe }};
+window.savedFranchiseBoundaries = JSON.parse({{ franchise_boundaries | tojson | safe }});
 let currentFields = [];
 let previewRecord = null;
 
@@ -2626,8 +2626,9 @@ async function saveKmlBoundaries() {
         btn.textContent = 'Saving...';
         if (statusEl) statusEl.style.display = 'none';
 
+        const saved = (window.savedFranchiseBoundaries && typeof window.savedFranchiseBoundaries === 'object') ? window.savedFranchiseBoundaries : {};
         const mergedBoundaries = {
-            ...window.savedFranchiseBoundaries,
+            ...saved,
             ...window.parsedKmlBoundaries
         };
 
@@ -2648,7 +2649,11 @@ async function saveKmlBoundaries() {
             alert('Franchise territory boundaries saved successfully!');
             window.location.reload();
         } else {
-            throw new Error('Save API returned error status');
+            let errorBody = '';
+            try {
+                errorBody = await res.text();
+            } catch (e) {}
+            throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorBody || 'No response body'}`);
         }
     } catch (err) {
         console.error(err);
