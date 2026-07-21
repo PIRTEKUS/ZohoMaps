@@ -223,6 +223,14 @@ main.container { padding: 0 !important; overflow: hidden; }
             🏛️
         </button>
 
+        {% if franchise_boundaries and franchise_boundaries != '{}' %}
+        <!-- Toggle Franchise Boundaries button -->
+        <button class="ctrl-btn dark" id="boundary-toggle-btn" onclick="toggleFranchiseBoundaries()"
+                title="Hide Franchise Boundaries" style="padding:0.45rem 0.65rem;">
+            🗺️
+        </button>
+        {% endif %}
+
         <!-- Toggle Map/Satellite view -->
         <button class="ctrl-btn dark" id="map-type-btn" onclick="toggleMapType()"
                 title="Switch to Satellite view" style="padding:0.45rem 0.65rem;">
@@ -773,11 +781,30 @@ window.toggleMapType = function() {
         }
     }
 };
+
+let boundariesHidden = false;
+window.toggleFranchiseBoundaries = function() {
+    boundariesHidden = !boundariesHidden;
+    if (typeof window.applyBoundaryStyles === 'function') {
+        window.applyBoundaryStyles(boundariesHidden);
+    }
+    const btn = document.getElementById('boundary-toggle-btn');
+    if (btn) {
+        if (boundariesHidden) {
+            btn.classList.add('active');
+            btn.title = "Show Franchise Boundaries";
+        } else {
+            btn.classList.remove('active');
+            btn.title = "Hide Franchise Boundaries";
+        }
+    }
+};
 </script>
 <script>
     window.configuredModules = {{ configs | tojson | safe }};
     window.clusterConfig = {{ cluster_config | tojson | safe }};
     window.routeMaxStops = {{ route_max_stops | tojson | safe }};
+    window.franchiseBoundaries = {{ franchise_boundaries | safe }};
     window.targetModule = {{ target_module | tojson | safe if target_module else 'null' }};
     window.targetRecordId = {{ target_record_id | tojson | safe if target_record_id else 'null' }};
     window.targetLat = {{ target_lat | tojson | safe if target_lat is not none else 'null' }};

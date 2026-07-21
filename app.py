@@ -471,6 +471,7 @@ def index():
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     cluster_config = _get_cluster_config()
     route_max_stops = database.get_global_setting('route_max_stops', '10')
+    franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -481,7 +482,8 @@ def index():
         target_lng=target_lng,
         user_franchises=user_franchises,
         cluster_config=cluster_config,
-        route_max_stops=route_max_stops
+        route_max_stops=route_max_stops,
+        franchise_boundaries=franchise_boundaries
     )
 
 
@@ -517,6 +519,7 @@ def index_with_record(module_name, record_id):
     user_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin)
     cluster_config = _get_cluster_config()
     route_max_stops = database.get_global_setting('route_max_stops', '10')
+    franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
     return render_template('map.html',
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
@@ -527,7 +530,8 @@ def index_with_record(module_name, record_id):
         target_lng=target_lng,
         user_franchises=user_franchises,
         cluster_config=cluster_config,
-        route_max_stops=route_max_stops
+        route_max_stops=route_max_stops,
+        franchise_boundaries=franchise_boundaries
     )
 
 @app.route('/login')
@@ -662,6 +666,7 @@ def settings():
         nightly_sync_schedule = json.loads(nightly_sync_schedule_str)
     except Exception:
         nightly_sync_schedule = {}
+    franchise_boundaries = database.get_global_setting('franchise_boundaries', '{}')
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
                            configs=configs,
@@ -675,6 +680,7 @@ def settings():
                            nightly_sync_enabled=nightly_sync_enabled,
                            nightly_sync_time=nightly_sync_time,
                            nightly_sync_schedule=nightly_sync_schedule,
+                           franchise_boundaries=franchise_boundaries,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 
@@ -2761,6 +2767,13 @@ def admin_crm_users():
         for u in data.get('users', [])
     ]
     return jsonify({'users': users})
+
+@app.route('/api/admin/franchises')
+def admin_franchises():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+    franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
+    return jsonify({'franchises': franchises})
 
 @app.route('/api/admin/test-franchise-lookup')
 def admin_test_franchise_lookup():

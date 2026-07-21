@@ -744,6 +744,56 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Franchise Boundaries (KML Import) -->
+            <div class="settings-card glass" id="kml-import-card" style="border-color: rgba(99,102,241,0.35);">
+                <h2>Franchise Territory Boundaries <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                    Upload a KML file containing franchise territory shapes. Boundaries will be rendered as outlines on the map to define franchise areas.
+                </p>
+
+                <div id="kml-dropzone" style="background: rgba(0,0,0,0.15); padding: 1.5rem; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.15); text-align: center; margin-bottom: 1.5rem; transition: border-color 0.2s;" ondragover="event.preventDefault(); this.style.borderColor='var(--primary)';" ondragleave="this.style.borderColor='rgba(255,255,255,0.15)';" ondrop="handleKmlDrop(event)">
+                    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🗺️</div>
+                    <label for="kml-file-input" style="color: #60a5fa; cursor: pointer; font-weight: 600; text-decoration: underline;">
+                        Choose KML File
+                    </label>
+                    <span style="color: #94a3b8; margin-left: 0.25rem;">or drag it here</span>
+                    <input type="file" id="kml-file-input" accept=".kml" style="display: none;" onchange="handleKmlSelect(event)">
+                    <div id="kml-file-name" style="margin-top: 0.5rem; font-size: 0.85rem; color: #e2e8f0; font-weight: 500;">No file selected</div>
+                </div>
+
+                <div id="kml-preview-section" style="display: none; margin-bottom: 1.5rem;">
+                    <h3 style="font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.75rem; display: flex; justify-content: space-between;">
+                        <span>Parsed Boundaries Preview</span>
+                        <span id="kml-preview-stats" style="color: #94a3b8; font-size: 0.85rem;"></span>
+                    </h3>
+                    <div style="max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.825rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); position: sticky; top: 0; z-index: 1;">
+                                    <th style="padding: 0.6rem 1rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Placemark Name</th>
+                                    <th style="padding: 0.6rem 1rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Match Status</th>
+                                    <th style="padding: 0.6rem 1rem; color: #94a3b8; font-weight: 600; background: #0f172a;">CRM Franchise ID</th>
+                                </tr>
+                            </thead>
+                            <tbody id="kml-preview-body">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                    <button id="clear-boundaries-btn" class="btn-secondary" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; font-size: 0.875rem; padding: 0.6rem 1.5rem; {% if franchise_boundaries and franchise_boundaries != '{}' %}{% else %}display: none;{% endif %}" onclick="clearSavedBoundaries()">
+                        🗑️ Delete All Boundaries
+                    </button>
+                    <div style="display: flex; gap: 1rem; margin-left: auto; align-items: center;">
+                        <span id="kml-save-status" style="font-size: 0.85rem; color: #10b981; display: none;">✓ Boundaries saved!</span>
+                        <button id="save-kml-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; display: none; background: linear-gradient(135deg,#10b981,#059669); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;" onclick="saveKmlBoundaries()">
+                            Save Boundaries
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     {% endif %}
@@ -2208,6 +2258,267 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+    }
 });
+
+// ── KML Boundaries Import Logic ───────────────────────────────────────────────────
+window.parsedKmlBoundaries = null;
+
+function handleKmlDrop(e) {
+    e.preventDefault();
+    document.getElementById('kml-dropzone').style.borderColor = 'rgba(255,255,255,0.15)';
+    const file = e.dataTransfer.files[0];
+    if (file) processKmlFile(file);
+}
+
+function handleKmlSelect(e) {
+    const file = e.target.files[0];
+    if (file) processKmlFile(file);
+}
+
+function processKmlFile(file) {
+    if (!file.name.toLowerCase().endsWith('.kml')) {
+        alert('Please upload a valid KML file (.kml)');
+        return;
+    }
+    document.getElementById('kml-file-name').textContent = file.name;
+    
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        const text = e.target.result;
+        try {
+            await parseAndMatchKml(text);
+        } catch (err) {
+            console.error(err);
+            alert('Failed to parse KML file: ' + err.message);
+        }
+    };
+    reader.readAsText(file);
+}
+
+async function parseAndMatchKml(kmlText) {
+    // 1. Fetch cached CRM Franchises
+    const res = await fetch('/api/admin/franchises');
+    if (!res.ok) throw new Error('Could not fetch CRM franchises');
+    const data = await res.json();
+    const crmFranchises = data.franchises || [];
+    
+    // Normalize franchise names for matching
+    const normalizeName = (name) => {
+        if (!name) return '';
+        return name.toLowerCase()
+            .replace(/^pirtek\s+/i, '') // Remove 'PIRTEK ' prefix
+            .replace(/\s+/g, ' ')       // Normalize spaces
+            .trim();
+    };
+
+    // Build lookup map: normalized_name -> franchise
+    const franchiseLookup = {};
+    crmFranchises.forEach(f => {
+        const norm = normalizeName(f.name);
+        if (norm) {
+            franchiseLookup[norm] = f;
+        }
+    });
+
+    // 2. Parse KML using DOMParser
+    const parser = new DOMParser();
+    const kmlDoc = parser.parseFromString(kmlText, 'text/xml');
+    
+    // Check for XML parsing error
+    const parseError = kmlDoc.querySelector('parsererror');
+    if (parseError) {
+        throw new Error('Invalid KML markup format');
+    }
+
+    const placemarks = kmlDoc.getElementsByTagName('Placemark');
+    if (placemarks.length === 0) {
+        throw new Error('No Placemark tags found in KML');
+    }
+
+    const matchedBoundaries = {};
+    const previewRowsHtml = [];
+    let matchCount = 0;
+
+    for (let i = 0; i < placemarks.length; i++) {
+        const pm = placemarks[i];
+        
+        // Extract Name
+        const nameNode = pm.getElementsByTagName('name')[0];
+        const rawName = nameNode ? nameNode.textContent.trim() : `Placemark #${i+1}`;
+        
+        // Extract Geometries (Polygon or MultiGeometry)
+        let coordinatesList = [];
+        
+        // Helper to parse a coordinates text block
+        const parseCoordsText = (txt) => {
+            const points = [];
+            const pairs = txt.trim().split(/\s+/);
+            pairs.forEach(p => {
+                const parts = p.split(',');
+                if (parts.length >= 2) {
+                    const lng = parseFloat(parts[0]);
+                    const lat = parseFloat(parts[1]);
+                    if (!isNaN(lng) && !isNaN(lat)) {
+                        points.push([lng, lat]);
+                    }
+                }
+            });
+            return points;
+        };
+
+        const polygonNodes = pm.getElementsByTagName('Polygon');
+        for (let j = 0; j < polygonNodes.length; j++) {
+            const poly = polygonNodes[j];
+            const outerNode = poly.getElementsByTagName('outerBoundaryIs')[0];
+            if (outerNode) {
+                const coordsNode = outerNode.getElementsByTagName('coordinates')[0];
+                if (coordsNode) {
+                    const ring = parseCoordsText(coordsNode.textContent);
+                    if (ring.length > 0) {
+                        // GeoJSON Polygon coordinates structure: [[ring1], [ring2]...]
+                        coordinatesList.push(ring);
+                    }
+                }
+            }
+        }
+
+        if (coordinatesList.length === 0) {
+            continue; // Skip placemarks without valid polygon geometries
+        }
+
+        // Determine if Polygon or MultiPolygon
+        let geometry = null;
+        if (coordinatesList.length === 1) {
+            geometry = {
+                type: 'Polygon',
+                coordinates: coordinatesList
+            };
+        } else {
+            geometry = {
+                type: 'MultiPolygon',
+                coordinates: coordinatesList.map(poly => [poly])
+            };
+        }
+
+        // Try to match the name
+        const normName = normalizeName(rawName);
+        const match = franchiseLookup[normName];
+
+        let statusCell = '';
+        let idCell = '';
+
+        if (match) {
+            matchCount++;
+            statusCell = `<span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500;">✓ Matched</span>`;
+            idCell = `<span style="font-family: monospace; color: #94a3b8;">${match.id}</span>`;
+            
+            // Add to boundaries object
+            matchedBoundaries[match.id] = {
+                name: match.name,
+                type: geometry.type,
+                coordinates: geometry.coordinates
+            };
+        } else {
+            statusCell = `<span style="background: rgba(245,158,11,0.15); color: #fcd34d; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500;">⚠ Unmatched</span>`;
+            idCell = `<span style="color: #64748b; font-style: italic;">No CRM match for "${rawName}"</span>`;
+        }
+
+        previewRowsHtml.push(`
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                <td style="padding: 0.6rem 1rem; color: #f1f5f9; font-weight: 500;">${rawName}</td>
+                <td style="padding: 0.6rem 1rem;">${statusCell}</td>
+                <td style="padding: 0.6rem 1rem;">${idCell}</td>
+            </tr>
+        `);
+    }
+
+    // Update preview container
+    document.getElementById('kml-preview-body').innerHTML = previewRowsHtml.join('');
+    document.getElementById('kml-preview-stats').textContent = `Matched ${matchCount} of ${previewRowsHtml.length} shapes`;
+    document.getElementById('kml-preview-section').style.display = 'block';
+
+    // Store globally to save on click
+    window.parsedKmlBoundaries = matchedBoundaries;
+    
+    // Toggle save button
+    document.getElementById('save-kml-btn').style.display = 'inline-flex';
+}
+
+async function saveKmlBoundaries() {
+    if (!window.parsedKmlBoundaries || Object.keys(window.parsedKmlBoundaries).length === 0) {
+        alert('No matched franchise boundaries to save.');
+        return;
+    }
+
+    const btn = document.getElementById('save-kml-btn');
+    const statusEl = document.getElementById('kml-save-status');
+
+    try {
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        if (statusEl) statusEl.style.display = 'none';
+
+        const res = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                key: 'franchise_boundaries',
+                value: JSON.stringify(window.parsedKmlBoundaries)
+            })
+        });
+
+        if (res.ok) {
+            if (statusEl) {
+                statusEl.style.display = 'inline';
+                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+            }
+            alert('Franchise territory boundaries saved successfully!');
+            window.location.reload();
+        } else {
+            throw new Error('Save API returned error status');
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Error saving franchise boundaries: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save Boundaries';
+    }
+}
+
+async function clearSavedBoundaries() {
+    if (!confirm('Are you sure you want to delete all saved franchise boundaries? This will remove all territory outlines from the map.')) {
+        return;
+    }
+
+    const btn = document.getElementById('clear-boundaries-btn');
+    try {
+        btn.disabled = true;
+        btn.textContent = 'Deleting...';
+
+        const res = await fetch('/api/settings/global', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                key: 'franchise_boundaries',
+                value: '{}'
+            })
+        });
+
+        if (res.ok) {
+            alert('All franchise territory boundaries cleared successfully!');
+            window.location.reload();
+        } else {
+            throw new Error('Delete API returned error status');
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Error clearing franchise boundaries: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🗑️ Delete All Boundaries';
+    }
+}
 </script>
 {% endblock %}

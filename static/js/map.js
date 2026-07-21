@@ -131,6 +131,17 @@ window.updateFranchiseFilterUI = function() {
     if (label) label.textContent = labelText;
     if (mLabelCount) mLabelCount.textContent = mobileText;
 
+    if (typeof window.applyBoundaryStyles === 'function') {
+        window.applyBoundaryStyles();
+        
+        if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all') && window.selectedFranchiseIds.size === 1) {
+            const selectedId = Array.from(window.selectedFranchiseIds)[0];
+            if (window.franchiseBoundaries && window.franchiseBoundaries[selectedId]) {
+                fitMapToBoundary(window.franchiseBoundaries[selectedId]);
+            }
+        }
+    }
+
     if (window.lastMapData) {
         plotData(window.lastMapData);
         updateLegend(window.lastMapData);
@@ -255,6 +266,7 @@ async function initMap() {
         } else {
             tryIPFallback();
         }
+        renderFranchiseBoundaries();
     }
 }
 
@@ -1039,3 +1051,101 @@ window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
         setTimeout(() => { btnElement.disabled = false; btnElement.innerHTML = originalText; btnElement.style.color = ''; }, 2500);
     }
 };
+
+// ── Franchise Territory Boundaries rendering & controls ───────────────────────────
+window.applyBoundaryStyles = function(hideOverride) {
+    if (!window.map || !window.map.data) return;
+    const hide = (typeof hideOverride === 'boolean') ? hideOverride : (window.boundariesHidden || false);
+    
+    window.map.data.setStyle(feature => {
+        if (hide) {
+            return { visible: false };
+        }
+        
+        const franchiseId = feature.getId();
+        let color = '#6366f1'; // Default Indigo
+        let isHighlighted = false;
+        let visible = true;
+        
+        if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
+            if (window.selectedFranchiseIds.has(franchiseId)) {
+                isHighlighted = true;
+                color = '#10b981'; // Vibrant green highlight for active selection
+            } else {
+                visible = false; // Hide non-selected franchise boundaries
+            }
+        }
+        
+        return {
+            strokeColor: color,
+            strokeOpacity: isHighlighted ? 0.9 : 0.4,
+            strokeWeight: isHighlighted ? 4 : 2,
+            fillColor: color,
+            fillOpacity: isHighlighted ? 0.12 : 0.03,
+            visible: visible,
+            clickable: true
+        };
+    });
+};
+
+function renderFranchiseBoundaries() {
+    if (!window.franchiseBoundaries || Object.keys(window.franchiseBoundaries).length === 0) return;
+    
+    const features = Object.entries(window.franchiseBoundaries).map(([id, boundary]) => ({
+        type: 'Feature',
+        id: id,
+        geometry: {
+            type: boundary.type,
+            coordinates: boundary.coordinates
+        },
+        properties: {
+            name: boundary.name,
+            franchiseId: id
+        }
+    }));
+    
+    const featureCollection = {
+        type: 'FeatureCollection',
+        features: features
+    };
+    
+    window.map.data.addGeoJson(featureCollection);
+    window.applyBoundaryStyles();
+    
+    // Info Window tooltip on territory click
+    const boundaryInfoWindow = new google.maps.InfoWindow();
+    window.map.data.addListener('click', event => {
+        const name = event.feature.getProperty('name');
+        boundaryInfoWindow.setContent(`
+            <div style="padding: 0.5rem; color: #1e293b; font-family: inherit; font-size: 0.85rem; font-weight: 500;">
+                🗺️ Territory: <strong style="color: var(--primary);">${name}</strong>
+            </div>
+        `);
+        boundaryInfoWindow.setPosition(event.latLng);
+        boundaryInfoWindow.open(window.map);
+    });
+}
+
+function fitMapToBoundary(boundary) {
+    if (!boundary || !boundary.coordinates) return;
+    const bounds = new google.maps.LatLngBounds();
+    
+    const processRing = (ring) => {
+        ring.forEach(pt => {
+            bounds.extend(new google.maps.LatLng(pt[1], pt[0]));
+        });
+    };
+    
+    if (boundary.type === 'Polygon') {
+        boundary.coordinates.forEach(processRing);
+    } else if (boundary.type === 'MultiPolygon') {
+        boundary.coordinates.forEach(poly => {
+            poly.forEach(processRing);
+        });
+    }
+    
+    if (!bounds.isEmpty()) {
+        window.isProgrammaticMove = true; // Prevents auto-search trigger
+        window.map.fitBounds(bounds);
+    }
+}
