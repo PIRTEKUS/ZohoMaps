@@ -441,6 +441,9 @@ def _get_boundary_style_config():
         'boundary_show_labels': database.get_global_setting('boundary_show_labels', 'true'),
         'boundary_label_size': database.get_global_setting('boundary_label_size', '14'),
         'boundary_label_color': database.get_global_setting('boundary_label_color', '#ffffff'),
+        'boundary_highlight_color': database.get_global_setting('boundary_highlight_color', '#10b981'),
+        'boundary_neighbors_mode': database.get_global_setting('boundary_neighbors_mode', 'no_all'),
+        'boundary_neighbors_radius': database.get_global_setting('boundary_neighbors_radius', '200')
     }
 
 
@@ -696,6 +699,9 @@ def settings():
     boundary_show_labels = database.get_global_setting('boundary_show_labels', 'true')
     boundary_label_size = database.get_global_setting('boundary_label_size', '14')
     boundary_label_color = database.get_global_setting('boundary_label_color', '#ffffff')
+    boundary_highlight_color = database.get_global_setting('boundary_highlight_color', '#10b981')
+    boundary_neighbors_mode = database.get_global_setting('boundary_neighbors_mode', 'no_all')
+    boundary_neighbors_radius = database.get_global_setting('boundary_neighbors_radius', '200')
 
     is_admin = session.get('is_admin', False)
     return render_template('settings.html',
@@ -719,6 +725,9 @@ def settings():
                            boundary_show_labels=boundary_show_labels,
                            boundary_label_size=boundary_label_size,
                            boundary_label_color=boundary_label_color,
+                           boundary_highlight_color=boundary_highlight_color,
+                           boundary_neighbors_mode=boundary_neighbors_mode,
+                           boundary_neighbors_radius=boundary_neighbors_radius,
                            is_admin=is_admin,
                            app_version=APP_VERSION)
 

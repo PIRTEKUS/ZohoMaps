@@ -811,7 +811,10 @@ window.toggleFranchiseBoundaries = function() {
         strokeWeight: parseInt({{ boundary_stroke_weight | tojson | safe }}),
         showLabels: {{ boundary_show_labels | tojson | safe }} === true || {{ boundary_show_labels | tojson | safe }} === 'true',
         labelSize: parseInt({{ boundary_label_size | tojson | safe }}),
-        labelColor: {{ boundary_label_color | tojson | safe }}
+        labelColor: {{ boundary_label_color | tojson | safe }},
+        highlightColor: {{ boundary_highlight_color | tojson | safe }},
+        neighborsMode: {{ boundary_neighbors_mode | tojson | safe }},
+        neighborsRadius: parseInt({{ boundary_neighbors_radius | tojson | safe }})
     };
     window.targetModule = {{ target_module | tojson | safe if target_module else 'null' }};
     window.targetRecordId = {{ target_record_id | tojson | safe if target_record_id else 'null' }};

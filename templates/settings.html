@@ -848,6 +848,32 @@
                             </div>
                         </div>
 
+                        <div class="form-group" style="margin: 0;">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Selected Highlight Color</label>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                                <input type="color" id="boundary-highlight-color-picker" value="{{ boundary_highlight_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-highlight-color-text').value = this.value">
+                                <input type="text" id="boundary-highlight-color-text" value="{{ boundary_highlight_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#10B981" oninput="document.getElementById('boundary-highlight-color-picker').value = this.value">
+                            </div>
+                        </div>
+
+                        <div class="form-group" style="margin: 0;">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Neighbor Boundaries Visibility</label>
+                            <select id="boundary-neighbors-mode" style="width: 100%; margin-top: 5px; padding: 0.55rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" onchange="toggleNeighborsRadiusInput(this.value)">
+                                <option value="no_all" {% if boundary_neighbors_mode == 'no_all' %}selected{% endif %}>No to all (Hide all others)</option>
+                                <option value="yes_all" {% if boundary_neighbors_mode == 'yes_all' %}selected{% endif %}>Yes to all (Show all others)</option>
+                                <option value="same_state" {% if boundary_neighbors_mode == 'same_state' %}selected{% endif %}>Only show same State</option>
+                                <option value="close_neighbors" {% if boundary_neighbors_mode == 'close_neighbors' %}selected{% endif %}>Only show close neighbors</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="boundary-neighbors-radius-group" style="margin: 0; {% if boundary_neighbors_mode != 'close_neighbors' %}display: none;{% endif %}">
+                            <label style="color: #94a3b8; font-size: 0.85rem;">Neighbors Radius (Miles)</label>
+                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                                <input type="range" id="boundary-neighbors-radius" min="10" max="1000" step="10" value="{{ boundary_neighbors_radius }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-neighbors-radius-val').textContent = this.value + ' mi'">
+                                <span id="boundary-neighbors-radius-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 60px; text-align: right;">{{ boundary_neighbors_radius }} mi</span>
+                            </div>
+                        </div>
+
                     </div>
                     <div style="display: flex; justify-content: flex-end; align-items: center;">
                         <span id="boundary-styles-status" style="font-size: 0.85rem; color: #10b981; margin-right: 1rem; display: none;">✓ Styles saved!</span>
@@ -2671,11 +2697,17 @@ async function clearSavedBoundaries() {
     }
 }
 
-// ── KML Boundaries Style Config Handlers ──────────────────────────────────────────
 function toggleLabelSettings(checked) {
     document.querySelectorAll('.label-settings-group').forEach(el => {
         el.style.display = checked ? 'block' : 'none';
     });
+}
+
+function toggleNeighborsRadiusInput(mode) {
+    const el = document.getElementById('boundary-neighbors-radius-group');
+    if (el) {
+        el.style.display = (mode === 'close_neighbors') ? 'block' : 'none';
+    }
 }
 
 async function saveBoundaryStyles() {
@@ -2693,6 +2725,9 @@ async function saveBoundaryStyles() {
     const showLabels = document.getElementById('boundary-show-labels').checked ? 'true' : 'false';
     const labelSize = document.getElementById('boundary-label-size').value || '14';
     const labelColor = document.getElementById('boundary-label-color-text').value || '#ffffff';
+    const highlightColor = document.getElementById('boundary-highlight-color-text').value || '#10b981';
+    const neighborsMode = document.getElementById('boundary-neighbors-mode').value || 'no_all';
+    const neighborsRadius = document.getElementById('boundary-neighbors-radius').value || '200';
 
     try {
         const postData = async (key, val) => {
@@ -2710,6 +2745,9 @@ async function saveBoundaryStyles() {
         await postData('boundary_show_labels', showLabels);
         await postData('boundary_label_size', labelSize);
         await postData('boundary_label_color', labelColor);
+        await postData('boundary_highlight_color', highlightColor);
+        await postData('boundary_neighbors_mode', neighborsMode);
+        await postData('boundary_neighbors_radius', neighborsRadius);
 
         if (statusEl) {
             statusEl.style.display = 'inline';

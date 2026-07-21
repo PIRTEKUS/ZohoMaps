@@ -1054,6 +1054,79 @@ window.syncSingleRecord = async function(moduleName, recordId, btnElement) {
 
 // ── Franchise Territory Boundaries rendering & controls ───────────────────────────
 window.boundaryLabels = [];
+window.franchiseStateCache = JSON.parse(localStorage.getItem('franchise_state_cache') || '{}');
+
+function getHaversineDistance(coords1, coords2) {
+    const R = 3958.8; // Earth radius in miles
+    const dLat = (coords2.lat - coords1.lat) * Math.PI / 180;
+    const dLng = (coords2.lng - coords1.lng) * Math.PI / 180;
+    const a = 
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(coords1.lat * Math.PI / 180) * Math.cos(coords2.lat * Math.PI / 180) * 
+        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+function getFranchiseState(franchiseId) {
+    if (!window.lastMapData) return null;
+    const franchiseRecords = window.lastMapData.filter(r => r.franchise_id === franchiseId);
+    if (franchiseRecords.length === 0) return null;
+    
+    for (const r of franchiseRecords) {
+        if (r.record_data) {
+            try {
+                const data = typeof r.record_data === 'string' ? JSON.parse(r.record_data) : r.record_data;
+                const state = data.State || data.Billing_State || data.Shipping_State || data.State_Province;
+                if (state) return state.trim().toUpperCase();
+            } catch(e) {}
+        }
+    }
+    return null;
+}
+
+function resolveFranchiseState(id, centroid, callback) {
+    if (window.franchiseStateCache[id]) {
+        if (callback) callback(window.franchiseStateCache[id]);
+        return;
+    }
+    
+    const stateFromRecords = getFranchiseState(id);
+    if (stateFromRecords) {
+        window.franchiseStateCache[id] = stateFromRecords;
+        localStorage.setItem('franchise_state_cache', JSON.stringify(window.franchiseStateCache));
+        if (callback) callback(stateFromRecords);
+        return;
+    }
+    
+    if (!centroid || !window.google || !window.google.maps) {
+        if (callback) callback(null);
+        return;
+    }
+    
+    // Add small random delay to throttle geocoder requests and avoid OVER_QUERY_LIMIT
+    setTimeout(() => {
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: centroid }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+                const stateComp = results[0].address_components.find(c => c.types.includes('administrative_area_level_1'));
+                if (stateComp) {
+                    const state = stateComp.short_name; // e.g. 'MI'
+                    window.franchiseStateCache[id] = state;
+                    localStorage.setItem('franchise_state_cache', JSON.stringify(window.franchiseStateCache));
+                    if (callback) callback(state);
+                    
+                    // Re-apply boundary styling once resolved asynchronously
+                    if (window.applyBoundaryStyles) {
+                        window.applyBoundaryStyles();
+                    }
+                    return;
+                }
+            }
+            if (callback) callback(null);
+        });
+    }, Math.random() * 2000);
+}
 
 window.applyBoundaryStyles = function(hideOverride) {
     if (!window.map || !window.map.data) return;
@@ -1064,7 +1137,10 @@ window.applyBoundaryStyles = function(hideOverride) {
         strokeWeight: 2,
         showLabels: true,
         labelSize: 14,
-        labelColor: '#ffffff'
+        labelColor: '#ffffff',
+        highlightColor: '#10b981',
+        neighborsMode: 'no_all',
+        neighborsRadius: 200
     };
     
     // 1. Update the Data layer styles
@@ -1081,9 +1157,39 @@ window.applyBoundaryStyles = function(hideOverride) {
         if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
             if (window.selectedFranchiseIds.has(franchiseId)) {
                 isHighlighted = true;
-                color = '#10b981'; // Always highlight selection in vibrant green
+                color = config.highlightColor || '#10b981'; // Highlights selection in custom color
             } else {
-                visible = false; // Hide non-selected franchise boundaries
+                // Evaluate neighbor boundary filter modes
+                const mode = config.neighborsMode || 'no_all';
+                if (mode === 'no_all') {
+                    visible = false;
+                } else if (mode === 'yes_all') {
+                    visible = true;
+                } else if (mode === 'same_state') {
+                    visible = false;
+                    const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
+                    if (selectedFranchiseId) {
+                        const selectedState = window.franchiseStateCache[selectedFranchiseId];
+                        const otherState = window.franchiseStateCache[franchiseId];
+                        if (selectedState && otherState && selectedState === otherState) {
+                            visible = true;
+                        }
+                    }
+                } else if (mode === 'close_neighbors') {
+                    visible = false;
+                    const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
+                    if (selectedFranchiseId && window.franchiseBoundaries[selectedFranchiseId] && window.franchiseBoundaries[franchiseId]) {
+                        const selectedCentroid = getPolygonCentroid(window.franchiseBoundaries[selectedFranchiseId].coordinates, window.franchiseBoundaries[selectedFranchiseId].type);
+                        const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
+                        if (selectedCentroid && otherCentroid) {
+                            const dist = getHaversineDistance(selectedCentroid, otherCentroid);
+                            const maxDist = config.neighborsRadius || 200;
+                            if (dist <= maxDist) {
+                                visible = true;
+                            }
+                        }
+                    }
+                }
             }
         }
         
@@ -1098,7 +1204,7 @@ window.applyBoundaryStyles = function(hideOverride) {
         };
     });
 
-    // 2. Update centered text label visibility & style dynamically
+    // 2. Update centered text label visibility dynamically
     if (window.boundaryLabels) {
         window.boundaryLabels.forEach(lbl => {
             if (hide) {
@@ -1112,9 +1218,41 @@ window.applyBoundaryStyles = function(hideOverride) {
                 
                 const franchiseId = lbl.franchiseId;
                 let labelVisible = true;
+                
                 if (window.selectedFranchiseIds && !window.selectedFranchiseIds.has('all')) {
-                    if (!window.selectedFranchiseIds.has(franchiseId)) {
-                        labelVisible = false;
+                    if (window.selectedFranchiseIds.has(franchiseId)) {
+                        labelVisible = true;
+                    } else {
+                        const mode = config.neighborsMode || 'no_all';
+                        if (mode === 'no_all') {
+                            labelVisible = false;
+                        } else if (mode === 'yes_all') {
+                            labelVisible = true;
+                        } else if (mode === 'same_state') {
+                            labelVisible = false;
+                            const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
+                            if (selectedFranchiseId) {
+                                const selectedState = window.franchiseStateCache[selectedFranchiseId];
+                                const otherState = window.franchiseStateCache[franchiseId];
+                                if (selectedState && otherState && selectedState === otherState) {
+                                    labelVisible = true;
+                                }
+                            }
+                        } else if (mode === 'close_neighbors') {
+                            labelVisible = false;
+                            const selectedFranchiseId = Array.from(window.selectedFranchiseIds)[0];
+                            if (selectedFranchiseId && window.franchiseBoundaries[selectedFranchiseId] && window.franchiseBoundaries[franchiseId]) {
+                                const selectedCentroid = getPolygonCentroid(window.franchiseBoundaries[selectedFranchiseId].coordinates, window.franchiseBoundaries[selectedFranchiseId].type);
+                                const otherCentroid = getPolygonCentroid(window.franchiseBoundaries[franchiseId].coordinates, window.franchiseBoundaries[franchiseId].type);
+                                if (selectedCentroid && otherCentroid) {
+                                    const dist = getHaversineDistance(selectedCentroid, otherCentroid);
+                                    const maxDist = config.neighborsRadius || 200;
+                                    if (dist <= maxDist) {
+                                        labelVisible = true;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 lbl.setMap(labelVisible ? window.map : null);
@@ -1183,6 +1321,9 @@ function renderFranchiseBoundaries() {
         // Add centered name label marker overlay
         const centroid = getPolygonCentroid(boundary.coordinates, boundary.type);
         if (centroid) {
+            // Kickstart asynchronous state geocoding resolution
+            resolveFranchiseState(id, centroid);
+
             const lbl = new google.maps.Marker({
                 position: centroid,
                 map: window.map,
