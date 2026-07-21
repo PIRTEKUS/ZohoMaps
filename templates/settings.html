@@ -2524,7 +2524,10 @@ async function parseAndMatchKml(kmlText) {
                     const lng = parseFloat(parts[0]);
                     const lat = parseFloat(parts[1]);
                     if (!isNaN(lng) && !isNaN(lat)) {
-                        points.push([lng, lat]);
+                        // Round to 5 decimal places (approx. 1 meter precision) for payload optimization
+                        const roundedLng = Math.round(lng * 100000) / 100000;
+                        const roundedLat = Math.round(lat * 100000) / 100000;
+                        points.push([roundedLng, roundedLat]);
                     }
                 }
             });
@@ -2623,12 +2626,17 @@ async function saveKmlBoundaries() {
         btn.textContent = 'Saving...';
         if (statusEl) statusEl.style.display = 'none';
 
+        const mergedBoundaries = {
+            ...window.savedFranchiseBoundaries,
+            ...window.parsedKmlBoundaries
+        };
+
         const res = await fetch('/api/settings/global', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 key: 'franchise_boundaries',
-                value: JSON.stringify(window.parsedKmlBoundaries)
+                value: JSON.stringify(mergedBoundaries)
             })
         });
 
