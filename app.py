@@ -1170,34 +1170,52 @@ def _refresh_user_mappings(admin_token):
             log_debug(f"[user_mappings] Failed to fetch territories: {r.status_code} - {r.text}")
             return None
         
-        territories = r.json().get('territories', [])
+        if r.status_code == 204 or not r.text.strip():
+            log_debug("[user_mappings] No territories found (204 or empty response)")
+            return {}
+
+        try:
+            territories = r.json().get('territories', [])
+        except Exception as je:
+            log_debug(f"[user_mappings] Error parsing territories JSON: {je}")
+            return None
+
         email_lookup = {}
         for t in territories:
             t_name = t.get('name')
             t_id = t.get('id')
+            if not t_name or not t_id:
+                continue
+                
             u_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users"
             u_resp = requests.get(u_url, headers=headers, timeout=10)
             if u_resp.ok:
-                t_users = u_resp.json().get('users', [])
-                for u in t_users:
-                    email = (u.get('email') or '').strip().lower()
-                    if email:
-                        if email not in email_lookup:
-                            email_lookup[email] = {
-                                'id': str(u.get('id')),
-                                'name': u.get('full_name', ''),
-                                'franchise': u.get('Franchise', ''),
-                                'territories': []
-                            }
-                        if t_name not in email_lookup[email]['territories']:
-                            email_lookup[email]['territories'].append(t_name)
+                if u_resp.status_code == 204 or not u_resp.text.strip():
+                    continue
+                try:
+                    t_users = u_resp.json().get('users', [])
+                    for u in t_users:
+                        email = (u.get('email') or '').strip().lower()
+                        if email:
+                            if email not in email_lookup:
+                                email_lookup[email] = {
+                                    'id': str(u.get('id')),
+                                    'name': u.get('full_name', ''),
+                                    'franchise': u.get('Franchise', ''),
+                                    'territories': []
+                                }
+                            if t_name not in email_lookup[email]['territories']:
+                                email_lookup[email]['territories'].append(t_name)
+                except Exception as parse_err:
+                    log_debug(f"[user_mappings] Error parsing users JSON for territory '{t_name}' ({t_id}): {parse_err}")
         
         # Save to database
         database.set_global_setting('user_territory_mappings', json.dumps(email_lookup))
         log_debug(f"[user_mappings] Rebuilt user mapping cache. Found {len(email_lookup)} users in territories.")
         return email_lookup
     except Exception as e:
-        log_debug(f"[user_mappings] Error building cache: {e}")
+        import traceback
+        log_debug(f"[user_mappings] Error building cache: {e}\n{traceback.format_exc()}")
         return None
 
 
