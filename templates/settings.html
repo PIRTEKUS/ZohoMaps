@@ -26,6 +26,10 @@
             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             System & Sync
         </button>
+        <button class="settings-tab-btn" onclick="switchTab('perf-tab')">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+            Performance Monitoring
+        </button>
         {% endif %}
         <button class="settings-tab-btn" onclick="switchTab('diagnostics-tab')">
             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
@@ -281,6 +285,77 @@
                             </div>
                         </div>
                         <!-- ===== END DUPLICATE FILTER ===== -->
+
+                        <!-- ===== SECOND LEVEL VISIBILITY FILTER SECTION ===== -->
+                        <div id="sec-filter-section" style="margin-top:1rem; border-top:1px solid var(--glass-border); padding-top:1rem;">
+                            <div style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; user-select:none;" onclick="toggleSecFilterSection()">
+                                <h3 style="margin:0; display:flex; align-items:center; gap:8px; font-size:0.95rem;">
+                                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    Second Level Visibility Filter
+                                    <small style="font-weight:400; font-size:0.72rem; color:#94a3b8;">sub-filter markers by field values (e.g. Priority)</small>
+                                </h3>
+                                <span id="sec-filter-toggle-icon" style="color:var(--primary); font-size:0.8rem; font-weight:600;">&#9658; Configure</span>
+                            </div>
+                            <div id="sec-filter-body" style="display:none; margin-top:1rem;">
+                                <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.25); border-radius:8px; padding:0.75rem 1rem; margin-bottom:1rem; font-size:0.8rem; color:#94a3b8; line-height:1.5;">
+                                    Configure a secondary filter field (e.g., Priority, Stage, Type). Choose default visibility for each option (e.g., hide "Low" priority by default to eliminate initial map lag).
+                                </div>
+                                <div class="form-group" style="display:flex; align-items:center; gap:0.75rem; background:rgba(99,102,241,0.1); padding:0.75rem; border-radius:8px; border:1px solid rgba(99,102,241,0.2);">
+                                    <label style="margin:0; font-weight:500; flex:1;">Enable Second Level Visibility Filter</label>
+                                    <label class="switch" style="flex-shrink:0;">
+                                        <input type="checkbox" id="sec-filter-enabled" onchange="toggleSecFilterFields(this.checked)">
+                                        <span class="slider round"></span>
+                                    </label>
+                                </div>
+                                <div id="sec-filter-fields" style="display:none; margin-top:1rem;">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Filter Field <small style="color:#94a3b8;">— field to filter by (e.g. Priority)</small></label>
+                                            <select id="sec-filter-field" onchange="onSecFilterFieldChange()"><option value="">-- Select field --</option></select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Field Type</label>
+                                            <select id="sec-filter-type" onchange="onSecFilterTypeChange()">
+                                                <option value="options">Options / Picklist</option>
+                                                <option value="text">Free Text</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <!-- Options / Picklist Config -->
+                                    <div id="sec-filter-options-box" style="margin-top:0.75rem;">
+                                        <label style="font-weight:500; font-size:0.85rem; margin-bottom:0.5rem; display:block;">Field Options &amp; Default Map Visibility:</label>
+                                        <div id="sec-filter-options-list" style="display:flex; flex-direction:column; gap:0.5rem; max-height:220px; overflow-y:auto; background:rgba(0,0,0,0.2); padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
+                                            <small style="color:#94a3b8;">Select a module and field above, or add custom option values below.</small>
+                                        </div>
+                                        <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                                            <input type="text" id="new-sec-option-input" placeholder="Add option (e.g. Low, Medium, High)" style="font-size:0.8rem; flex:1;">
+                                            <button type="button" class="btn-primary" onclick="addCustomSecOption()" style="padding:0.4rem 0.75rem; font-size:0.8rem;">+ Add Option</button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Free Text Config -->
+                                    <div id="sec-filter-text-box" style="display:none; margin-top:0.75rem;">
+                                        <label style="font-weight:500; font-size:0.85rem; margin-bottom:0.5rem; display:block;">Text Matching Rules &amp; Default Visibility:</label>
+                                        <div id="sec-filter-text-list" style="display:flex; flex-direction:column; gap:0.5rem; max-height:200px; overflow-y:auto; background:rgba(0,0,0,0.2); padding:0.75rem; border-radius:8px; border:1px solid rgba(255,255,255,0.08);">
+                                        </div>
+                                        <div style="display:flex; gap:0.5rem; margin-top:0.5rem; align-items:center; flex-wrap:wrap;">
+                                            <select id="new-sec-text-op" style="width:130px; font-size:0.8rem;">
+                                                <option value="contains">Contains</option>
+                                                <option value="not_contains">Does Not Contain</option>
+                                            </select>
+                                            <input type="text" id="new-sec-text-val" placeholder="Text to match (e.g. Low)" style="font-size:0.8rem; flex:1; min-width:120px;">
+                                            <select id="new-sec-text-vis" style="width:120px; font-size:0.8rem;">
+                                                <option value="false">Hidden (Off)</option>
+                                                <option value="true">Visible (On)</option>
+                                            </select>
+                                            <button type="button" class="btn-primary" onclick="addCustomSecTextRule()" style="padding:0.4rem 0.75rem; font-size:0.8rem;">+ Add Rule</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- ===== END SECOND LEVEL VISIBILITY FILTER ===== -->
 
                         <button type="submit" class="btn-primary w-full mt-4">Save Mapping</button>
                     </div>
@@ -960,6 +1035,83 @@
             </div>
         </div>
     </div>
+    <!-- ── PERFORMANCE MONITORING TAB ── -->
+    {% if is_admin %}
+    <div id="perf-tab" class="settings-tab-content">
+        <div class="settings-card glass" style="margin-bottom:1.5rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem; margin-bottom:1rem;">
+                <h2 style="margin:0; display:flex; align-items:center; gap:0.75rem;">
+                    <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                    Performance Monitoring Dashboard
+                </h2>
+                <div style="display:flex; align-items:center; gap:0.5rem;">
+                    <button class="btn-primary perf-range-btn active" id="perf-btn-24h" onclick="loadPerformanceStats(24)" style="padding:0.4rem 0.8rem; font-size:0.8rem;">Last 24 Hours</button>
+                    <button class="btn-primary perf-range-btn" id="perf-btn-7d" onclick="loadPerformanceStats(168)" style="padding:0.4rem 0.8rem; font-size:0.8rem; background:var(--secondary);">Last 7 Days</button>
+                    <button class="btn-icon" onclick="loadPerformanceStats(window.currentPerfRangeHours || 24)" title="Refresh Metrics" style="padding:0.4rem;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Overview Metrics Grid -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem;">
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem; text-align:center;">
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Avg Response Time</div>
+                    <div id="perf-avg-latency" style="font-size:1.6rem; font-weight:700; color:#38bdf8;">-- ms</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem; text-align:center;">
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Max Response Latency</div>
+                    <div id="perf-max-latency" style="font-size:1.6rem; font-weight:700; color:#f43f5e;">-- ms</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem; text-align:center;">
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Total API Requests</div>
+                    <div id="perf-total-requests" style="font-size:1.6rem; font-weight:700; color:#34d399;">--</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem; text-align:center;">
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-bottom:4px;">Total Markers Served</div>
+                    <div id="perf-total-records" style="font-size:1.6rem; font-weight:700; color:#a78bfa;">--</div>
+                </div>
+            </div>
+
+            <!-- Performance Trend Chart -->
+            <div style="background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1.25rem; margin-bottom:1.5rem;">
+                <h3 style="margin:0 0 1rem 0; font-size:0.9rem; color:#cbd5e1; display:flex; align-items:center; gap:8px;">
+                    <svg viewBox="0 0 24 24" width="16" height="16" stroke="var(--primary)" stroke-width="2" fill="none"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+                    Average Response Latency Trend (ms)
+                </h3>
+                <div id="perf-chart-container" style="width:100%; height:180px; position:relative;">
+                    <svg id="perf-svg-chart" style="width:100%; height:100%; overflow:visible;"></svg>
+                </div>
+            </div>
+
+            <!-- Endpoint Breakdown & Cached Module Summary -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:1rem;">
+                <div style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem;">
+                    <h3 style="margin:0 0 0.75rem 0; font-size:0.85rem; color:#cbd5e1;">Top API Endpoints Latency</h3>
+                    <table style="width:100%; border-collapse:collapse; font-size:0.8rem; text-align:left;">
+                        <thead>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); color:#94a3b8;">
+                                <th style="padding:6px;">Endpoint</th>
+                                <th style="padding:6px; text-align:right;">Calls</th>
+                                <th style="padding:6px; text-align:right;">Avg Latency</th>
+                                <th style="padding:6px; text-align:right;">Max</th>
+                            </tr>
+                        </thead>
+                        <tbody id="perf-endpoint-rows">
+                            <tr><td colspan="4" style="padding:10px; color:#94a3b8; text-align:center;">Loading stats...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div style="background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:1rem;">
+                    <h3 style="margin:0 0 0.75rem 0; font-size:0.85rem; color:#cbd5e1;">Cached Record Counts by Module</h3>
+                    <div id="perf-cached-modules-grid" style="display:flex; flex-wrap:wrap; gap:0.5rem; max-height:200px; overflow-y:auto;">
+                        <small style="color:#94a3b8;">Loading cache stats...</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
     {% endif %}
 
     <!-- ── DIAGNOSTICS TAB ── -->
@@ -1016,6 +1168,10 @@ function switchTab(tabId) {
             btn.classList.add('active');
         }
     });
+
+    if (tabId === 'perf-tab') {
+        loadPerformanceStats(window.currentPerfRangeHours || 24);
+    }
 }
 
 function updateBracketBounds() {
@@ -1377,6 +1533,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 override_checkbox_field_label: overrideSel.value ? (overrideSel.options[overrideSel.selectedIndex]?.text || '') : ''
             };
 
+            // Collect second level visibility filter settings
+            const secEnabled = document.getElementById('sec-filter-enabled').checked;
+            const secFieldSel = document.getElementById('sec-filter-field');
+            const secTypeSel = document.getElementById('sec-filter-type');
+
+            const secOptions = [];
+            document.querySelectorAll('.sec-option-row').forEach(row => {
+                const val = row.dataset.value;
+                const cb = row.querySelector('.sec-option-vis-cb');
+                if (val) {
+                    secOptions.push({
+                        value: val,
+                        default_visible: cb ? cb.checked : true
+                    });
+                }
+            });
+
+            const secTextRules = [];
+            document.querySelectorAll('.sec-text-rule-row').forEach(row => {
+                const cb = row.querySelector('.sec-text-vis-cb');
+                secTextRules.push({
+                    operator: row.dataset.op,
+                    value: row.dataset.val,
+                    default_visible: cb ? cb.checked : true
+                });
+            });
+
+            field_mappings['secondary_filter'] = {
+                enabled: secEnabled,
+                field_api_name: secFieldSel ? secFieldSel.value : '',
+                field_label: (secFieldSel && secFieldSel.selectedIndex >= 0) ? secFieldSel.options[secFieldSel.selectedIndex].text : '',
+                field_type: secTypeSel ? secTypeSel.value : 'options',
+                options: secOptions,
+                text_rules: secTextRules
+            };
+
             const isSharedEl = document.getElementById('map-is_shared');
             const is_shared = isSharedEl ? isSharedEl.checked : false;
 
@@ -1578,8 +1770,8 @@ async function fetchFields(moduleName) {
         const selectedSelect = document.getElementById('dual-list-selected');
         if (selectedSelect) selectedSelect.innerHTML = '';
 
-        // Populate duplicate filter field dropdowns with same field list
-        ['dup-filter-parent-link', 'dup-filter-primary-code-field', 'dup-filter-override-field'].forEach(id => {
+        // Populate duplicate & secondary filter field dropdowns with same field list
+        ['dup-filter-parent-link', 'dup-filter-primary-code-field', 'dup-filter-override-field', 'sec-filter-field'].forEach(id => {
             const sel = document.getElementById(id);
             if (!sel) return;
             const isOverride = id === 'dup-filter-override-field';
@@ -1811,8 +2003,271 @@ async function loadConfigIntoForm(conf) {
         const ovSelect = document.getElementById('dup-filter-override-field');
         if (ovSelect) ovSelect.value = df.override_checkbox_field || '';
     }
+
+    // Restore second level visibility filter settings
+    const sec = conf.field_mappings?.secondary_filter;
+    if (sec && sec.enabled) {
+        const secBody = document.getElementById('sec-filter-body');
+        const secToggleIcon = document.getElementById('sec-filter-toggle-icon');
+        const secEnabledInput = document.getElementById('sec-filter-enabled');
+        
+        if (secBody) secBody.style.display = 'block';
+        if (secToggleIcon) secToggleIcon.innerHTML = '&#9660; Collapse';
+        if (secEnabledInput) secEnabledInput.checked = true;
+        
+        toggleSecFilterFields(true);
+        const secFieldSelect = document.getElementById('sec-filter-field');
+        if (secFieldSelect) secFieldSelect.value = sec.field_api_name || '';
+        const secTypeSelect = document.getElementById('sec-filter-type');
+        if (secTypeSelect) secTypeSelect.value = sec.field_type || 'options';
+        onSecFilterTypeChange();
+
+        const optList = document.getElementById('sec-filter-options-list');
+        if (optList) optList.innerHTML = '';
+        (sec.options || []).forEach(o => addSecOptionRow(o.value, o.default_visible !== false));
+
+        const txtList = document.getElementById('sec-filter-text-list');
+        if (txtList) txtList.innerHTML = '';
+        (sec.text_rules || []).forEach(r => addSecTextRuleRow(r.operator, r.value, r.default_visible !== false));
+    }
     
     fetchPreviewRecord(conf.module_name);
+}
+
+function toggleSecFilterSection() {
+    const body = document.getElementById('sec-filter-body');
+    const icon = document.getElementById('sec-filter-toggle-icon');
+    const isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : 'block';
+    icon.innerHTML = isOpen ? '&#9658; Configure' : '&#9660; Collapse';
+}
+
+function toggleSecFilterFields(enabled) {
+    document.getElementById('sec-filter-fields').style.display = enabled ? 'block' : 'none';
+}
+
+function onSecFilterTypeChange() {
+    const type = document.getElementById('sec-filter-type').value;
+    document.getElementById('sec-filter-options-box').style.display = type === 'options' ? 'block' : 'none';
+    document.getElementById('sec-filter-text-box').style.display = type === 'text' ? 'block' : 'none';
+}
+
+function onSecFilterFieldChange() {
+    const fieldApi = document.getElementById('sec-filter-field').value;
+    const list = document.getElementById('sec-filter-options-list');
+    if (!list) return;
+    list.innerHTML = '';
+    
+    if (!fieldApi) {
+        list.innerHTML = '<small style="color:#94a3b8;">Select a module and field above, or add custom option values below.</small>';
+        return;
+    }
+
+    let defaults = [];
+    const lower = fieldApi.toLowerCase();
+    if (lower.includes('priority')) {
+        defaults = ['Low', 'Medium', 'High', 'Urgent'];
+    } else if (lower.includes('stage') || lower.includes('status')) {
+        defaults = ['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'];
+    } else if (lower.includes('type')) {
+        defaults = ['Existing', 'New Customer', 'Partner', 'Vendor'];
+    } else {
+        defaults = ['Option 1', 'Option 2', 'Option 3'];
+    }
+
+    defaults.forEach(val => {
+        const isDefaultHidden = val.toLowerCase() === 'low';
+        addSecOptionRow(val, !isDefaultHidden);
+    });
+}
+
+function addSecOptionRow(value, visible = true) {
+    const list = document.getElementById('sec-filter-options-list');
+    if (!list) return;
+    if (list.querySelector('small')) list.innerHTML = '';
+    
+    // Avoid duplicate rows
+    const escapedVal = value.replace(/"/g, '\\"');
+    if (list.querySelector(`.sec-option-row[data-value="${escapedVal}"]`)) return;
+
+    const row = document.createElement('div');
+    row.className = 'sec-option-row';
+    row.dataset.value = value;
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.04); padding:0.4rem 0.75rem; border-radius:6px;';
+    row.innerHTML = `
+        <span style="font-weight:500; font-size:0.85rem; color:#f1f5f9;">${value}</span>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+            <small style="color:#94a3b8; font-size:0.75rem;">Default Map Visibility:</small>
+            <label class="switch" style="transform:scale(0.8); flex-shrink:0;">
+                <input type="checkbox" class="sec-option-vis-cb" ${visible ? 'checked' : ''}>
+                <span class="slider round"></span>
+            </label>
+            <button type="button" class="btn-icon-danger" onclick="this.closest('.sec-option-row').remove()" style="padding:2px 6px; font-size:0.75rem;">&times;</button>
+        </div>
+    `;
+    list.appendChild(row);
+}
+
+function addCustomSecOption() {
+    const input = document.getElementById('new-sec-option-input');
+    if (!input) return;
+    const val = input.value.trim();
+    if (!val) return;
+    addSecOptionRow(val, true);
+    input.value = '';
+}
+
+function addSecTextRuleRow(op, val, vis = true) {
+    const list = document.getElementById('sec-filter-text-list');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = 'sec-text-rule-row';
+    row.dataset.op = op;
+    row.dataset.val = val;
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.04); padding:0.4rem 0.75rem; border-radius:6px;';
+    const opLabel = op === 'contains' ? 'Contains' : 'Does Not Contain';
+    row.innerHTML = `
+        <div style="font-size:0.8rem;">
+            <strong style="color:var(--primary);">${opLabel}:</strong> <span style="color:#f1f5f9;">"${val}"</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+            <small style="color:#94a3b8; font-size:0.75rem;">Default Visibility:</small>
+            <label class="switch" style="transform:scale(0.8); flex-shrink:0;">
+                <input type="checkbox" class="sec-text-vis-cb" ${vis ? 'checked' : ''}>
+                <span class="slider round"></span>
+            </label>
+            <button type="button" class="btn-icon-danger" onclick="this.closest('.sec-text-rule-row').remove()" style="padding:2px 6px; font-size:0.75rem;">&times;</button>
+        </div>
+    `;
+    list.appendChild(row);
+}
+
+function addCustomSecTextRule() {
+    const opEl = document.getElementById('new-sec-text-op');
+    const valEl = document.getElementById('new-sec-text-val');
+    const visEl = document.getElementById('new-sec-text-vis');
+    if (!valEl) return;
+    const val = valEl.value.trim();
+    if (!val) return;
+    addSecTextRuleRow(opEl ? opEl.value : 'contains', val, visEl ? visEl.value === 'true' : true);
+    valEl.value = '';
+}
+
+async function loadPerformanceStats(rangeHours = 24) {
+    window.currentPerfRangeHours = rangeHours;
+    document.querySelectorAll('.perf-range-btn').forEach(b => b.classList.remove('active'));
+    const btnId = rangeHours === 24 ? 'perf-btn-24h' : 'perf-btn-7d';
+    const activeBtn = document.getElementById(btnId);
+    if (activeBtn) activeBtn.classList.add('active');
+
+    try {
+        const res = await fetch('/api/admin/performance-stats?range_hours=' + rangeHours);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const ov = data.overview || {};
+        const avgEl = document.getElementById('perf-avg-latency');
+        if (avgEl) avgEl.textContent = (ov.avg_latency_ms || 0) + ' ms';
+        const maxEl = document.getElementById('perf-max-latency');
+        if (maxEl) maxEl.textContent = (ov.max_latency_ms || 0) + ' ms';
+        const reqEl = document.getElementById('perf-total-requests');
+        if (reqEl) reqEl.textContent = (ov.total_requests || 0).toLocaleString();
+        const recEl = document.getElementById('perf-total-records');
+        if (recEl) recEl.textContent = (ov.total_records || 0).toLocaleString();
+
+        renderPerfTrendChart(data.time_series || []);
+
+        const epTable = document.getElementById('perf-endpoint-rows');
+        if (epTable) {
+            epTable.innerHTML = '';
+            if (!data.endpoints || data.endpoints.length === 0) {
+                epTable.innerHTML = '<tr><td colspan="4" style="padding:10px; color:#94a3b8; text-align:center;">No API requests logged yet.</td></tr>';
+            } else {
+                data.endpoints.forEach(ep => {
+                    const row = document.createElement('tr');
+                    row.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+                    row.innerHTML = `
+                        <td style="padding:6px; font-weight:500; color:#e2e8f0;">${ep.endpoint}</td>
+                        <td style="padding:6px; text-align:right; color:#94a3b8;">${ep.calls}</td>
+                        <td style="padding:6px; text-align:right; color:#38bdf8; font-weight:600;">${ep.avg_ms} ms</td>
+                        <td style="padding:6px; text-align:right; color:#f43f5e;">${ep.max_ms} ms</td>
+                    `;
+                    epTable.appendChild(row);
+                });
+            }
+        }
+
+        const modGrid = document.getElementById('perf-cached-modules-grid');
+        if (modGrid) {
+            modGrid.innerHTML = '';
+            if (!data.cached_modules || data.cached_modules.length === 0) {
+                modGrid.innerHTML = '<small style="color:#94a3b8;">No module records cached yet.</small>';
+            } else {
+                data.cached_modules.forEach(m => {
+                    const badge = document.createElement('div');
+                    badge.style.cssText = 'background:rgba(99,102,241,0.15); border:1px solid rgba(99,102,241,0.3); border-radius:6px; padding:0.4rem 0.75rem; font-size:0.8rem; color:#e2e8f0; display:flex; align-items:center; gap:0.5rem;';
+                    badge.innerHTML = `<strong>${m.module}:</strong> <span style="color:#38bdf8; font-weight:600;">${m.count.toLocaleString()} records</span>`;
+                    modGrid.appendChild(badge);
+                });
+            }
+        }
+    } catch (e) {
+        console.error('Error loading perf stats:', e);
+    }
+}
+
+function renderPerfTrendChart(timeSeries) {
+    const svg = document.getElementById('perf-svg-chart');
+    if (!svg) return;
+    svg.innerHTML = '';
+    if (!timeSeries || timeSeries.length === 0) return;
+
+    const container = document.getElementById('perf-chart-container');
+    const w = container ? (container.clientWidth || 600) : 600;
+    const h = 180;
+    const padding = { top: 20, right: 20, bottom: 30, left: 40 };
+
+    const maxMs = Math.max(...timeSeries.map(d => d.avg_ms), 10);
+
+    const points = timeSeries.map((d, idx) => {
+        const x = padding.left + (idx / (timeSeries.length - 1 || 1)) * (w - padding.left - padding.right);
+        const y = h - padding.bottom - (d.avg_ms / maxMs) * (h - padding.top - padding.bottom);
+        return { x, y, label: d.label, val: d.avg_ms };
+    });
+
+    let pathD = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+        pathD += ` L ${points[i].x} ${points[i].y}`;
+    }
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', pathD);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', '#38bdf8');
+    path.setAttribute('stroke-width', '2.5');
+    svg.appendChild(path);
+
+    points.forEach((pt, idx) => {
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', pt.x);
+        circle.setAttribute('cy', pt.y);
+        circle.setAttribute('r', '4');
+        circle.setAttribute('fill', '#0284c7');
+        circle.setAttribute('stroke', '#ffffff');
+        circle.setAttribute('stroke-width', '1.5');
+        svg.appendChild(circle);
+
+        if (idx % Math.ceil(points.length / 6) === 0 || idx === points.length - 1) {
+            const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            txt.setAttribute('x', pt.x);
+            txt.setAttribute('y', h - 5);
+            txt.setAttribute('text-anchor', 'middle');
+            txt.setAttribute('fill', '#94a3b8');
+            txt.setAttribute('font-size', '10');
+            txt.textContent = pt.label;
+            svg.appendChild(txt);
+        }
+    });
 }
 
 async function fetchPreviewRecord(moduleName) {

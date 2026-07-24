@@ -2521,6 +2521,8 @@ def build_display_record_data(raw_record, config, field_label_map):
 @app.route('/api/map-data')
 @limiter.limit("120 per minute")
 def get_map_data():
+    import time
+    start_t = time.time()
     if 'access_token' not in session:
         return jsonify({'error': 'Unauthorized'}), 401
 
@@ -2552,23 +2554,10 @@ def get_map_data():
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
 
     # ── Global cache with franchise filter (authoritative) ───────────────────
-    # DATA PRIVACY RULES:
-    #  • Admins: see everything in the global cache.
-    #  • Non-admins with successful franchise lookup: ONLY see records whose
-    #    franchise_id matches one of their franchise IDs.  The result of this
-    #    filter is ALWAYS used — we never fall back to unfiltered data when the
-    #    franchise filter is active, because per-user records may be unfiltered.
-    #  • Non-admins with failed franchise lookup: degraded mode — serve global
-    #    cache unfiltered (franchise_ids_for_filter stays None).
-    #    Fallback to per-user records only if global cache is unpopulated.
-    # ─────────────────────────────────────────────────────────────────────────
     user_id  = session.get('user_id')
     is_admin = session.get('is_admin', False)
 
     # ── On-demand email → CRM ID resolution ─────────────────────────────────
-    # If the admin token was unavailable when this user logged in, their user_id
-    # is their Zoho email instead of their numeric CRM user ID.  COQL franchise
-    # queries need the numeric ID to work.  Try to resolve it now.
     if not is_admin and '@' in str(user_id):
         _resolve_tok = _get_admin_access_token()
         if _resolve_tok:
@@ -2598,25 +2587,12 @@ def get_map_data():
         franchise_ids_for_filter = [] # Default to empty list for standard users to prevent unrestricted access
         _atk = _get_admin_access_token()
         if _atk:
-            _fi = _get_user_franchise_ids(user_id, _atk)
-            if _fi is not None:
-                franchise_ids_for_filter = [
-                    fid for fid in _fi.get('ids', [])
-                    if not str(fid).startswith('territory_')
-                ]
-                # If cached result was empty, auto-bust and re-run (catches stale pre-Strategy-3 cache)
-                if not franchise_ids_for_filter:
-                    log_debug(f"[map] Franchise cache returned 0 IDs — auto-refreshing for {user_id}.")
-                    _fi2 = _get_user_franchise_ids(user_id, _atk, force_refresh=True)
-                    if _fi2 is not None:
-                        franchise_ids_for_filter = [
-                            fid for fid in _fi2.get('ids', [])
-                            if not str(fid).startswith('territory_')
-                        ]
+            try:
+                fr_res = _get_franchises_for_ui(user_id, is_admin)
+                franchise_ids_for_filter = [f['id'] for f in fr_res if 'id' in f]
                 franchise_lookup_succeeded = True
-                log_debug(f"[map] Franchise lookup OK: {len(franchise_ids_for_filter)} franchise ID(s) for {user_id}.")
-            else:
-                log_debug(f"[map] Franchise lookup returned None for {user_id} — degraded mode.")
+            except Exception as e:
+                log_debug(f"[map] Franchise lookup error: {e}")
         else:
             # Admin token unavailable — try cached franchise IDs from DB
             _cache_key = f'franchise_ids_{user_id}'
@@ -2792,6 +2768,15 @@ def get_map_data():
             module_labels_cache[module_name] = get_module_field_labels(module_name)
         field_label_map = module_labels_cache[module_name]
 
+        # Extract secondary filter value if configured
+        sec_val = None
+        sec_cfg = cfg.get('field_mappings', {}).get('secondary_filter')
+        if sec_cfg and sec_cfg.get('enabled') and sec_cfg.get('field_api_name'):
+            f_name = sec_cfg.get('field_api_name')
+            raw_rec = r.get('record_data', {})
+            if isinstance(raw_rec, dict):
+                sec_val = extract_val(raw_rec.get(f_name))
+
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
@@ -2805,10 +2790,30 @@ def get_map_data():
             'record_data': build_display_record_data(r['record_data'], cfg, field_label_map),
             'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),
             'field_mappings': cfg.get('field_mappings', {}),
-            'franchise_id': r.get('franchise_id')
+            'franchise_id': r.get('franchise_id'),
+            'secondary_value': str(sec_val) if sec_val is not None else None
         })
 
+    elapsed_ms = (time.time() - start_t) * 1000.0
+    database.log_performance_metric('/api/map-data', elapsed_ms, record_count=len(map_points), user_id=session.get('user_id'))
+
     return jsonify(map_points)
+
+
+@app.route('/api/admin/performance-stats')
+def get_performance_stats_endpoint():
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin only'}), 403
+
+    try:
+        range_hours = int(request.args.get('range_hours', 24))
+    except (TypeError, ValueError):
+        range_hours = 24
+
+    stats = database.get_performance_stats(range_hours=range_hours)
+    return jsonify(stats)
 
 # ── CRM Explorer (admin diagnostic tool) ─────────────────────────────────────
 

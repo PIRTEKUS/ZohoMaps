@@ -451,7 +451,11 @@ function plotData(data) {
     // Always reset marker lookup so stale markers from previous loads don't linger
     window.markersById = {};
 
-    const visibleData = data.filter(item => !(window.hiddenModules && window.hiddenModules.has(item.module)));
+    window.initDefaultSecondaryFilters();
+    const visibleData = data.filter(item => 
+        !(window.hiddenModules && window.hiddenModules.has(item.module)) &&
+        !isItemSecondaryHidden(item)
+    );
 
     visibleData.forEach(item => {
         const position = { lat: item.lat, lng: item.lng };
@@ -729,6 +733,70 @@ window.focusMapMarker = function(id) {
     }
 };
 
+window.hiddenSecondaryValues = window.hiddenSecondaryValues || new Set();
+window.secondaryFiltersInitialized = false;
+
+window.initDefaultSecondaryFilters = function() {
+    if (window.secondaryFiltersInitialized) return;
+    window.secondaryFiltersInitialized = true;
+    const configured = window.configuredModules || [];
+    configured.forEach(cfg => {
+        const sec = cfg.field_mappings?.secondary_filter;
+        if (sec && sec.enabled) {
+            if (sec.field_type === 'options' && sec.options) {
+                sec.options.forEach(opt => {
+                    if (opt.default_visible === false) {
+                        window.hiddenSecondaryValues.add(`${cfg.module_name}::${opt.value}`);
+                        if (cfg.module_label) window.hiddenSecondaryValues.add(`${cfg.module_label}::${opt.value}`);
+                    }
+                });
+            } else if (sec.field_type === 'text' && sec.text_rules) {
+                sec.text_rules.forEach(rule => {
+                    if (rule.default_visible === false) {
+                        window.hiddenSecondaryValues.add(`${cfg.module_name}::rule_${rule.operator}_${rule.value}`);
+                        if (cfg.module_label) window.hiddenSecondaryValues.add(`${cfg.module_label}::rule_${rule.operator}_${rule.value}`);
+                    }
+                });
+            }
+        }
+    });
+};
+
+function isItemSecondaryHidden(item) {
+    if (!window.hiddenSecondaryValues || window.hiddenSecondaryValues.size === 0) return false;
+    
+    const configuredModules = window.configuredModules || [];
+    const cfg = configuredModules.find(c => 
+        c.module_name === item.api_module_name || 
+        c.module_name === item.module || 
+        c.module_label === item.module
+    );
+    if (!cfg || !cfg.field_mappings?.secondary_filter?.enabled) return false;
+
+    const sec = cfg.field_mappings.secondary_filter;
+    const secVal = item.secondary_value !== undefined && item.secondary_value !== null ? String(item.secondary_value) : '';
+
+    if (sec.field_type === 'options') {
+        const key1 = `${cfg.module_name}::${secVal}`;
+        const key2 = `${item.module}::${secVal}`;
+        if (window.hiddenSecondaryValues.has(key1) || window.hiddenSecondaryValues.has(key2)) {
+            return true;
+        }
+    } else if (sec.field_type === 'text') {
+        const rules = sec.text_rules || [];
+        for (let r of rules) {
+            const ruleKey1 = `${cfg.module_name}::rule_${r.operator}_${r.value}`;
+            const ruleKey2 = `${item.module}::rule_${r.operator}_${r.value}`;
+            if (window.hiddenSecondaryValues.has(ruleKey1) || window.hiddenSecondaryValues.has(ruleKey2)) {
+                const matchVal = (secVal || '').toLowerCase();
+                const target = (r.value || '').toLowerCase();
+                if (r.operator === 'contains' && matchVal.includes(target)) return true;
+                if (r.operator === 'not_contains' && !matchVal.includes(target)) return true;
+            }
+        }
+    }
+    return false;
+}
 
 function updateLegend(data) {
     if (window.filterMapData) data = window.filterMapData(data);
@@ -788,6 +856,72 @@ function updateLegend(data) {
             <button class="cat-sync" onclick="syncSingleModule('${safeApiName}', this)">Sync</button>
         `;
         legend.appendChild(row);
+
+        // Render secondary visibility filter sub-tree if configured
+        const sec = config.field_mappings?.secondary_filter;
+        if (sec && sec.enabled) {
+            const subTree = document.createElement('div');
+            subTree.className = 'cat-sub-tree';
+            
+            const fieldLabel = sec.field_label || sec.field_api_name || 'Filter';
+            const subHeader = document.createElement('div');
+            subHeader.className = 'cat-sub-header';
+            subHeader.textContent = fieldLabel + ':';
+            subTree.appendChild(subHeader);
+
+            if (sec.field_type === 'options' && sec.options) {
+                const optionCounts = {};
+                data.filter(item => item.module === displayLabel || item.api_module_name === apiName).forEach(item => {
+                    const v = item.secondary_value !== undefined && item.secondary_value !== null ? String(item.secondary_value) : '(Blank)';
+                    optionCounts[v] = (optionCounts[v] || 0) + 1;
+                });
+
+                sec.options.forEach(opt => {
+                    const optVal = opt.value;
+                    const optCount = optionCounts[optVal] || 0;
+                    const key1 = `${apiName}::${optVal}`;
+                    const key2 = `${displayLabel}::${optVal}`;
+                    const isSubVisible = !window.hiddenSecondaryValues.has(key1) && !window.hiddenSecondaryValues.has(key2);
+                    
+                    const safeOptVal = optVal.replace(/'/g, "\\'");
+                    const subRow = document.createElement('div');
+                    subRow.className = 'cat-sub-row';
+                    subRow.innerHTML = `
+                        <span class="cat-sub-tree-line">| - -</span>
+                        <span class="cat-sub-label">${optVal}</span>
+                        <span class="cat-count">${optCount}</span>
+                        <button class="cat-eye" style="width:24px;height:24px;"
+                                onclick="window.toggleSecondaryVisibility('${safeApiName}', '${safeLabel}', '${safeOptVal}', ${isSubVisible})"
+                                title="${isSubVisible ? 'Hide' : 'Show'} ${optVal}">
+                            ${isSubVisible ? eyeVisible : eyeHidden}
+                        </button>
+                    `;
+                    subTree.appendChild(subRow);
+                });
+            } else if (sec.field_type === 'text' && sec.text_rules) {
+                sec.text_rules.forEach(rule => {
+                    const ruleKey = `${apiName}::rule_${rule.operator}_${rule.value}`;
+                    const isSubVisible = !window.hiddenSecondaryValues.has(ruleKey);
+                    const ruleText = (rule.operator === 'contains' ? 'Contains' : 'Does Not Contain') + ` "${rule.value}"`;
+                    const safeRuleVal = (rule.value || '').replace(/'/g, "\\'");
+
+                    const subRow = document.createElement('div');
+                    subRow.className = 'cat-sub-row';
+                    subRow.innerHTML = `
+                        <span class="cat-sub-tree-line">| - -</span>
+                        <span class="cat-sub-label">${ruleText}</span>
+                        <button class="cat-eye" style="width:24px;height:24px;"
+                                onclick="window.toggleSecondaryRuleVisibility('${safeApiName}', '${rule.operator}', '${safeRuleVal}', ${isSubVisible})"
+                                title="${isSubVisible ? 'Hide' : 'Show'} rule">
+                            ${isSubVisible ? eyeVisible : eyeHidden}
+                        </button>
+                    `;
+                    subTree.appendChild(subRow);
+                });
+            }
+
+            legend.appendChild(subTree);
+        }
     }
 }
 
@@ -843,7 +977,46 @@ window.toggleModuleVisibility = function(moduleName, makeHidden) {
         updateLegend(window.lastMapData);
         // Pass only the visible records to the list
         const visibleForList = window.lastMapData.filter(
-            item => !window.hiddenModules.has(item.module)
+            item => !window.hiddenModules.has(item.module) && !isItemSecondaryHidden(item)
+        );
+        if (window.updateRecordList) window.updateRecordList(visibleForList);
+    }
+};
+
+window.toggleSecondaryVisibility = function(moduleName, displayLabel, optionValue, makeHidden) {
+    if (!window.hiddenSecondaryValues) window.hiddenSecondaryValues = new Set();
+    const key1 = `${moduleName}::${optionValue}`;
+    const key2 = `${displayLabel}::${optionValue}`;
+    if (makeHidden) {
+        window.hiddenSecondaryValues.add(key1);
+        window.hiddenSecondaryValues.add(key2);
+    } else {
+        window.hiddenSecondaryValues.delete(key1);
+        window.hiddenSecondaryValues.delete(key2);
+    }
+    if (window.lastMapData) {
+        plotData(window.lastMapData);
+        updateLegend(window.lastMapData);
+        const visibleForList = window.lastMapData.filter(
+            item => !window.hiddenModules.has(item.module) && !isItemSecondaryHidden(item)
+        );
+        if (window.updateRecordList) window.updateRecordList(visibleForList);
+    }
+};
+
+window.toggleSecondaryRuleVisibility = function(moduleName, operator, value, makeHidden) {
+    if (!window.hiddenSecondaryValues) window.hiddenSecondaryValues = new Set();
+    const ruleKey = `${moduleName}::rule_${operator}_${value}`;
+    if (makeHidden) {
+        window.hiddenSecondaryValues.add(ruleKey);
+    } else {
+        window.hiddenSecondaryValues.delete(ruleKey);
+    }
+    if (window.lastMapData) {
+        plotData(window.lastMapData);
+        updateLegend(window.lastMapData);
+        const visibleForList = window.lastMapData.filter(
+            item => !window.hiddenModules.has(item.module) && !isItemSecondaryHidden(item)
         );
         if (window.updateRecordList) window.updateRecordList(visibleForList);
     }

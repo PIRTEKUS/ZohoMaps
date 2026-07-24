@@ -186,11 +186,36 @@ def init_db():
         )
     ''')
 
-    # Ensure unique index exists for safety
+    # Performance Monitoring Logs table
+    exec_query(conn, '''
+        CREATE TABLE IF NOT EXISTS performance_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL NOT NULL,
+            endpoint TEXT NOT NULL,
+            response_time_ms REAL NOT NULL,
+            record_count INTEGER DEFAULT 0,
+            user_id TEXT,
+            status_code INTEGER DEFAULT 200
+        )
+    ''')
+
+    # Ensure unique index exists for safety and performance indexes
     try:
         exec_query(conn, "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
-    except Exception:
-        pass
+        exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_mod_rec_user_module ON module_records(user_id, module_name)")
+        exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_mod_rec_spatial ON module_records(user_id, lat, lng)")
+        exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_perf_logs_ts ON performance_logs(timestamp)")
+        exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_perf_logs_ep ON performance_logs(endpoint)")
+    except Exception as e:
+        print(f"Index creation notice: {e}")
+
+    # Prune old performance logs (older than 7 days)
+    import time
+    try:
+        cutoff = time.time() - (7 * 86400)
+        exec_query(conn, "DELETE FROM performance_logs WHERE timestamp < ?", (cutoff,))
+    except Exception as e:
+        print(f"Perf log prune notice: {e}")
 
     conn.commit()
     conn.close()
@@ -567,4 +592,108 @@ def get_hidden_records(user_id):
     rows = exec_query(conn, 'SELECT id, module_name FROM module_records WHERE user_id = ? AND (lat IS NULL OR lng IS NULL)', (str(user_id),), fetchall=True)
     conn.close()
     return {(r['id'], r['module_name']) for r in rows}
+
+
+def log_performance_metric(endpoint, response_time_ms, record_count=0, user_id=None, status_code=200):
+    """Log performance metrics for monitoring (safe, non-blocking fallback)."""
+    try:
+        import time
+        conn = get_db_connection()
+        exec_query(conn, '''
+            INSERT INTO performance_logs (timestamp, endpoint, response_time_ms, record_count, user_id, status_code)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (time.time(), str(endpoint), float(response_time_ms), int(record_count or 0), str(user_id or ''), int(status_code or 200)))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Failed to log perf metric: {e}")
+
+
+def get_performance_stats(range_hours=24):
+    """Aggregate performance statistics for the last 24h or 7d (168h)."""
+    import time
+    import datetime
+    now = time.time()
+    since = now - (float(range_hours) * 3600.0)
+
+    conn = get_db_connection()
+    try:
+        # Overview summary
+        row = exec_query(conn, '''
+            SELECT COUNT(*) as total_requests,
+                   AVG(response_time_ms) as avg_latency,
+                   MAX(response_time_ms) as max_latency,
+                   SUM(record_count) as total_records
+            FROM performance_logs
+            WHERE timestamp >= ?
+        ''', (since,), fetchone=True)
+
+        overview = {
+            'total_requests': int(row['total_requests']) if row and row['total_requests'] else 0,
+            'avg_latency_ms': round(float(row['avg_latency']), 2) if row and row['avg_latency'] else 0.0,
+            'max_latency_ms': round(float(row['max_latency']), 2) if row and row['max_latency'] else 0.0,
+            'total_records': int(row['total_records']) if row and row['total_records'] else 0
+        }
+
+        # Breakdown by endpoint
+        ep_rows = exec_query(conn, '''
+            SELECT endpoint,
+                   COUNT(*) as calls,
+                   AVG(response_time_ms) as avg_ms,
+                   MAX(response_time_ms) as max_ms
+            FROM performance_logs
+            WHERE timestamp >= ?
+            GROUP BY endpoint
+            ORDER BY calls DESC
+            LIMIT 15
+        ''', (since,), fetchall=True)
+
+        endpoints = []
+        for r in ep_rows or []:
+            endpoints.append({
+                'endpoint': r['endpoint'],
+                'calls': int(r['calls']),
+                'avg_ms': round(float(r['avg_ms']), 2),
+                'max_ms': round(float(r['max_ms']), 2)
+            })
+
+        # Time series interval buckets (12 buckets)
+        num_buckets = 12
+        bucket_size = (now - since) / num_buckets
+        time_series = []
+        for i in range(num_buckets):
+            b_start = since + (i * bucket_size)
+            b_end = b_start + bucket_size
+            b_row = exec_query(conn, '''
+                SELECT COUNT(*) as cnt, AVG(response_time_ms) as avg_ms
+                FROM performance_logs
+                WHERE timestamp >= ? AND timestamp < ?
+            ''', (b_start, b_end), fetchone=True)
+
+            dt = datetime.datetime.fromtimestamp(b_start)
+            label = dt.strftime('%H:%M') if range_hours <= 24 else dt.strftime('%m/%d %H:%M')
+            time_series.append({
+                'label': label,
+                'requests': int(b_row['cnt']) if b_row and b_row['cnt'] else 0,
+                'avg_ms': round(float(b_row['avg_ms']), 2) if b_row and b_row['avg_ms'] else 0.0
+            })
+
+        # Total cached records summary by module
+        mod_counts = exec_query(conn, '''
+            SELECT module_name, COUNT(*) as record_count
+            FROM module_records
+            GROUP BY module_name
+        ''', fetchall=True)
+        cached_modules = [{'module': r['module_name'], 'count': r['record_count']} for r in mod_counts or []]
+
+        return {
+            'range_hours': range_hours,
+            'overview': overview,
+            'endpoints': endpoints,
+            'time_series': time_series,
+            'cached_modules': cached_modules
+        }
+    finally:
+        conn.close()
+
 
