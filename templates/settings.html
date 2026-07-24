@@ -2066,36 +2066,44 @@ async function onSecFilterFieldChange() {
     const fieldApi = document.getElementById('sec-filter-field')?.value;
     const list = document.getElementById('sec-filter-options-list');
     if (!list) return;
-    list.innerHTML = '';
     
     if (!fieldApi || !moduleName) {
         list.innerHTML = '<small style="color:#94a3b8;">Select a module and field above to load possible option values.</small>';
         return;
     }
 
+    const fieldObj = (window.currentFields || []).find(f => (f.api_name || '').toLowerCase() === fieldApi.toLowerCase());
+    let localOptions = (fieldObj && fieldObj.pick_list_values && fieldObj.pick_list_values.length > 0) ? fieldObj.pick_list_values : [];
+
     list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
 
     try {
         const res = await fetch(`/api/field-options/${encodeURIComponent(moduleName)}/${encodeURIComponent(fieldApi)}`);
+        let serverOptions = [];
         if (res.ok) {
             const data = await res.json();
-            const options = data.options || [];
-            list.innerHTML = '';
-            
-            if (options.length === 0) {
-                list.innerHTML = '<small style="color:#94a3b8;">No distinct options found for this field yet. You can add options below.</small>';
-            } else {
-                options.forEach(val => {
-                    const isDefaultHidden = String(val).toLowerCase() === 'low';
-                    addSecOptionRow(val, !isDefaultHidden);
-                });
-            }
-        } else {
+            serverOptions = data.options || [];
+        }
+        
+        const combined = Array.from(new Set([...localOptions, ...serverOptions]));
+        list.innerHTML = '';
+
+        if (combined.length === 0) {
             fallbackSecFieldDefaults(fieldApi);
+        } else {
+            combined.forEach(val => {
+                const isDefaultHidden = String(val).toLowerCase() === 'low';
+                addSecOptionRow(val, !isDefaultHidden);
+            });
         }
     } catch(e) {
         console.error('Error fetching field options:', e);
-        fallbackSecFieldDefaults(fieldApi);
+        if (localOptions.length > 0) {
+            list.innerHTML = '';
+            localOptions.forEach(val => addSecOptionRow(val, String(val).toLowerCase() !== 'low'));
+        } else {
+            fallbackSecFieldDefaults(fieldApi);
+        }
     }
 }
 

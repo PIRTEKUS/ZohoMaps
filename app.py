@@ -768,7 +768,19 @@ def get_fields(module_name):
     
     metadata = zoho_api.fetch_module_fields(module_name, session['access_token'])
     if 'fields' in metadata:
-        fields = [{'api_name': f['api_name'], 'display_label': f['display_label']} for f in metadata['fields']]
+        fields = []
+        for f in metadata['fields']:
+            pv_list = []
+            for pv in f.get('pick_list_values', []) or []:
+                val = pv.get('actual_value') or pv.get('display_value') or pv.get('label')
+                if val:
+                    pv_list.append(str(val).strip())
+            fields.append({
+                'api_name': f['api_name'],
+                'display_label': f['display_label'],
+                'data_type': f.get('data_type', ''),
+                'pick_list_values': pv_list
+            })
         # Cache per-module fields so team users can use them too
         database.set_global_setting(f'cached_fields_{module_name}', json.dumps(fields))
         return jsonify(fields)
@@ -2823,22 +2835,35 @@ def get_field_options_route(module_name, field_api_name):
 
     options = set()
 
-    # 1. Distinct values from cached records in database
+    # 1. Check cached field metadata in global settings
+    cached_str = database.get_global_setting(f'cached_fields_{module_name}', '')
+    if cached_str:
+        try:
+            cached_fields = json.loads(cached_str)
+            for f in cached_fields:
+                if f.get('api_name', '').lower() == field_api_name.lower():
+                    for pv in f.get('pick_list_values', []):
+                        if pv:
+                            options.add(str(pv).strip())
+        except Exception:
+            pass
+
+    # 2. Distinct values from cached records in database
     db_vals = database.get_distinct_field_values(module_name, field_api_name)
     for v in db_vals:
         options.add(v)
 
-    # 2. Picklist values from Zoho CRM field metadata
+    # 3. Picklist values from Zoho CRM field metadata (if still empty or for fresh sync)
     token = session.get('access_token')
-    if token:
+    if token and not options:
         try:
             metadata = zoho_api.fetch_module_fields(module_name, token)
             if 'fields' in metadata:
                 for f in metadata['fields']:
-                    if f.get('api_name') == field_api_name:
-                        p_vals = f.get('pick_list_values', [])
+                    if f.get('api_name', '').lower() == field_api_name.lower():
+                        p_vals = f.get('pick_list_values', []) or []
                         for pv in p_vals:
-                            val = pv.get('actual_value') or pv.get('display_value')
+                            val = pv.get('actual_value') or pv.get('display_value') or pv.get('label')
                             if val:
                                 options.add(str(val).strip())
         except Exception as e:
@@ -2848,11 +2873,13 @@ def get_field_options_route(module_name, field_api_name):
     if not options:
         lower = field_api_name.lower()
         if 'priority' in lower:
-            options.update(['Low', 'Medium', 'High', 'Urgent'])
+            options.update(['Low', 'Medium', 'High', 'Urgent', 'Critical'])
         elif 'stage' in lower or 'status' in lower:
-            options.update(['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'])
+            options.update(['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost', 'Qualified', 'Unqualified'])
         elif 'type' in lower:
-            options.update(['Existing', 'New Customer', 'Partner', 'Vendor'])
+            options.update(['Existing', 'New Customer', 'Partner', 'Vendor', 'Other'])
+        elif 'rating' in lower:
+            options.update(['Active', 'Acquired', 'Cold', 'Contacted', 'Market Failed', 'Project Cancelled', 'Shut Down'])
 
     return jsonify({'options': sorted(list(options))})
 
