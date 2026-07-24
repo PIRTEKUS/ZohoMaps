@@ -1151,7 +1151,14 @@
                     <div id="fd-content"><span style="color:#64748b;">Click "Load Debug Info" to inspect.</span></div>
    <script>
 window.nightlySyncSchedule = {{ nightly_sync_schedule | tojson | safe }};
-window.savedFranchiseBoundaries = JSON.parse({{ franchise_boundaries | tojson | safe }});
+try {
+    let _fbRaw = {{ franchise_boundaries | tojson | safe }};
+    if (typeof _fbRaw === 'string') _fbRaw = JSON.parse(_fbRaw || '{}');
+    if (typeof _fbRaw === 'string') _fbRaw = JSON.parse(_fbRaw || '{}');
+    window.savedFranchiseBoundaries = _fbRaw || {};
+} catch(e) {
+    window.savedFranchiseBoundaries = {};
+}
 let currentFields = [];
 let previewRecord = null;
 
