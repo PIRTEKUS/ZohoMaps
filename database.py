@@ -600,8 +600,8 @@ def get_distinct_field_values(module_name, field_api_name):
     try:
         rows = exec_query(conn, '''
             SELECT record_data FROM module_records
-            WHERE module_name = ? AND record_data IS NOT NULL
-            LIMIT 3000
+            WHERE LOWER(module_name) = LOWER(?) AND record_data IS NOT NULL
+            LIMIT 5000
         ''', (module_name,), fetchall=True)
         
         values = set()
@@ -611,9 +611,22 @@ def get_distinct_field_values(module_name, field_api_name):
                 data = json.loads(raw) if isinstance(raw, str) else raw
                 if isinstance(data, dict):
                     val = data.get(field_api_name)
+                    if val is None:
+                        for k, v in data.items():
+                            if k.lower() == field_api_name.lower():
+                                val = v
+                                break
                     if val is not None:
                         if isinstance(val, dict):
                             val = val.get('name') or val.get('display_value') or str(val)
+                        elif isinstance(val, list):
+                            for item_v in val:
+                                if isinstance(item_v, dict):
+                                    item_v = item_v.get('name') or item_v.get('display_value') or str(item_v)
+                                item_str = str(item_v).strip()
+                                if item_str:
+                                    values.add(item_str)
+                            continue
                         val_str = str(val).strip()
                         if val_str:
                             values.add(val_str)

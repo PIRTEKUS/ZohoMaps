@@ -2124,8 +2124,11 @@ function addSecOptionRow(value, visible = true) {
     if (list.querySelector('small')) list.innerHTML = '';
     
     // Avoid duplicate rows
-    const escapedVal = value.replace(/"/g, '\\"');
-    if (list.querySelector(`.sec-option-row[data-value="${escapedVal}"]`)) return;
+    let exists = false;
+    list.querySelectorAll('.sec-option-row').forEach(el => {
+        if (el.dataset.value === value) exists = true;
+    });
+    if (exists) return;
 
     const row = document.createElement('div');
     row.className = 'sec-option-row';
