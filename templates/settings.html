@@ -2083,7 +2083,7 @@ async function onSecFilterFieldChange(forceReload = false) {
     // Preserve existing option rows & visibility states if user already configured some
     const existingMap = new Map();
     list.querySelectorAll('.sec-option-row').forEach(row => {
-        const val = row.dataset.value;
+        const val = row.getAttribute('data-value');
         const cb = row.querySelector('.sec-option-vis-cb');
         if (val) existingMap.set(val, cb ? cb.checked : true);
     });
@@ -2091,9 +2091,7 @@ async function onSecFilterFieldChange(forceReload = false) {
     const fieldObj = (window.currentFields || []).find(f => (f.api_name || '').toLowerCase() === fieldApi.toLowerCase());
     let localOptions = (fieldObj && fieldObj.pick_list_values && fieldObj.pick_list_values.length > 0) ? fieldObj.pick_list_values : [];
 
-    if (existingMap.size === 0 || forceReload) {
-        list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
-    }
+    list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
 
     try {
         const res = await fetch(`/api/field-options/${encodeURIComponent(moduleName)}/${encodeURIComponent(fieldApi)}`);
@@ -2111,18 +2109,22 @@ async function onSecFilterFieldChange(forceReload = false) {
             else if (lower.includes('type')) combined = ['Existing', 'New Customer', 'Partner', 'Vendor'];
         }
 
+        list.innerHTML = '';
         if (combined.length > 0) {
-            list.innerHTML = '';
             combined.forEach(val => {
-                const wasVis = existingMap.has(val) ? existingMap.get(val) : (String(val).toLowerCase() !== 'low');
-                addSecOptionRow(val, wasVis);
+                const valStr = String(val);
+                const wasVis = existingMap.has(valStr) ? existingMap.get(valStr) : (valStr.toLowerCase() !== 'low');
+                addSecOptionRow(valStr, wasVis);
             });
-        } else if (existingMap.size === 0) {
+        } else {
             fallbackSecFieldDefaults(fieldApi);
         }
     } catch(e) {
         console.error('Error fetching field options:', e);
-        if (existingMap.size === 0) {
+        list.innerHTML = '';
+        if (existingMap.size > 0) {
+            existingMap.forEach((vis, val) => addSecOptionRow(val, vis));
+        } else {
             fallbackSecFieldDefaults(fieldApi);
         }
     }
@@ -2135,14 +2137,14 @@ function fallbackSecFieldDefaults(fieldApi) {
     let defaults = [];
     const lower = (fieldApi || '').toLowerCase();
     if (lower.includes('priority')) {
-        defaults = ['Low', 'Medium', 'High', 'Urgent'];
+        defaults = ['Low', 'Medium', 'High', 'Urgent', 'Critical'];
     } else if (lower.includes('stage') || lower.includes('status')) {
         defaults = ['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'];
     } else if (lower.includes('type')) {
         defaults = ['Existing', 'New Customer', 'Partner', 'Vendor'];
     }
     defaults.forEach(val => {
-        const isDefaultHidden = val.toLowerCase() === 'low';
+        const isDefaultHidden = String(val).toLowerCase() === 'low';
         addSecOptionRow(val, !isDefaultHidden);
     });
 }
@@ -2152,19 +2154,20 @@ function addSecOptionRow(value, visible = true) {
     if (!list) return;
     if (list.querySelector('small')) list.innerHTML = '';
     
+    const valStr = String(value);
     // Avoid duplicate rows
     let exists = false;
     list.querySelectorAll('.sec-option-row').forEach(el => {
-        if (el.dataset.value === value) exists = true;
+        if (el.getAttribute('data-value') === valStr) exists = true;
     });
     if (exists) return;
 
     const row = document.createElement('div');
     row.className = 'sec-option-row';
-    row.dataset.value = value;
-    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.04); padding:0.4rem 0.75rem; border-radius:6px;';
+    row.setAttribute('data-value', valStr);
+    row.style.cssText = 'display:flex; align-items:center; justify-content:space-between; background:rgba(255,255,255,0.04); padding:0.4rem 0.75rem; border-radius:6px; margin-bottom:4px;';
     row.innerHTML = `
-        <span style="font-weight:500; font-size:0.85rem; color:#f1f5f9;">${value}</span>
+        <span style="font-weight:500; font-size:0.85rem; color:#f1f5f9;">${valStr}</span>
         <div style="display:flex; align-items:center; gap:0.5rem;">
             <small style="color:#94a3b8; font-size:0.75rem;">Default Map Visibility:</small>
             <label class="switch" style="transform:scale(0.8); flex-shrink:0;">
