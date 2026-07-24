@@ -740,9 +740,10 @@ window.focusMapMarker = function(id) {
 window.hiddenSecondaryValues = window.hiddenSecondaryValues || new Set();
 window.secondaryFiltersInitialized = false;
 
-window.initDefaultSecondaryFilters = function() {
-    if (window.secondaryFiltersInitialized) return;
+window.initDefaultSecondaryFilters = function(force = false) {
+    if (window.secondaryFiltersInitialized && !force) return;
     window.secondaryFiltersInitialized = true;
+    window.hiddenSecondaryValues = new Set();
     const configured = window.configuredModules || [];
     configured.forEach(cfg => {
         const sec = cfg.field_mappings?.secondary_filter;

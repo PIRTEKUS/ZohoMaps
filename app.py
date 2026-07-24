@@ -121,6 +121,27 @@ def extract_val(val):
         return val.get('name', val.get('display_value', str(val)))
     return val
 
+def extract_secondary_value(raw_rec, field_api_name):
+    if not field_api_name:
+        return None
+    if isinstance(raw_rec, str):
+        try:
+            raw_rec = json.loads(raw_rec)
+        except Exception:
+            return None
+    if not isinstance(raw_rec, dict):
+        return None
+        
+    val = raw_rec.get(field_api_name)
+    if val is None:
+        for k, v in raw_rec.items():
+            if str(k).lower() == str(field_api_name).lower():
+                val = v
+                break
+    if val is not None:
+        return extract_val(val)
+    return None
+
 def geocode_address(address, conn=None):
     cached = database.get_cached_geocode(address, conn=conn)
     if cached:
@@ -2780,34 +2801,7 @@ def get_map_data():
         sec_val = None
         sec_cfg = cfg.get('field_mappings', {}).get('secondary_filter')
         if sec_cfg and sec_cfg.get('enabled') and sec_cfg.get('field_api_name'):
-            f_name = sec_cfg.get('field_api_name')
-            raw_rec = r.get('record_data', {})
-            if isinstance(raw_rec, dict):
-                sec_val = extract_val(raw_rec.get(f_name))
-
-        # Perform server-side filter for default hidden secondary values (e.g. Low priority) unless include_hidden is requested
-        if not include_hidden and sec_cfg and sec_cfg.get('enabled'):
-            if sec_cfg.get('field_type') == 'options':
-                opts = sec_cfg.get('options', [])
-                opt_match = next((o for o in opts if str(o.get('value')).lower() == str(sec_val or '').lower()), None)
-                if opt_match and opt_match.get('default_visible') is False:
-                    continue
-            elif sec_cfg.get('field_type') == 'text':
-                rules = sec_cfg.get('text_rules', [])
-                should_skip = False
-                for rule in rules:
-                    if rule.get('default_visible') is False:
-                        val_lower = str(sec_val or '').lower()
-                        target_lower = str(rule.get('value') or '').lower()
-                        op = rule.get('operator')
-                        if op == 'contains' and target_lower in val_lower:
-                            should_skip = True
-                            break
-                        elif op == 'not_contains' and target_lower not in val_lower:
-                            should_skip = True
-                            break
-                if should_skip:
-                    continue
+            sec_val = extract_secondary_value(r.get('record_data'), sec_cfg.get('field_api_name'))
 
         map_points.append({
             'id': r['id'],
