@@ -2831,8 +2831,10 @@ def get_performance_stats_endpoint():
 @app.route('/api/field-options/<module_name>/<field_api_name>')
 def get_field_options_route(module_name, field_api_name):
     if 'access_token' not in session:
+        log_debug(f"[field-options] Unauthorized access attempt for {module_name}.{field_api_name}")
         return jsonify({'error': 'Unauthorized'}), 401
 
+    log_debug(f"[field-options] Searching options for module '{module_name}', field '{field_api_name}'")
     options = set()
 
     # 1. Check cached field metadata in global settings
@@ -2842,16 +2844,19 @@ def get_field_options_route(module_name, field_api_name):
             cached_fields = json.loads(cached_str)
             for f in cached_fields:
                 if f.get('api_name', '').lower() == field_api_name.lower():
-                    for pv in f.get('pick_list_values', []):
+                    pvals = f.get('pick_list_values', []) or []
+                    for pv in pvals:
                         if pv:
                             options.add(str(pv).strip())
-        except Exception:
-            pass
+                    log_debug(f"[field-options] Found {len(pvals)} picklist options in cached_fields_{module_name}")
+        except Exception as e:
+            log_debug(f"[field-options] Error reading cached_fields: {e}")
 
     # 2. Distinct values from cached records in database
     db_vals = database.get_distinct_field_values(module_name, field_api_name)
     for v in db_vals:
         options.add(v)
+    log_debug(f"[field-options] Found {len(db_vals)} distinct values in DB records for {module_name}.{field_api_name}: {db_vals[:10]}")
 
     # 3. Picklist values from Zoho CRM field metadata (if still empty or for fresh sync)
     token = session.get('access_token')
@@ -2866,6 +2871,7 @@ def get_field_options_route(module_name, field_api_name):
                             val = pv.get('actual_value') or pv.get('display_value') or pv.get('label')
                             if val:
                                 options.add(str(val).strip())
+                        log_debug(f"[field-options] Found {len(p_vals)} picklist values from live Zoho API for {field_api_name}")
         except Exception as e:
             log_debug(f"[field-options] Error fetching Zoho picklist: {e}")
 
@@ -2880,8 +2886,11 @@ def get_field_options_route(module_name, field_api_name):
             options.update(['Existing', 'New Customer', 'Partner', 'Vendor', 'Other'])
         elif 'rating' in lower:
             options.update(['Active', 'Acquired', 'Cold', 'Contacted', 'Market Failed', 'Project Cancelled', 'Shut Down'])
+        log_debug(f"[field-options] Applied fallback defaults for {field_api_name}: {sorted(list(options))}")
 
-    return jsonify({'options': sorted(list(options))})
+    result = sorted(list(options))
+    log_debug(f"[field-options] SUCCESS: Returning total {len(result)} options for {module_name}.{field_api_name}: {result}")
+    return jsonify({'options': result})
 
 # ── CRM Explorer (admin diagnostic tool) ─────────────────────────────────────
 

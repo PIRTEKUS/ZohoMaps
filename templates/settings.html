@@ -311,7 +311,12 @@
                                     <div class="form-row">
                                         <div class="form-group">
                                             <label>Filter Field <small style="color:#94a3b8;">— field to filter by (e.g. Priority)</small></label>
-                                            <select id="sec-filter-field" onchange="onSecFilterFieldChange()"><option value="">-- Select field --</option></select>
+                                            <div style="display:flex; gap:0.5rem; align-items:center;">
+                                                <select id="sec-filter-field" onchange="onSecFilterFieldChange(true)" style="flex:1;"><option value="">-- Select field --</option></select>
+                                                <button type="button" class="btn-secondary" onclick="onSecFilterFieldChange(true)" title="Fetch all possible option values from schema/database" style="padding:0.45rem 0.75rem; font-size:0.78rem; white-space:nowrap;">
+                                                    🔄 Load Options
+                                                </button>
+                                            </div>
                                         </div>
                                         <div class="form-group">
                                             <label>Field Type</label>
@@ -2038,6 +2043,9 @@ async function loadConfigIntoForm(conf) {
         const txtList = document.getElementById('sec-filter-text-list');
         if (txtList) txtList.innerHTML = '';
         (sec.text_rules || []).forEach(r => addSecTextRuleRow(r.operator, r.value, r.default_visible !== false));
+
+        // Fetch and merge any missing options for this field from schema/DB
+        onSecFilterFieldChange(false);
     }
     
     fetchPreviewRecord(conf.module_name);
@@ -2061,7 +2069,7 @@ function onSecFilterTypeChange() {
     document.getElementById('sec-filter-text-box').style.display = type === 'text' ? 'block' : 'none';
 }
 
-async function onSecFilterFieldChange() {
+async function onSecFilterFieldChange(forceReload = false) {
     const moduleName = document.getElementById('module-select')?.value;
     const fieldApi = document.getElementById('sec-filter-field')?.value;
     const list = document.getElementById('sec-filter-options-list');
@@ -2072,10 +2080,20 @@ async function onSecFilterFieldChange() {
         return;
     }
 
+    // Preserve existing option rows & visibility states if user already configured some
+    const existingMap = new Map();
+    list.querySelectorAll('.sec-option-row').forEach(row => {
+        const val = row.dataset.value;
+        const cb = row.querySelector('.sec-option-vis-cb');
+        if (val) existingMap.set(val, cb ? cb.checked : true);
+    });
+
     const fieldObj = (window.currentFields || []).find(f => (f.api_name || '').toLowerCase() === fieldApi.toLowerCase());
     let localOptions = (fieldObj && fieldObj.pick_list_values && fieldObj.pick_list_values.length > 0) ? fieldObj.pick_list_values : [];
 
-    list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
+    if (existingMap.size === 0 || forceReload) {
+        list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
+    }
 
     try {
         const res = await fetch(`/api/field-options/${encodeURIComponent(moduleName)}/${encodeURIComponent(fieldApi)}`);
@@ -2085,23 +2103,26 @@ async function onSecFilterFieldChange() {
             serverOptions = data.options || [];
         }
         
-        const combined = Array.from(new Set([...localOptions, ...serverOptions]));
-        list.innerHTML = '';
-
+        let combined = Array.from(new Set([...localOptions, ...serverOptions]));
         if (combined.length === 0) {
-            fallbackSecFieldDefaults(fieldApi);
-        } else {
+            const lower = (fieldApi || '').toLowerCase();
+            if (lower.includes('priority')) combined = ['Low', 'Medium', 'High', 'Urgent', 'Critical'];
+            else if (lower.includes('stage') || lower.includes('status')) combined = ['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'];
+            else if (lower.includes('type')) combined = ['Existing', 'New Customer', 'Partner', 'Vendor'];
+        }
+
+        if (combined.length > 0) {
+            list.innerHTML = '';
             combined.forEach(val => {
-                const isDefaultHidden = String(val).toLowerCase() === 'low';
-                addSecOptionRow(val, !isDefaultHidden);
+                const wasVis = existingMap.has(val) ? existingMap.get(val) : (String(val).toLowerCase() !== 'low');
+                addSecOptionRow(val, wasVis);
             });
+        } else if (existingMap.size === 0) {
+            fallbackSecFieldDefaults(fieldApi);
         }
     } catch(e) {
         console.error('Error fetching field options:', e);
-        if (localOptions.length > 0) {
-            list.innerHTML = '';
-            localOptions.forEach(val => addSecOptionRow(val, String(val).toLowerCase() !== 'low'));
-        } else {
+        if (existingMap.size === 0) {
             fallbackSecFieldDefaults(fieldApi);
         }
     }
