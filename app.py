@@ -2748,29 +2748,25 @@ def get_map_data():
     configs = {c['module_name']: c for c in database.get_effective_configs(session.get('user_id'), session.get('is_admin', False))}
     
 
+    include_hidden = request.args.get('include_hidden', 'false').lower() == 'true'
+
     module_labels_cache = {}
     map_points = []
     for r in records:
         cfg = configs.get(r['module_name'], {})
         
         # Build robust link for CRM or CRM Plus.
-        # module_url_map already maps api_name -> system tab name (e.g. Ship_To_Addresses -> CustomModule2)
         api_name = r['module_name']
         link_module = module_url_map.get(api_name, api_name)
         
-        # If the Zoho API returned the OrgID as the domain name (which it does for standard CRM), ignore it.
-        # We only want to use CRM Plus format if they actually have a custom domain name (like 'pirtekus').
         is_crm_plus = bool(domain_name and domain_name.lower() != 'unknown' and str(domain_name) != str(org_id) and str(domain_name) != f"org{org_id}")
         
         if org_id:
-            # Prefix org_id with 'org' if it's purely numeric
             safe_org_id = f"org{org_id}" if str(org_id).isdigit() else org_id
             
             if is_crm_plus:
-                # CRM Plus: use /tab/{system_module_name}/{record_id}
                 zoho_link = f"https://crmplus.{ZOHO_TLD}/{domain_name}/index.do/cxapp/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
             else:
-                # Standard Zoho CRM
                 zoho_link = f"https://crm.{ZOHO_TLD}/crm/{safe_org_id}/tab/{link_module}/{r['id']}"
         else:
             zoho_link = f"https://crm.{ZOHO_TLD}/crm/tab/{link_module}/{r['id']}"
@@ -2788,6 +2784,30 @@ def get_map_data():
             raw_rec = r.get('record_data', {})
             if isinstance(raw_rec, dict):
                 sec_val = extract_val(raw_rec.get(f_name))
+
+        # Perform server-side filter for default hidden secondary values (e.g. Low priority) unless include_hidden is requested
+        if not include_hidden and sec_cfg and sec_cfg.get('enabled'):
+            if sec_cfg.get('field_type') == 'options':
+                opts = sec_cfg.get('options', [])
+                opt_match = next((o for o in opts if str(o.get('value')).lower() == str(sec_val or '').lower()), None)
+                if opt_match and opt_match.get('default_visible') is False:
+                    continue
+            elif sec_cfg.get('field_type') == 'text':
+                rules = sec_cfg.get('text_rules', [])
+                should_skip = False
+                for rule in rules:
+                    if rule.get('default_visible') is False:
+                        val_lower = str(sec_val or '').lower()
+                        target_lower = str(rule.get('value') or '').lower()
+                        op = rule.get('operator')
+                        if op == 'contains' and target_lower in val_lower:
+                            should_skip = True
+                            break
+                        elif op == 'not_contains' and target_lower not in val_lower:
+                            should_skip = True
+                            break
+                if should_skip:
+                    continue
 
         map_points.append({
             'id': r['id'],

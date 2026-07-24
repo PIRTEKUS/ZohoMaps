@@ -998,6 +998,15 @@ window.toggleSecondaryVisibility = function(moduleName, displayLabel, optionValu
     } else {
         window.hiddenSecondaryValues.delete(key1);
         window.hiddenSecondaryValues.delete(key2);
+        
+        // If un-hiding, check if records for this option were omitted by server-side filter
+        const hasRecordsInLastData = (window.lastMapData || []).some(
+            item => String(item.secondary_value).toLowerCase() === String(optionValue).toLowerCase()
+        );
+        if (!hasRecordsInLastData && window.fetchData) {
+            window.fetchData(true);
+            return;
+        }
     }
     if (window.lastMapData) {
         plotData(window.lastMapData);
