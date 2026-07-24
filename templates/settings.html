@@ -2152,7 +2152,8 @@ function fallbackSecFieldDefaults(fieldApi) {
 function addSecOptionRow(value, visible = true) {
     const list = document.getElementById('sec-filter-options-list');
     if (!list) return;
-    if (list.querySelector('small')) list.innerHTML = '';
+    const placeholder = list.querySelector(':scope > small');
+    if (placeholder) placeholder.remove();
     
     const valStr = String(value);
     // Avoid duplicate rows
