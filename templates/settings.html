@@ -2061,29 +2061,57 @@ function onSecFilterTypeChange() {
     document.getElementById('sec-filter-text-box').style.display = type === 'text' ? 'block' : 'none';
 }
 
-function onSecFilterFieldChange() {
-    const fieldApi = document.getElementById('sec-filter-field').value;
+async function onSecFilterFieldChange() {
+    const moduleName = document.getElementById('module-select')?.value;
+    const fieldApi = document.getElementById('sec-filter-field')?.value;
     const list = document.getElementById('sec-filter-options-list');
     if (!list) return;
     list.innerHTML = '';
     
-    if (!fieldApi) {
-        list.innerHTML = '<small style="color:#94a3b8;">Select a module and field above, or add custom option values below.</small>';
+    if (!fieldApi || !moduleName) {
+        list.innerHTML = '<small style="color:#94a3b8;">Select a module and field above to load possible option values.</small>';
         return;
     }
 
+    list.innerHTML = '<small style="color:#38bdf8;">Loading options for ' + fieldApi + '...</small>';
+
+    try {
+        const res = await fetch(`/api/field-options/${encodeURIComponent(moduleName)}/${encodeURIComponent(fieldApi)}`);
+        if (res.ok) {
+            const data = await res.json();
+            const options = data.options || [];
+            list.innerHTML = '';
+            
+            if (options.length === 0) {
+                list.innerHTML = '<small style="color:#94a3b8;">No distinct options found for this field yet. You can add options below.</small>';
+            } else {
+                options.forEach(val => {
+                    const isDefaultHidden = String(val).toLowerCase() === 'low';
+                    addSecOptionRow(val, !isDefaultHidden);
+                });
+            }
+        } else {
+            fallbackSecFieldDefaults(fieldApi);
+        }
+    } catch(e) {
+        console.error('Error fetching field options:', e);
+        fallbackSecFieldDefaults(fieldApi);
+    }
+}
+
+function fallbackSecFieldDefaults(fieldApi) {
+    const list = document.getElementById('sec-filter-options-list');
+    if (!list) return;
+    list.innerHTML = '';
     let defaults = [];
-    const lower = fieldApi.toLowerCase();
+    const lower = (fieldApi || '').toLowerCase();
     if (lower.includes('priority')) {
         defaults = ['Low', 'Medium', 'High', 'Urgent'];
     } else if (lower.includes('stage') || lower.includes('status')) {
         defaults = ['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'];
     } else if (lower.includes('type')) {
         defaults = ['Existing', 'New Customer', 'Partner', 'Vendor'];
-    } else {
-        defaults = ['Option 1', 'Option 2', 'Option 3'];
     }
-
     defaults.forEach(val => {
         const isDefaultHidden = val.toLowerCase() === 'low';
         addSecOptionRow(val, !isDefaultHidden);

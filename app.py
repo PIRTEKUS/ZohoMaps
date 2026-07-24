@@ -2815,6 +2815,47 @@ def get_performance_stats_endpoint():
     stats = database.get_performance_stats(range_hours=range_hours)
     return jsonify(stats)
 
+
+@app.route('/api/field-options/<module_name>/<field_api_name>')
+def get_field_options_route(module_name, field_api_name):
+    if 'access_token' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    options = set()
+
+    # 1. Distinct values from cached records in database
+    db_vals = database.get_distinct_field_values(module_name, field_api_name)
+    for v in db_vals:
+        options.add(v)
+
+    # 2. Picklist values from Zoho CRM field metadata
+    token = session.get('access_token')
+    if token:
+        try:
+            metadata = zoho_api.fetch_module_fields(module_name, token)
+            if 'fields' in metadata:
+                for f in metadata['fields']:
+                    if f.get('api_name') == field_api_name:
+                        p_vals = f.get('pick_list_values', [])
+                        for pv in p_vals:
+                            val = pv.get('actual_value') or pv.get('display_value')
+                            if val:
+                                options.add(str(val).strip())
+        except Exception as e:
+            log_debug(f"[field-options] Error fetching Zoho picklist: {e}")
+
+    # Fallback defaults for common field names if still empty
+    if not options:
+        lower = field_api_name.lower()
+        if 'priority' in lower:
+            options.update(['Low', 'Medium', 'High', 'Urgent'])
+        elif 'stage' in lower or 'status' in lower:
+            options.update(['New', 'Open', 'In Progress', 'Closed', 'Won', 'Lost'])
+        elif 'type' in lower:
+            options.update(['Existing', 'New Customer', 'Partner', 'Vendor'])
+
+    return jsonify({'options': sorted(list(options))})
+
 # ── CRM Explorer (admin diagnostic tool) ─────────────────────────────────────
 
 @app.route('/admin/crm-explorer')

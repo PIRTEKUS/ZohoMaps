@@ -594,6 +594,37 @@ def get_hidden_records(user_id):
     return {(r['id'], r['module_name']) for r in rows}
 
 
+def get_distinct_field_values(module_name, field_api_name):
+    """Return a list of unique values present in record_data for a given module and field."""
+    conn = get_db_connection()
+    try:
+        rows = exec_query(conn, '''
+            SELECT record_data FROM module_records
+            WHERE module_name = ? AND record_data IS NOT NULL
+            LIMIT 3000
+        ''', (module_name,), fetchall=True)
+        
+        values = set()
+        for r in rows or []:
+            try:
+                raw = r['record_data']
+                data = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(data, dict):
+                    val = data.get(field_api_name)
+                    if val is not None:
+                        if isinstance(val, dict):
+                            val = val.get('name') or val.get('display_value') or str(val)
+                        val_str = str(val).strip()
+                        if val_str:
+                            values.add(val_str)
+            except Exception:
+                pass
+        return sorted(list(values))
+    finally:
+        conn.close()
+
+
+
 def log_performance_metric(endpoint, response_time_ms, record_count=0, user_id=None, status_code=200):
     """Log performance metrics for monitoring (safe, non-blocking fallback)."""
     try:
