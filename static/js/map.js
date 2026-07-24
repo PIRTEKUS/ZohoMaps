@@ -777,8 +777,15 @@ function isItemSecondaryHidden(item) {
     const secVal = item.secondary_value !== undefined && item.secondary_value !== null ? String(item.secondary_value) : '';
 
     if (sec.field_type === 'options') {
-        const key1 = `${cfg.module_name}::${secVal}`;
-        const key2 = `${item.module}::${secVal}`;
+        const optionsList = sec.options || [];
+        // If an option was removed by the user in settings, it is NOT in optionsList -> ALWAYS VISIBLE!
+        const configuredOpt = optionsList.find(o => String(o.value).toLowerCase() === secVal.toLowerCase());
+        if (!configuredOpt) {
+            return false;
+        }
+
+        const key1 = `${cfg.module_name}::${configuredOpt.value}`;
+        const key2 = `${item.module}::${configuredOpt.value}`;
         if (window.hiddenSecondaryValues.has(key1) || window.hiddenSecondaryValues.has(key2)) {
             return true;
         }
@@ -887,7 +894,6 @@ function updateLegend(data) {
                     const subRow = document.createElement('div');
                     subRow.className = 'cat-sub-row';
                     subRow.innerHTML = `
-                        <span class="cat-sub-tree-line">| - -</span>
                         <span class="cat-sub-label">${optVal}</span>
                         <span class="cat-count">${optCount}</span>
                         <button class="cat-eye" style="width:24px;height:24px;"
@@ -908,7 +914,6 @@ function updateLegend(data) {
                     const subRow = document.createElement('div');
                     subRow.className = 'cat-sub-row';
                     subRow.innerHTML = `
-                        <span class="cat-sub-tree-line">| - -</span>
                         <span class="cat-sub-label">${ruleText}</span>
                         <button class="cat-eye" style="width:24px;height:24px;"
                                 onclick="window.toggleSecondaryRuleVisibility('${safeApiName}', '${rule.operator}', '${safeRuleVal}', ${isSubVisible})"
