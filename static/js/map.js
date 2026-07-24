@@ -287,7 +287,7 @@ async function tryIPFallback() {
     }
 }
 
-async function loadMapData() {
+async function loadMapData(forceIncludeHidden = false) {
     try {
         const bounds = map.getBounds();
         if (!bounds) {
@@ -324,6 +324,10 @@ async function loadMapData() {
             sync_max_lng: sync_max_lng,
             sync: 'true'
         });
+
+        if (forceIncludeHidden || window.hasExplicitlyUnhiddenSecondary) {
+            params.append('include_hidden', 'true');
+        }
 
         const res = await fetch('/api/map-data?' + params.toString());
         if (!res.ok) {
@@ -998,6 +1002,7 @@ window.toggleSecondaryVisibility = function(moduleName, displayLabel, optionValu
     } else {
         window.hiddenSecondaryValues.delete(key1);
         window.hiddenSecondaryValues.delete(key2);
+        window.hasExplicitlyUnhiddenSecondary = true;
         
         // If un-hiding, check if records for this option were omitted by server-side filter
         const hasRecordsInLastData = (window.lastMapData || []).some(
