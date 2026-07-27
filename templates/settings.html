@@ -825,6 +825,49 @@
                 </div>
             </div>
 
+            <!-- ── MANUAL FRANCHISE & MODULE SYNC CARD ── -->
+            <div class="settings-card glass" style="margin-bottom:2rem; border-color: rgba(56,189,248,0.35);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                    <h2 style="margin:0; display:flex; align-items:center; gap:0.75rem; font-size:1.25rem;">
+                        ⚡ Manual Franchise & Module Sync
+                    </h2>
+                    <span style="font-size:0.8rem; color:#38bdf8; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:0.25rem 0.65rem; border-radius:12px; font-weight:600;">Admin Utility</span>
+                </div>
+                <p style="color:#94a3b8; font-size:0.88rem; margin-bottom:1.25rem; line-height:1.5;">
+                    Select a specific franchise territory and module to manually sync records from Zoho CRM into the local map database and view the exact record counts synced.
+                </p>
+
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:1.25rem; align-items:end;">
+                    <div>
+                        <label class="form-label" style="display:block; margin-bottom:0.4rem; font-size:0.85rem; font-weight:600; color:#cbd5e1;">Target Franchise:</label>
+                        <select id="manual-sync-franchise" class="form-control" style="width:100%; padding:0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-family:inherit; font-size:0.85rem; outline:none;">
+                            <option value="all">-- All Franchises --</option>
+                            {% for f in all_franchises %}
+                            <option value="{{ f.id }}">{{ f.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="form-label" style="display:block; margin-bottom:0.4rem; font-size:0.85rem; font-weight:600; color:#cbd5e1;">Target Module:</label>
+                        <select id="manual-sync-module" class="form-control" style="width:100%; padding:0.55rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-family:inherit; font-size:0.85rem; outline:none;">
+                            <option value="">-- All Configured Modules --</option>
+                            {% for c in configs %}
+                            <option value="{{ c.module_name }}">{{ c.module_label or c.module_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <button type="button" id="manual-sync-btn" onclick="runManualFranchiseSync()" class="btn-primary" style="width:100%; display:flex; align-items:center; justify-content:center; gap:0.5rem; padding:0.65rem 1.25rem; font-weight:600; background:linear-gradient(135deg,#38bdf8,#0284c7); border:none; border-radius:8px; color:white; cursor:pointer;">
+                            <span>⚡ Run Manual Sync</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="manual-sync-result" style="display:none; margin-top:1.25rem; padding:1rem 1.25rem; border-radius:8px; font-size:0.9rem;"></div>
+            </div>
+
             <!-- Franchise Boundaries (KML Import) -->
             <div class="settings-card glass" id="kml-import-card" style="border-color: rgba(99,102,241,0.35);">
                 <h2>Franchise Territory Boundaries <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
@@ -3321,6 +3364,67 @@ async function saveBoundaryStyles() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Save Style Settings';
+    }
+}
+
+async function runManualFranchiseSync() {
+    const btn = document.getElementById('manual-sync-btn');
+    const resBox = document.getElementById('manual-sync-result');
+    const franchiseId = document.getElementById('manual-sync-franchise')?.value;
+    const moduleName = document.getElementById('manual-sync-module')?.value;
+
+    if (!franchiseId) {
+        alert('Please select a franchise.');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳ Syncing...</span>`;
+    resBox.style.display = 'block';
+    resBox.style.background = 'rgba(56,189,248,0.1)';
+    resBox.style.border = '1px solid rgba(56,189,248,0.3)';
+    resBox.style.color = '#38bdf8';
+    resBox.innerHTML = `⏳ Requesting data from Zoho CRM... Please wait while records are fetched and geocoded.`;
+
+    try {
+        const res = await fetch('/api/admin/sync-franchise-module', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                franchise_id: franchiseId,
+                module_name: moduleName || null
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || 'Sync request failed');
+        }
+
+        resBox.style.background = 'rgba(16,185,129,0.12)';
+        resBox.style.border = '1px solid rgba(16,185,129,0.3)';
+        resBox.style.color = '#6ee7b7';
+
+        let modDetails = (data.modules || []).map(m => `<li><strong>${m.module}</strong>: ${m.synced} records synced (${m.geocoded} new geocodes)</li>`).join('');
+
+        resBox.innerHTML = `
+            <div style="font-weight:600; font-size:1rem; margin-bottom:0.4rem;">
+                ✅ Sync Completed for ${data.franchise_name}!
+            </div>
+            <div>Total Records Synced: <strong>${data.total_synced}</strong> (${data.total_geocoded} new geocodes)</div>
+            <ul style="margin-top:0.4rem; margin-bottom:0; padding-left:1.2rem; font-size:0.85rem; color:#cbd5e1;">
+                ${modDetails}
+            </ul>
+        `;
+    } catch (e) {
+        console.error(e);
+        resBox.style.background = 'rgba(239,68,68,0.12)';
+        resBox.style.border = '1px solid rgba(239,68,68,0.3)';
+        resBox.style.color = '#fca5a5';
+        resBox.innerHTML = `❌ Sync Error: ${e.message}`;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<span>⚡ Run Manual Sync</span>`;
     }
 }
 </script>
