@@ -1225,12 +1225,16 @@ try {
 let currentFields = [];
 let previewRecord = null;
 
-// Tab switcher function defined globally so it can be called by inline onclick
 function switchTab(tabId) {
+    const target = document.getElementById(tabId);
+    if (!target) {
+        console.warn('[switchTab] Tab element not found:', tabId);
+        return;
+    }
     document.querySelectorAll('.settings-tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.settings-tab-btn').forEach(el => el.classList.remove('active'));
     
-    document.getElementById(tabId).classList.add('active');
+    target.classList.add('active');
     
     const buttons = document.querySelectorAll('.settings-tab-btn');
     buttons.forEach(btn => {
@@ -1239,7 +1243,7 @@ function switchTab(tabId) {
         }
     });
 
-    if (tabId === 'perf-tab') {
+    if (tabId === 'perf-tab' && typeof loadPerformanceStats === 'function') {
         loadPerformanceStats(window.currentPerfRangeHours || 24);
     }
 }
@@ -3424,6 +3428,8 @@ async function runManualFranchiseSync() {
                 franchise_id: franchiseId,
                 module_name: moduleName || null
             })
+        });
+
         if (res.status === 401 || res.redirected) {
             window.location.href = '/login';
             return;
