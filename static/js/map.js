@@ -219,6 +219,14 @@ async function initMap() {
 
     // Also keep direct click on the button (handled in map.html as searchArea())
     window.fetchData = loadMapData;
+
+    // Clean up query parameters / deep-link path from URL bar back to main URL ({mainURL}) without page reload
+    if (window.history && window.history.replaceState) {
+        if (window.location.search || (window.location.pathname !== '/' && window.location.pathname !== '')) {
+            window.history.replaceState({}, document.title, '/');
+        }
+    }
+
     // Check if target coordinates are provided for deep-linking
     if (window.targetLat !== null && window.targetLng !== null && !isNaN(window.targetLat) && !isNaN(window.targetLng)) {
         const targetPos = {
@@ -266,8 +274,10 @@ async function initMap() {
         } else {
             tryIPFallback();
         }
-        renderFranchiseBoundaries();
     }
+
+    // Always render franchise boundaries (KML / polygon layers) regardless of deep-linking or standard load
+    renderFranchiseBoundaries();
 }
 
 async function tryIPFallback() {
