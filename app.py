@@ -763,16 +763,21 @@ def settings():
 
 @app.route('/api/modules')
 def get_modules():
-    if 'access_token' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    token = session.get('access_token')
-    metadata = zoho_api.fetch_module_metadata(token) if token else {}
-    
-    if 'modules' not in metadata:
+    token = session.get('access_token') or _get_admin_access_token()
+    metadata = {}
+    if token:
+        try:
+            metadata = zoho_api.fetch_module_metadata(token)
+        except Exception as e:
+            log_debug(f"Error fetching module metadata: {e}")
+
+    if not isinstance(metadata, dict) or 'modules' not in metadata:
         admin_token = _get_admin_access_token()
         if admin_token and admin_token != token:
-            metadata = zoho_api.fetch_module_metadata(admin_token)
+            try:
+                metadata = zoho_api.fetch_module_metadata(admin_token)
+            except Exception:
+                pass
 
     if 'modules' in metadata:
         modules = [{'api_name': m['api_name'], 'plural_label': m.get('plural_label', m['api_name'])} for m in metadata['modules']]
