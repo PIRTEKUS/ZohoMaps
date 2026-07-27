@@ -1786,6 +1786,7 @@ def api_admin_sync_franchise_module():
         except Exception:
             pass
 
+        target_user_id = session.get('user_id') or 'global'
         import random, time, threading
         job_id = f"sync_{int(time.time())}_{random.randint(1000, 9999)}"
         MANUAL_SYNC_JOBS[job_id] = {
@@ -1799,7 +1800,7 @@ def api_admin_sync_franchise_module():
             'modules': []
         }
 
-        def _bg_sync_worker(job_id, admin_token, modules_to_sync, franchise_id, franchise_name):
+        def _bg_sync_worker(job_id, admin_token, modules_to_sync, franchise_id, franchise_name, target_user_id):
             try:
                 FRANCHISE_FIELD_MAP = {
                     'Accounts':          'Franchise',
@@ -1854,7 +1855,9 @@ def api_admin_sync_franchise_module():
                                     mod_geocoded += 1
 
                         if page_tuples:
-                            database.save_module_records_batch(None, page_tuples)
+                            database.save_module_records_batch(target_user_id, page_tuples)
+                            if target_user_id != 'global':
+                                database.save_module_records_batch('global', page_tuples)
 
                         MANUAL_SYNC_JOBS[job_id]['total_synced'] = total_synced_all + mod_synced
                         MANUAL_SYNC_JOBS[job_id]['total_geocoded'] = total_geocoded_all + mod_geocoded
@@ -1880,7 +1883,7 @@ def api_admin_sync_franchise_module():
                 MANUAL_SYNC_JOBS[job_id]['status'] = 'failed'
                 MANUAL_SYNC_JOBS[job_id]['error'] = str(e)
 
-        thread = threading.Thread(target=_bg_sync_worker, args=(job_id, admin_token, modules_to_sync, franchise_id, franchise_name))
+        thread = threading.Thread(target=_bg_sync_worker, args=(job_id, admin_token, modules_to_sync, franchise_id, franchise_name, target_user_id))
         thread.daemon = True
         thread.start()
 
@@ -1904,6 +1907,17 @@ def api_admin_sync_franchise_module_status(job_id):
     if not job:
         return jsonify({'error': 'Job not found'}), 404
     return jsonify(job)
+
+
+@app.route('/api/admin/reset-sync-flag', methods=['POST'])
+def api_admin_reset_sync_flag():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin privileges required'}), 403
+    global _nightly_sync_running
+    _nightly_sync_running = False
+    database.set_global_setting('nightly_sync_running', 'false')
+    log_debug("[reset-sync-flag] Admin manually reset nightly_sync_running flag to false.")
+    return jsonify({'status': 'success', 'message': 'Sync status flag reset to Idle.'})
 
 
 def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
