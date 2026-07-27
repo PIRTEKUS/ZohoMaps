@@ -1763,22 +1763,29 @@ function updateCustomMarkerPreview() {
 }
 
 async function fetchModules() {
+    const select = document.getElementById('module-select');
+    if (!select) return;
     try {
         const res = await fetch('/api/modules');
+        if (res.status === 401 || res.redirected) {
+            window.location.href = '/login';
+            return;
+        }
         const modules = await res.json();
-        const select = document.getElementById('module-select');
-        if (!select) return;
         select.innerHTML = '<option value="">Select a Module...</option>';
-        modules.forEach(m => {
-            const opt = document.createElement('option');
-            opt.value = m.api_name;
-            opt.textContent = m.plural_label || m.api_name;
-            select.appendChild(opt);
-        });
+        if (Array.isArray(modules) && modules.length > 0) {
+            modules.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.api_name;
+                opt.textContent = m.plural_label || m.api_name;
+                select.appendChild(opt);
+            });
+        } else {
+            select.innerHTML = '<option value="">-- Select a Module --</option>';
+        }
     } catch (e) {
         console.error(e);
-        const select = document.getElementById('module-select');
-        if (select) select.innerHTML = '<option value="">Error loading modules</option>';
+        if (select) select.innerHTML = '<option value="">Error loading modules (Refresh page)</option>';
     }
 }
 
