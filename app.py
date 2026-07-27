@@ -1687,6 +1687,64 @@ def sync_single_record(module_name, record_id):
         return jsonify({'error': str(e)}), 500
 
 
+def _process_single_record_tuple(record, module_name, config):
+    fields = config['field_mappings']
+    name_field = fields.get('name', 'Account_Name' if module_name == 'Accounts' else 'Last_Name' if module_name == 'Leads' else 'Name')
+    
+    lat, lng = None, None
+    name_raw = record.get(name_field, record.get('Full_Name', record.get('Name', f"{module_name} {record.get('id')}")))
+    name = str(extract_val(name_raw))
+    
+    lat_field = fields.get('latitude')
+    lng_field = fields.get('longitude')
+    if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+        try:
+            lat = float(record[lat_field])
+            lng = float(record[lng_field])
+        except (ValueError, TypeError):
+            pass
+    
+    was_geocoded = False
+    if lat is None or lng is None:
+        address_parts = []
+        for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+            val = extract_val(record.get(fields.get(k)))
+            if val and not _is_null_string(val):
+                address_parts.append(str(val))
+        
+        full_address = ", ".join(address_parts)
+        if full_address:
+            lat, lng = geocode_address(full_address)
+            if lat is not None and lng is not None:
+                was_geocoded = True
+
+    if lat is not None and lng is not None:
+        record_data = record.copy()
+        if record.get('Modified_Time') and '_modified_time' not in record_data:
+            record_data['_modified_time'] = str(record.get('Modified_Time'))
+
+        df = fields.get('duplicate_filter', {})
+        if df.get('enabled') and df.get('parent_link_field'):
+            raw_parent = record.get(df['parent_link_field'])
+            if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                record_data['_dup_parent_id'] = raw_parent['id']
+            elif raw_parent:
+                record_data['_dup_parent_id'] = str(raw_parent)
+
+        tuple_data = (
+            record.get('id'),
+            module_name,
+            name,
+            lat,
+            lng,
+            config['marker_color'],
+            record_data
+        )
+        return tuple_data, was_geocoded
+
+    return None, False
+
+
 @app.route('/api/admin/sync-franchise-module', methods=['POST'])
 def api_admin_sync_franchise_module():
     try:
@@ -1768,18 +1826,17 @@ def api_admin_sync_franchise_module():
                 if not records:
                     break
 
+                page_tuples = []
                 for record in records:
-                    res = process_and_save_record(
-                        user_id=None,
-                        module_name=mod,
-                        record=record,
-                        config=cfg,
-                        is_admin=True
-                    )
-                    if res in ('synced', 'geocoded'):
+                    tup, was_geocoded = _process_single_record_tuple(record, mod, cfg)
+                    if tup:
+                        page_tuples.append(tup)
                         mod_synced += 1
-                        if res == 'geocoded':
+                        if was_geocoded:
                             mod_geocoded += 1
+
+                if page_tuples:
+                    database.save_module_records_batch(None, page_tuples)
 
                 page += 1
 
