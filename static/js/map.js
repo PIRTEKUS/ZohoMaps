@@ -875,7 +875,6 @@ function updateLegend(data) {
                     onclick="window.toggleModuleVisibility('${safeLabel}', ${isVisible})" title="${isVisible ? 'Hide' : 'Show'} ${displayLabel}">
                 ${isVisible ? eyeVisible : eyeHidden}
             </button>
-            <button class="cat-sync" onclick="syncSingleModule('${safeApiName}', this)">Sync</button>
         `;
         legend.appendChild(row);
 
