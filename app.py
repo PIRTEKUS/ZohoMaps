@@ -1651,115 +1651,125 @@ def sync_single_record(module_name, record_id):
     except Exception as e:
         log_debug(f"Sync error: {str(e)}")
         import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/sync-franchise-module', methods=['POST'])
 def api_admin_sync_franchise_module():
-    if not session.get('is_admin'):
-        return jsonify({'error': 'Admin privileges required'}), 403
-
-    data = request.get_json() or {}
-    module_name = data.get('module_name')
-    franchise_id = data.get('franchise_id')
-
-    if not franchise_id:
-        return jsonify({'error': 'Please select a franchise'}), 400
-
-    admin_token = _require_admin_token('admin-manual-franchise-sync')
-    if not admin_token:
-        return jsonify({'error': 'Admin token not available. Please log in again.'}), 400
-
-    effective_configs = database.get_effective_configs(session.get('user_id'), is_admin=True)
-    
-    if module_name:
-        modules_to_sync = [m for m in effective_configs if m['module_name'] == module_name]
-    else:
-        modules_to_sync = effective_configs
-
-    if not modules_to_sync:
-        return jsonify({'error': 'No matching module configuration found'}), 404
-
-    FRANCHISE_FIELD_MAP = {
-        'Accounts':          'Franchise',
-        'Leads':             'Select_Your_Franchise1',
-        'Ship_To_Addresses': 'Franchise'
-    }
-
-    franchise_name = franchise_id
-    cached_franchises_str = database.get_global_setting('cached_all_franchises', '[]')
     try:
-        for f in json.loads(cached_franchises_str):
-            if str(f.get('id')) == str(franchise_id):
-                franchise_name = f.get('name', franchise_id)
-                break
-    except Exception:
-        pass
+        if not session.get('is_admin'):
+            return jsonify({'error': 'Admin privileges required'}), 403
 
-    results = []
-    total_synced_all = 0
-    total_geocoded_all = 0
+        data = request.get_json() or {}
+        module_name = data.get('module_name')
+        franchise_id = data.get('franchise_id')
 
-    for cfg in modules_to_sync:
-        mod = cfg['module_name']
-        f_field = FRANCHISE_FIELD_MAP.get(mod, 'Franchise')
+        if not franchise_id:
+            return jsonify({'error': 'Please select a franchise'}), 400
+
+        admin_token = _require_admin_token('admin-manual-franchise-sync')
+        if not admin_token:
+            return jsonify({'error': 'Admin token not available. Please log in again.'}), 400
+
+        effective_configs = database.get_effective_configs(session.get('user_id'), is_admin=True)
         
-        if franchise_id == 'all':
-            criteria = None
+        if module_name:
+            modules_to_sync = [m for m in effective_configs if m['module_name'] == module_name]
         else:
-            criteria = f"({f_field}.id:in:{franchise_id})"
+            modules_to_sync = effective_configs
 
-        field_metadata = zoho_api.fetch_module_fields(mod, admin_token)
-        sync_fields_list = build_fields_list(mod, cfg, field_metadata)
+        if not modules_to_sync:
+            return jsonify({'error': 'No matching module configuration found'}), 404
 
-        page = 1
-        page_token = None
-        more_records = True
-        mod_synced = 0
-        mod_geocoded = 0
+        FRANCHISE_FIELD_MAP = {
+            'Accounts':          'Franchise',
+            'Leads':             'Select_Your_Franchise1',
+            'Ship_To_Addresses': 'Franchise'
+        }
 
-        while more_records:
-            if criteria:
-                api_data = zoho_api.search_records(mod, criteria, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
+        franchise_name = franchise_id
+        cached_franchises_str = database.get_global_setting('cached_all_franchises', '[]')
+        try:
+            for f in json.loads(cached_franchises_str):
+                if str(f.get('id')) == str(franchise_id):
+                    franchise_name = f.get('name', franchise_id)
+                    break
+        except Exception:
+            pass
+
+        results = []
+        total_synced_all = 0
+        total_geocoded_all = 0
+
+        for cfg in modules_to_sync:
+            mod = cfg['module_name']
+            f_field = FRANCHISE_FIELD_MAP.get(mod, 'Franchise')
+            
+            if franchise_id == 'all':
+                criteria = None
             else:
-                api_data = zoho_api.fetch_module_records(mod, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
+                criteria = f"({f_field}.id:in:{franchise_id})"
 
-            records = api_data.get('data', [])
-            info = api_data.get('info', {})
-            more_records = info.get('more_records', False)
-            page_token = info.get('next_page_token')
+            field_metadata = zoho_api.fetch_module_fields(mod, admin_token)
+            sync_fields_list = build_fields_list(mod, cfg, field_metadata)
 
-            if not records:
-                break
+            page = 1
+            page_token = None
+            more_records = True
+            mod_synced = 0
+            mod_geocoded = 0
 
-            for record in records:
-                res = process_and_save_record(
-                    user_id=None,
-                    module_name=mod,
-                    record=record,
-                    config=cfg,
-                    is_admin=True
-                )
-                if res in ('synced', 'geocoded'):
-                    mod_synced += 1
-                    if res == 'geocoded':
-                        mod_geocoded += 1
+            while more_records:
+                if criteria:
+                    api_data = zoho_api.search_records(mod, criteria, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
+                else:
+                    api_data = zoho_api.fetch_module_records(mod, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
 
-            page += 1
+                records = api_data.get('data', [])
+                info = api_data.get('info', {})
+                more_records = info.get('more_records', False)
+                page_token = info.get('next_page_token')
 
-        results.append({
-            'module': mod,
-            'synced': mod_synced,
-            'geocoded': mod_geocoded
+                if not records:
+                    break
+
+                for record in records:
+                    res = process_and_save_record(
+                        user_id=None,
+                        module_name=mod,
+                        record=record,
+                        config=cfg,
+                        is_admin=True
+                    )
+                    if res in ('synced', 'geocoded'):
+                        mod_synced += 1
+                        if res == 'geocoded':
+                            mod_geocoded += 1
+
+                page += 1
+
+            results.append({
+                'module': mod,
+                'synced': mod_synced,
+                'geocoded': mod_geocoded
+            })
+            total_synced_all += mod_synced
+            total_geocoded_all += mod_geocoded
+
+        return jsonify({
+            'status': 'success',
+            'franchise_name': franchise_name,
+            'franchise_id': franchise_id,
+            'total_synced': total_synced_all,
+            'total_geocoded': total_geocoded_all,
+            'modules': results
         })
-        total_synced_all += mod_synced
-        total_geocoded_all += mod_geocoded
-
-    return jsonify({
-        'status': 'success',
-        'franchise_name': franchise_name,
-        'franchise_id': franchise_id,
-        'total_synced': total_synced_all,
-        'total_geocoded': total_geocoded_all,
-        'modules': results
-    })
+    except Exception as e:
+        log_debug(f"[sync-franchise-module] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 
 def do_sync_module(user_id, access_token, module_name, config, is_admin=False):

@@ -3396,7 +3396,15 @@ async function runManualFranchiseSync() {
             })
         });
 
-        const data = await res.json();
+        const contentType = res.headers.get('content-type') || '';
+        let data = {};
+        if (contentType.includes('application/json')) {
+            data = await res.json();
+        } else {
+            const rawText = await res.text();
+            throw new Error(`Server returned HTTP ${res.status}: ${rawText.substring(0, 150)}`);
+        }
+
         if (!res.ok) {
             throw new Error(data.error || 'Sync request failed');
         }
