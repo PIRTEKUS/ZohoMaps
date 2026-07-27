@@ -45,9 +45,18 @@
                 <h2>Add New Mapping</h2>
                 <form id="config-form" class="config-form">
                     <div class="form-group">
-                        <label>Zoho Module</label>
-                        <select id="module-select" required>
-                            <option value="">Loading modules...</option>
+                        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.4rem;">
+                            <label for="module-select" style="margin:0; font-weight:600; color:#cbd5e1; font-size:0.85rem;">Zoho Module:</label>
+                            <button type="button" id="refresh-modules-btn" onclick="refreshZohoModules()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#38bdf8; border-radius:6px; padding:0.2rem 0.65rem; font-size:0.75rem; cursor:pointer; display:flex; align-items:center; gap:4px;" title="Refresh module list from Zoho CRM API">
+                                <span>🔄 Refresh Zoho Modules</span>
+                            </button>
+                        </div>
+                        <select id="module-select" required style="width:100%;">
+                            <option value="">-- Select a Module --</option>
+                            <option value="Accounts">Accounts</option>
+                            <option value="Leads">Leads</option>
+                            <option value="Ship_To_Addresses">Ship To Addresses</option>
+                            <option value="Contacts">Contacts</option>
                         </select>
                     </div>
 
@@ -1269,8 +1278,6 @@ function updateBracketBounds() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    fetchModules();
-    
     // Initialize color swatches
     const SWATCHES = [
         '#ef4444','#f97316','#eab308','#22c55e','#14b8a6',
@@ -1767,9 +1774,16 @@ function updateCustomMarkerPreview() {
     }
 }
 
-async function fetchModules() {
+async function refreshZohoModules() {
+    const btn = document.getElementById('refresh-modules-btn');
     const select = document.getElementById('module-select');
     if (!select) return;
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳ Loading...</span>`;
+    }
+    
     try {
         const res = await fetch('/api/modules');
         if (res.status === 401 || res.redirected) {
@@ -1777,20 +1791,25 @@ async function fetchModules() {
             return;
         }
         const modules = await res.json();
-        select.innerHTML = '<option value="">Select a Module...</option>';
         if (Array.isArray(modules) && modules.length > 0) {
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">-- Select a Module --</option>';
             modules.forEach(m => {
                 const opt = document.createElement('option');
                 opt.value = m.api_name;
                 opt.textContent = m.plural_label || m.api_name;
+                if (m.api_name === currentVal) opt.selected = true;
                 select.appendChild(opt);
             });
-        } else {
-            select.innerHTML = '<option value="">-- Select a Module --</option>';
         }
     } catch (e) {
         console.error(e);
-        if (select) select.innerHTML = '<option value="">Error loading modules (Refresh page)</option>';
+        alert('Could not refresh modules from Zoho API: ' + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<span>🔄 Refresh Zoho Modules</span>`;
+        }
     }
 }
 

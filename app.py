@@ -763,33 +763,47 @@ def settings():
 
 @app.route('/api/modules')
 def get_modules():
+    log_debug("[/api/modules] Request received. Session keys: %s" % list(session.keys()))
     token = session.get('access_token') or _get_admin_access_token()
+    token_src = "session" if session.get('access_token') else "admin_fallback"
+    log_debug("[/api/modules] Token source: %s (token_present=%s)" % (token_src, bool(token)))
+    
     metadata = {}
     if token:
         try:
+            log_debug("[/api/modules] Requesting module metadata from Zoho CRM API...")
             metadata = zoho_api.fetch_module_metadata(token)
+            log_debug("[/api/modules] Response keys: %s" % (list(metadata.keys()) if isinstance(metadata, dict) else type(metadata)))
         except Exception as e:
-            log_debug(f"Error fetching module metadata: {e}")
+            log_debug(f"[/api/modules] Error fetching module metadata: {e}")
 
     if not isinstance(metadata, dict) or 'modules' not in metadata:
+        code_err = metadata.get('code', '?') if isinstance(metadata, dict) else 'N/A'
+        msg_err = metadata.get('message', '?') if isinstance(metadata, dict) else 'N/A'
+        log_debug(f"[/api/modules] Primary token metadata missing 'modules'. Code: {code_err}, Message: {msg_err}")
+        
         admin_token = _get_admin_access_token()
         if admin_token and admin_token != token:
             try:
+                log_debug("[/api/modules] Retrying with fresh admin token...")
                 metadata = zoho_api.fetch_module_metadata(admin_token)
-            except Exception:
-                pass
+            except Exception as e:
+                log_debug(f"[/api/modules] Admin token retry error: {e}")
 
-    if 'modules' in metadata:
+    if isinstance(metadata, dict) and 'modules' in metadata:
         modules = [{'api_name': m['api_name'], 'plural_label': m.get('plural_label', m['api_name'])} for m in metadata['modules']]
+        log_debug("[/api/modules] SUCCESS: Fetched %d modules from Zoho API" % len(modules))
         database.set_global_setting('cached_modules', json.dumps(modules))
         return jsonify(modules)
     
     cached = database.get_global_setting('cached_modules', '')
     if cached:
         try:
-            return jsonify(json.loads(cached))
-        except Exception:
-            pass
+            cached_list = json.loads(cached)
+            log_debug("[/api/modules] Returning %d cached modules from database" % len(cached_list))
+            return jsonify(cached_list)
+        except Exception as e:
+            log_debug(f"[/api/modules] Error reading cached modules: {e}")
     
     default_modules = [
         {'api_name': 'Accounts', 'plural_label': 'Accounts'},
@@ -797,6 +811,7 @@ def get_modules():
         {'api_name': 'Ship_To_Addresses', 'plural_label': 'Ship To Addresses'},
         {'api_name': 'Contacts', 'plural_label': 'Contacts'}
     ]
+    log_debug("[/api/modules] Returning static fallback modules: %s" % [m['api_name'] for m in default_modules])
     return jsonify(default_modules)
 
 @app.route('/api/fields/<module_name>')
