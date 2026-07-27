@@ -1745,6 +1745,8 @@ def _process_single_record_tuple(record, module_name, config):
     return None, False
 
 
+MANUAL_SYNC_JOBS = {}
+
 @app.route('/api/admin/sync-franchise-module', methods=['POST'])
 def api_admin_sync_franchise_module():
     try:
@@ -1774,12 +1776,6 @@ def api_admin_sync_franchise_module():
         if not modules_to_sync:
             return jsonify({'error': 'No matching module configuration found'}), 404
 
-        FRANCHISE_FIELD_MAP = {
-            'Accounts':          'Franchise',
-            'Leads':             'Select_Your_Franchise1',
-            'Ship_To_Addresses': 'Franchise'
-        }
-
         franchise_name = franchise_id
         cached_franchises_str = database.get_global_setting('cached_all_franchises', '[]')
         try:
@@ -1790,77 +1786,124 @@ def api_admin_sync_franchise_module():
         except Exception:
             pass
 
-        results = []
-        total_synced_all = 0
-        total_geocoded_all = 0
-
-        for cfg in modules_to_sync:
-            mod = cfg['module_name']
-            f_field = FRANCHISE_FIELD_MAP.get(mod, 'Franchise')
-            
-            if franchise_id == 'all':
-                criteria = None
-            else:
-                criteria = f"({f_field}.id:in:{franchise_id})"
-
-            field_metadata = zoho_api.fetch_module_fields(mod, admin_token)
-            sync_fields_list = build_fields_list(mod, cfg, field_metadata)
-
-            page = 1
-            page_token = None
-            more_records = True
-            mod_synced = 0
-            mod_geocoded = 0
-
-            while more_records:
-                if criteria:
-                    api_data = zoho_api.search_records(mod, criteria, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
-                else:
-                    api_data = zoho_api.fetch_module_records(mod, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
-
-                records = api_data.get('data', [])
-                info = api_data.get('info', {})
-                more_records = info.get('more_records', False)
-                page_token = info.get('next_page_token')
-
-                if not records:
-                    break
-
-                page_tuples = []
-                for record in records:
-                    tup, was_geocoded = _process_single_record_tuple(record, mod, cfg)
-                    if tup:
-                        page_tuples.append(tup)
-                        mod_synced += 1
-                        if was_geocoded:
-                            mod_geocoded += 1
-
-                if page_tuples:
-                    database.save_module_records_batch(None, page_tuples)
-
-                page += 1
-
-            results.append({
-                'module': mod,
-                'synced': mod_synced,
-                'geocoded': mod_geocoded
-            })
-            total_synced_all += mod_synced
-            total_geocoded_all += mod_geocoded
-
-        return jsonify({
-            'status': 'success',
+        import random, time, threading
+        job_id = f"sync_{int(time.time())}_{random.randint(1000, 9999)}"
+        MANUAL_SYNC_JOBS[job_id] = {
+            'status': 'running',
             'franchise_name': franchise_name,
             'franchise_id': franchise_id,
-            'total_synced': total_synced_all,
-            'total_geocoded': total_geocoded_all,
-            'modules': results
+            'module_name': module_name,
+            'progress_msg': f"Starting sync for {franchise_name}...",
+            'total_synced': 0,
+            'total_geocoded': 0,
+            'modules': []
+        }
+
+        def _bg_sync_worker(job_id, admin_token, modules_to_sync, franchise_id, franchise_name):
+            try:
+                FRANCHISE_FIELD_MAP = {
+                    'Accounts':          'Franchise',
+                    'Leads':             'Select_Your_Franchise1',
+                    'Ship_To_Addresses': 'Franchise'
+                }
+                results = []
+                total_synced_all = 0
+                total_geocoded_all = 0
+
+                for cfg in modules_to_sync:
+                    mod = cfg['module_name']
+                    f_field = FRANCHISE_FIELD_MAP.get(mod, 'Franchise')
+                    
+                    if franchise_id == 'all':
+                        criteria = None
+                    else:
+                        criteria = f"({f_field}.id:in:{franchise_id})"
+
+                    MANUAL_SYNC_JOBS[job_id]['progress_msg'] = f"Fetching field metadata for {mod}..."
+                    field_metadata = zoho_api.fetch_module_fields(mod, admin_token)
+                    sync_fields_list = build_fields_list(mod, cfg, field_metadata)
+
+                    page = 1
+                    page_token = None
+                    more_records = True
+                    mod_synced = 0
+                    mod_geocoded = 0
+
+                    while more_records:
+                        MANUAL_SYNC_JOBS[job_id]['progress_msg'] = f"Fetching page {page} for {mod} (Synced {total_synced_all + mod_synced} records)..."
+                        if criteria:
+                            api_data = zoho_api.search_records(mod, criteria, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
+                        else:
+                            api_data = zoho_api.fetch_module_records(mod, admin_token, fields=sync_fields_list, page=page, page_token=page_token)
+
+                        records = api_data.get('data', [])
+                        info = api_data.get('info', {})
+                        more_records = info.get('more_records', False)
+                        page_token = info.get('next_page_token')
+
+                        if not records:
+                            break
+
+                        page_tuples = []
+                        for record in records:
+                            tup, was_geocoded = _process_single_record_tuple(record, mod, cfg)
+                            if tup:
+                                page_tuples.append(tup)
+                                mod_synced += 1
+                                if was_geocoded:
+                                    mod_geocoded += 1
+
+                        if page_tuples:
+                            database.save_module_records_batch(None, page_tuples)
+
+                        MANUAL_SYNC_JOBS[job_id]['total_synced'] = total_synced_all + mod_synced
+                        MANUAL_SYNC_JOBS[job_id]['total_geocoded'] = total_geocoded_all + mod_geocoded
+                        page += 1
+
+                    results.append({
+                        'module': mod,
+                        'synced': mod_synced,
+                        'geocoded': mod_geocoded
+                    })
+                    total_synced_all += mod_synced
+                    total_geocoded_all += mod_geocoded
+
+                MANUAL_SYNC_JOBS[job_id]['status'] = 'completed'
+                MANUAL_SYNC_JOBS[job_id]['total_synced'] = total_synced_all
+                MANUAL_SYNC_JOBS[job_id]['total_geocoded'] = total_geocoded_all
+                MANUAL_SYNC_JOBS[job_id]['modules'] = results
+                MANUAL_SYNC_JOBS[job_id]['progress_msg'] = f"Sync completed! {total_synced_all} records synced."
+            except Exception as e:
+                log_debug(f"[bg-manual-sync] Error in job {job_id}: {e}")
+                import traceback
+                traceback.print_exc()
+                MANUAL_SYNC_JOBS[job_id]['status'] = 'failed'
+                MANUAL_SYNC_JOBS[job_id]['error'] = str(e)
+
+        thread = threading.Thread(target=_bg_sync_worker, args=(job_id, admin_token, modules_to_sync, franchise_id, franchise_name))
+        thread.daemon = True
+        thread.start()
+
+        return jsonify({
+            'status': 'started',
+            'job_id': job_id,
+            'franchise_name': franchise_name
         })
     except Exception as e:
         log_debug(f"[sync-franchise-module] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/sync-franchise-module-status/<job_id>', methods=['GET'])
+def api_admin_sync_franchise_module_status(job_id):
+    if not session.get('is_admin'):
+        return jsonify({'error': 'Admin privileges required'}), 403
+    job = MANUAL_SYNC_JOBS.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify(job)
 
 
 def do_sync_module(user_id, access_token, module_name, config, is_admin=False):

@@ -3413,12 +3413,12 @@ async function runManualFranchiseSync() {
     }
 
     btn.disabled = true;
-    btn.innerHTML = `<span>⏳ Syncing...</span>`;
+    btn.innerHTML = `<span>⏳ Starting Sync...</span>`;
     resBox.style.display = 'block';
     resBox.style.background = 'rgba(56,189,248,0.1)';
     resBox.style.border = '1px solid rgba(56,189,248,0.3)';
     resBox.style.color = '#38bdf8';
-    resBox.innerHTML = `⏳ Requesting data from Zoho CRM... Please wait while records are fetched and geocoded.`;
+    resBox.innerHTML = `⏳ Requesting background sync from Zoho CRM...`;
 
     try {
         const res = await fetch('/api/admin/sync-franchise-module', {
@@ -3435,43 +3435,70 @@ async function runManualFranchiseSync() {
             return;
         }
 
-        const contentType = res.headers.get('content-type') || '';
-        let data = {};
-        if (contentType.includes('application/json')) {
-            data = await res.json();
-        } else {
-            const rawText = await res.text();
-            throw new Error(`Server returned HTTP ${res.status}: ${rawText.substring(0, 150)}`);
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to start sync task');
         }
 
-        if (!res.ok) {
-            throw new Error(data.error || 'Sync request failed');
-        }
+        const jobId = data.job_id;
 
-        resBox.style.background = 'rgba(16,185,129,0.12)';
-        resBox.style.border = '1px solid rgba(16,185,129,0.3)';
-        resBox.style.color = '#6ee7b7';
+        // Poll for progress every 2 seconds
+        const pollInterval = setInterval(async () => {
+            try {
+                const statusRes = await fetch('/api/admin/sync-franchise-module-status/' + jobId);
+                if (!statusRes.ok) return;
+                const statusData = await statusRes.json();
 
-        let modDetails = (data.modules || []).map(m => `<li><strong>${m.module}</strong>: ${m.synced} records synced (${m.geocoded} new geocodes)</li>`).join('');
+                if (statusData.status === 'running') {
+                    resBox.innerHTML = `
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <span>⏳</span>
+                            <strong>${statusData.progress_msg || 'Syncing...'}</strong>
+                        </div>
+                    `;
+                } else if (statusData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    btn.disabled = false;
+                    btn.innerHTML = `<span>⚡ Run Manual Sync</span>`;
 
-        resBox.innerHTML = `
-            <div style="font-weight:600; font-size:1rem; margin-bottom:0.4rem;">
-                ✅ Sync Completed for ${data.franchise_name}!
-            </div>
-            <div>Total Records Synced: <strong>${data.total_synced}</strong> (${data.total_geocoded} new geocodes)</div>
-            <ul style="margin-top:0.4rem; margin-bottom:0; padding-left:1.2rem; font-size:0.85rem; color:#cbd5e1;">
-                ${modDetails}
-            </ul>
-        `;
+                    resBox.style.background = 'rgba(16,185,129,0.12)';
+                    resBox.style.border = '1px solid rgba(16,185,129,0.3)';
+                    resBox.style.color = '#6ee7b7';
+
+                    let modDetails = (statusData.modules || []).map(m => `<li><strong>${m.module}</strong>: ${m.synced} records synced (${m.geocoded} new geocodes)</li>`).join('');
+
+                    resBox.innerHTML = `
+                        <div style="font-weight:600; font-size:1rem; margin-bottom:0.4rem;">
+                            ✅ Sync Completed for ${statusData.franchise_name}!
+                        </div>
+                        <div>Total Records Synced: <strong>${statusData.total_synced}</strong> (${statusData.total_geocoded} new address geocodes)</div>
+                        <ul style="margin-top:0.4rem; margin-bottom:0; padding-left:1.2rem; font-size:0.85rem; color:#cbd5e1;">
+                            ${modDetails}
+                        </ul>
+                    `;
+                } else if (statusData.status === 'failed') {
+                    clearInterval(pollInterval);
+                    btn.disabled = false;
+                    btn.innerHTML = `<span>⚡ Run Manual Sync</span>`;
+
+                    resBox.style.background = 'rgba(239,68,68,0.12)';
+                    resBox.style.border = '1px solid rgba(239,68,68,0.3)';
+                    resBox.style.color = '#fca5a5';
+                    resBox.innerHTML = `❌ Sync Error: ${statusData.error || 'Sync task failed'}`;
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }, 2000);
+
     } catch (e) {
         console.error(e);
+        btn.disabled = false;
+        btn.innerHTML = `<span>⚡ Run Manual Sync</span>`;
         resBox.style.background = 'rgba(239,68,68,0.12)';
         resBox.style.border = '1px solid rgba(239,68,68,0.3)';
         resBox.style.color = '#fca5a5';
         resBox.innerHTML = `❌ Sync Error: ${e.message}`;
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = `<span>⚡ Run Manual Sync</span>`;
     }
 }
 </script>
