@@ -3394,7 +3394,10 @@ async function runManualFranchiseSync() {
                 franchise_id: franchiseId,
                 module_name: moduleName || null
             })
-        });
+        if (res.status === 401 || res.redirected) {
+            window.location.href = '/login';
+            return;
+        }
 
         const contentType = res.headers.get('content-type') || '';
         let data = {};

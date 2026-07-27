@@ -1658,6 +1658,8 @@ def sync_single_record(module_name, record_id):
 @app.route('/api/admin/sync-franchise-module', methods=['POST'])
 def api_admin_sync_franchise_module():
     try:
+        if 'access_token' not in session or not session.get('user_id'):
+            return jsonify({'error': 'Unauthorized. Session expired. Please log in again.'}), 401
         if not session.get('is_admin'):
             return jsonify({'error': 'Admin privileges required'}), 403
 
