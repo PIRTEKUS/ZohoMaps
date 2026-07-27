@@ -1609,7 +1609,13 @@ function fitMapToBoundary(boundary) {
     }
     
     if (!bounds.isEmpty()) {
-        window.isProgrammaticMove = true; // Prevents auto-search trigger
+        window.isProgrammaticMove = true; // Prevents auto-search trigger while animating
         window.map.fitBounds(bounds);
+        google.maps.event.addListenerOnce(window.map, 'idle', () => {
+            window.isProgrammaticMove = false;
+            const btn = document.getElementById('search-area-btn');
+            if (btn) btn.style.display = 'none';
+            loadMapData();
+        });
     }
 }
