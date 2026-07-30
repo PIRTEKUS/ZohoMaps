@@ -685,7 +685,7 @@ window.buildPopupContent = function(item) {
         ${callButtonHtml}
         <button class="btn-primary" style="font-size:0.7rem;padding:0.25rem;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.getDirections(${item.lat},${item.lng})">Directions</button>
         <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.addToRoute('${item.id}','${safeName}',${item.lat},${item.lng})">Add to Route</button>
-        <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.open('${item.zoho_link}','_blank')">Open Web</button>
+        <button class="btn-secondary" style="font-size:0.7rem;padding:0.25rem;color:#1e293b;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.open('${item.zoho_link}','_blank')">Open CRM</button>
         ${isMobile ? `<button class="btn-primary" style="font-size:0.7rem;padding:0.25rem;grid-column:span 2;" onclick="window.activeInfoWindow&&window.activeInfoWindow.close();window.location.href='${zohoAppLink}'">Open in Zoho App</button>` : ''}
     </div></div></div>`;
     return content;
