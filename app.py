@@ -1869,8 +1869,7 @@ def api_admin_sync_franchise_module():
 
                         if page_tuples:
                             database.save_module_records_batch(target_user_id, page_tuples)
-                            if target_user_id != 'global':
-                                database.save_module_records_batch('global', page_tuples)
+                            database.save_global_records_batch(page_tuples)
 
                         MANUAL_SYNC_JOBS[job_id]['total_synced'] = total_synced_all + mod_synced
                         MANUAL_SYNC_JOBS[job_id]['total_geocoded'] = total_geocoded_all + mod_geocoded

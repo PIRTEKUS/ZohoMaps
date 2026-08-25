@@ -220,6 +220,54 @@ def init_db():
     conn.commit()
     conn.close()
 
+    try:
+        repair_franchise_ids()
+    except Exception as e:
+        print(f"repair_franchise_ids notice: {e}")
+
+def repair_franchise_ids():
+    """Auto-repair existing records in module_records where franchise_id is NULL by parsing JSON record_data."""
+    conn = get_db_connection()
+    try:
+        # Also migrate any 'global' user_id rows to '__global__'
+        exec_query(conn, "UPDATE module_records SET user_id = '__global__' WHERE user_id = 'global'")
+        
+        rows = exec_query(conn, "SELECT id, module_name, user_id, record_data FROM module_records WHERE franchise_id IS NULL", fetchall=True)
+        if rows:
+            if not IS_POSTGRES:
+                exec_query(conn, 'BEGIN TRANSACTION')
+            for r in rows:
+                try:
+                    rd = json.loads(r['record_data'])
+                    fid = None
+                    for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises']:
+                        fval = rd.get(ff)
+                        if isinstance(fval, list):
+                            first = next((item for item in fval if isinstance(item, dict)), None)
+                            if first and first.get('id'):
+                                fid = str(first['id'])
+                                break
+                        elif isinstance(fval, dict) and fval.get('id'):
+                            fid = str(fval['id'])
+                            break
+                        elif fval and str(fval).strip() and str(fval).lower() not in ['none', 'null', '']:
+                            fid = str(fval)
+                            break
+                    if fid:
+                        exec_query(conn, "UPDATE module_records SET franchise_id = ? WHERE id = ? AND module_name = ? AND user_id = ?", (fid, str(r['id']), r['module_name'], str(r['user_id'])))
+                except Exception:
+                    pass
+            if not IS_POSTGRES:
+                conn.commit()
+    except Exception as e:
+        if not IS_POSTGRES:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
 def get_global_setting(key, default=None):
     conn = get_db_connection()
     row = exec_query(conn, 'SELECT value FROM global_settings WHERE key = ?', (key,), fetchone=True)
@@ -526,25 +574,24 @@ def get_records_in_bounds_global(franchise_ids, min_lat, max_lat, min_lng, max_l
         franchise_filter = f"AND franchise_id IN ({placeholders})"
         franchise_params = tuple(franchise_ids)
 
-    base_params = (GLOBAL_USER, min_lat, max_lat)
     if min_lng > max_lng:
         query = f'''
             SELECT * FROM module_records
-            WHERE user_id = ? AND lat >= ? AND lat <= ?
+            WHERE user_id IN ('__global__', 'global') AND lat >= ? AND lat <= ?
             AND (lng >= ? OR lng <= ?)
             {franchise_filter}
-            LIMIT 5000
+            LIMIT 15000
         '''
-        params = base_params + (min_lng, max_lng) + franchise_params
+        params = (min_lat, max_lat, min_lng, max_lng) + franchise_params
     else:
         query = f'''
             SELECT * FROM module_records
-            WHERE user_id = ? AND lat >= ? AND lat <= ?
+            WHERE user_id IN ('__global__', 'global') AND lat >= ? AND lat <= ?
             AND lng >= ? AND lng <= ?
             {franchise_filter}
-            LIMIT 5000
+            LIMIT 15000
         '''
-        params = base_params + (min_lng, max_lng) + franchise_params
+        params = (min_lat, max_lat, min_lng, max_lng) + franchise_params
 
     rows = exec_query(conn, query, params, fetchall=True)
     conn.close()
