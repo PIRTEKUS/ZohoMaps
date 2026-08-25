@@ -1933,6 +1933,58 @@ def api_admin_reset_sync_flag():
     return jsonify({'status': 'success', 'message': 'Sync status flag reset to Idle.'})
 
 
+@app.route('/api/admin/franchise-record-counts', methods=['GET'])
+def api_admin_franchise_record_counts():
+    """Returns a breakdown of stored module records grouped by franchise_id and module_name."""
+    if 'access_token' not in session or not session.get('user_id'):
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    conn = database.get_db_connection()
+    try:
+        rows = database.exec_query(conn, '''
+            SELECT franchise_id, module_name, COUNT(*) as record_count,
+                   SUM(CASE WHEN lat IS NOT NULL AND lng IS NOT NULL THEN 1 ELSE 0 END) as geocoded_count
+            FROM module_records
+            GROUP BY franchise_id, module_name
+        ''', fetchall=True)
+    finally:
+        conn.close()
+
+    cached_franchises_str = database.get_global_setting('cached_all_franchises', '[]')
+    franchise_name_map = {}
+    try:
+        for f in json.loads(cached_franchises_str):
+            fid = str(f.get('id'))
+            fname = f.get('name', f'Franchise {fid}')
+            franchise_name_map[fid] = fname
+    except Exception:
+        pass
+
+    franchise_data = {}
+    for r in rows:
+        fid = str(r['franchise_id']) if r['franchise_id'] is not None else 'Unassigned'
+        fname = franchise_name_map.get(fid, f'Franchise {fid}' if fid != 'Unassigned' else 'Unassigned / Global')
+        if fid not in franchise_data:
+            franchise_data[fid] = {
+                'franchise_id': fid,
+                'franchise_name': fname,
+                'modules': {},
+                'total_records': 0
+            }
+        cnt = r['record_count']
+        geo = r['geocoded_count'] or 0
+        franchise_data[fid]['modules'][r['module_name']] = {
+            'count': cnt,
+            'geocoded': geo
+        }
+        franchise_data[fid]['total_records'] += cnt
+
+    return jsonify({
+        'status': 'success',
+        'franchises': list(franchise_data.values())
+    })
+
+
 def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     """Core logic to fetch, geocode, and save records for a single module.
     Non-admin users have records filtered to their assigned franchises."""
