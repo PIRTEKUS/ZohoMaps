@@ -1268,20 +1268,29 @@ try {
 let currentFields = [];
 let previewRecord = null;
 
-function switchTab(tabId) {
+window.switchTab = function(tabId) {
+    console.log('[switchTab] Switching to tab:', tabId);
     const target = document.getElementById(tabId);
     if (!target) {
         console.warn('[switchTab] Tab element not found:', tabId);
         return;
     }
-    document.querySelectorAll('.settings-tab-content').forEach(el => el.classList.remove('active'));
-    document.querySelectorAll('.settings-tab-btn').forEach(el => el.classList.remove('active'));
+    
+    document.querySelectorAll('.settings-tab-content').forEach(el => {
+        el.classList.remove('active');
+        el.style.display = 'none';
+    });
+    
+    document.querySelectorAll('.settings-tab-btn').forEach(el => {
+        el.classList.remove('active');
+    });
     
     target.classList.add('active');
+    target.style.display = 'block';
     
-    const buttons = document.querySelectorAll('.settings-tab-btn');
-    buttons.forEach(btn => {
-        if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes(tabId)) {
+    document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+        const onclickAttr = btn.getAttribute('onclick') || '';
+        if (onclickAttr.includes(tabId)) {
             btn.classList.add('active');
         }
     });
@@ -1292,7 +1301,7 @@ function switchTab(tabId) {
     if (tabId === 'diagnostics-tab' && typeof loadFranchiseRecordCounts === 'function') {
         loadFranchiseRecordCounts();
     }
-}
+};
 
 let _rawFranchiseCounts = [];
 
