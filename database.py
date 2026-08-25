@@ -256,9 +256,21 @@ def repair_single_franchise_records(franchise_id):
         if rows:
             if not IS_POSTGRES:
                 exec_query(conn, 'BEGIN TRANSACTION')
+            seen_tuples = set()
+            unique_counts = {}
             for r in rows:
+                key = (str(r['id']), r['module_name'])
+                if key in seen_tuples:
+                    continue
+                seen_tuples.add(key)
                 mod = r['module_name']
-                repaired_counts[mod] = repaired_counts.get(mod, 0) + 1
+                unique_counts[mod] = unique_counts.get(mod, 0) + 1
+                try:
+                    rd = json.loads(r['record_data']) if isinstance(r['record_data'], str) else dict(r['record_data'])
+                except Exception:
+                    rd = {}
+                rd['id'] = str(r['id'])
+                rd['franchise_id'] = fid_str
                 exec_query(conn, '''
                     INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -270,9 +282,10 @@ def repair_single_franchise_records(franchise_id):
                         record_data=EXCLUDED.record_data,
                         franchise_id=EXCLUDED.franchise_id
                 ''', (GLOBAL_USER, str(r['id']), r['module_name'], r['name'], r['lat'], r['lng'], r['color'],
-                      r['record_data'] if isinstance(r['record_data'], str) else json.dumps(r['record_data']), fid_str))
+                      json.dumps(rd), fid_str))
             if not IS_POSTGRES:
                 conn.commit()
+            repaired_counts = unique_counts
     except Exception as e:
         if not IS_POSTGRES:
             try:

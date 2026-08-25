@@ -3010,41 +3010,17 @@ def get_map_data():
     # Query user's own cache (updated by on-demand syncs, viewport syncs, single record syncs)
     user_records = database.get_records_in_bounds(user_id, min_lat, max_lat, min_lng, max_lng)
 
-    # Clean stale records (old cached format from previous app versions without 'id')
-    # so they don't override the new full-field global cache records.
-    filtered_global = []
-    stale_global_ids = []
     for r in global_records:
-        if 'id' in r['record_data']:
-            filtered_global.append(r)
-        else:
-            stale_global_ids.append(r['id'])
-    global_records = filtered_global
+        if not isinstance(r.get('record_data'), dict):
+            r['record_data'] = {}
+        if 'id' not in r['record_data']:
+            r['record_data']['id'] = str(r['id'])
 
-    filtered_user = []
-    stale_user_ids = []
     for r in user_records:
-        if 'id' in r['record_data']:
-            filtered_user.append(r)
-        else:
-            stale_user_ids.append(r['id'])
-    user_records = filtered_user
-
-    if stale_global_ids or stale_user_ids:
-        try:
-            conn = database.get_db_connection()
-            if stale_global_ids:
-                log_debug(f"[map] Deleting {len(stale_global_ids)} stale global records (old format)")
-                placeholders = ','.join(['?'] * len(stale_global_ids))
-                database.exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND id IN ({placeholders})", ('__global__',) + tuple(stale_global_ids))
-            if stale_user_ids:
-                log_debug(f"[map] Deleting {len(stale_user_ids)} stale user records (old format) for {user_id}")
-                placeholders = ','.join(['?'] * len(stale_user_ids))
-                database.exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND id IN ({placeholders})", (str(user_id),) + tuple(stale_user_ids))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            log_debug(f"[map] Error deleting stale records: {e}")
+        if not isinstance(r.get('record_data'), dict):
+            r['record_data'] = {}
+        if 'id' not in r['record_data']:
+            r['record_data']['id'] = str(r['id'])
 
     # Merge: user_records takes priority over global_records because they are on-demand / newer.
     # Filter out hidden records.
