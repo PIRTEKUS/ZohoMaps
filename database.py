@@ -220,43 +220,57 @@ def init_db():
     conn.commit()
     conn.close()
 
-    try:
-        repair_franchise_ids()
-    except Exception as e:
-        print(f"repair_franchise_ids notice: {e}")
-
-def repair_franchise_ids():
-    """Auto-repair existing records in module_records where franchise_id is NULL by parsing JSON record_data."""
+def repair_single_franchise_records(franchise_id):
+    """Repair and ensure all records for a specific franchise are set to user_id='__global__' and have franchise_id populated."""
     conn = get_db_connection()
+    repaired_counts = {}
     try:
-        # Also migrate any 'global' user_id rows to '__global__'
-        exec_query(conn, "UPDATE module_records SET user_id = '__global__' WHERE user_id = 'global'")
+        fid_str = str(franchise_id)
+        # 1. Any record with franchise_id = fid_str
+        rows = exec_query(conn, "SELECT id, module_name, name, lat, lng, color, record_data, franchise_id FROM module_records WHERE franchise_id = ?", (fid_str,), fetchall=True) or []
         
-        rows = exec_query(conn, "SELECT id, module_name, user_id, record_data FROM module_records WHERE franchise_id IS NULL", fetchall=True)
+        # 2. Also search for records where franchise_id IS NULL or empty but record_data contains this franchise ID
+        null_rows = exec_query(conn, "SELECT id, module_name, name, lat, lng, color, record_data, franchise_id FROM module_records WHERE franchise_id IS NULL OR franchise_id = '' OR franchise_id = 'None'", fetchall=True) or []
+        for nr in null_rows:
+            try:
+                rd = json.loads(nr['record_data'])
+                found = False
+                for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises']:
+                    fval = rd.get(ff)
+                    if isinstance(fval, list):
+                        first = next((item for item in fval if isinstance(item, dict)), None)
+                        if first and str(first.get('id')) == fid_str:
+                            found = True
+                            break
+                    elif isinstance(fval, dict) and str(fval.get('id')) == fid_str:
+                        found = True
+                        break
+                    elif fval and str(fval) == fid_str:
+                        found = True
+                        break
+                if found:
+                    rows.append(nr)
+            except Exception:
+                pass
+
         if rows:
             if not IS_POSTGRES:
                 exec_query(conn, 'BEGIN TRANSACTION')
             for r in rows:
-                try:
-                    rd = json.loads(r['record_data'])
-                    fid = None
-                    for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises']:
-                        fval = rd.get(ff)
-                        if isinstance(fval, list):
-                            first = next((item for item in fval if isinstance(item, dict)), None)
-                            if first and first.get('id'):
-                                fid = str(first['id'])
-                                break
-                        elif isinstance(fval, dict) and fval.get('id'):
-                            fid = str(fval['id'])
-                            break
-                        elif fval and str(fval).strip() and str(fval).lower() not in ['none', 'null', '']:
-                            fid = str(fval)
-                            break
-                    if fid:
-                        exec_query(conn, "UPDATE module_records SET franchise_id = ? WHERE id = ? AND module_name = ? AND user_id = ?", (fid, str(r['id']), r['module_name'], str(r['user_id'])))
-                except Exception:
-                    pass
+                mod = r['module_name']
+                repaired_counts[mod] = repaired_counts.get(mod, 0) + 1
+                exec_query(conn, '''
+                    INSERT INTO module_records (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id, module_name, user_id) DO UPDATE SET
+                        name=EXCLUDED.name,
+                        lat=EXCLUDED.lat,
+                        lng=EXCLUDED.lng,
+                        color=EXCLUDED.color,
+                        record_data=EXCLUDED.record_data,
+                        franchise_id=EXCLUDED.franchise_id
+                ''', (GLOBAL_USER, str(r['id']), r['module_name'], r['name'], r['lat'], r['lng'], r['color'],
+                      r['record_data'] if isinstance(r['record_data'], str) else json.dumps(r['record_data']), fid_str))
             if not IS_POSTGRES:
                 conn.commit()
     except Exception as e:
@@ -265,8 +279,11 @@ def repair_franchise_ids():
                 conn.rollback()
             except Exception:
                 pass
+        raise e
     finally:
         conn.close()
+
+    return repaired_counts
 
 def get_global_setting(key, default=None):
     conn = get_db_connection()

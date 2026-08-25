@@ -1984,6 +1984,26 @@ def api_admin_franchise_record_counts():
     })
 
 
+@app.route('/api/admin/repair-franchise/<franchise_id>', methods=['POST'])
+def api_admin_repair_franchise(franchise_id):
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Admin privileges required'}), 403
+    try:
+        repaired = database.repair_single_franchise_records(franchise_id)
+        total_repaired = sum(repaired.values())
+        log_debug(f"[repair-franchise] Repaired {total_repaired} records for franchise {franchise_id}: {repaired}")
+        return jsonify({
+            'status': 'success',
+            'franchise_id': franchise_id,
+            'repaired': repaired,
+            'total_repaired': total_repaired,
+            'message': f"Successfully repaired {total_repaired} records for franchise {franchise_id}."
+        })
+    except Exception as e:
+        log_debug(f"[repair-franchise] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def do_sync_module(user_id, access_token, module_name, config, is_admin=False):
     """Core logic to fetch, geocode, and save records for a single module.
     Non-admin users have records filtered to their assigned franchises."""

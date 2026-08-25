@@ -1351,14 +1351,46 @@ function renderFranchiseRecordCountsTable(list) {
             <td style="padding:10px 12px; text-align:center;">${leads}</td>
             <td style="padding:10px 12px; text-align:center;">${ship}</td>
             <td style="padding:10px 12px; text-align:center;"><strong style="color:#38bdf8;">${f.total_records.toLocaleString()}</strong></td>
-            <td style="padding:10px 12px; text-align:right;">
-                ${f.franchise_id !== 'Unassigned' ? `<button type="button" onclick="triggerFranchiseSyncFromTable('${f.franchise_id}')" style="padding:0.3rem 0.65rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); color:#6ee7b7; border-radius:6px; font-size:0.75rem; cursor:pointer; font-weight:600;">⚡ Sync Franchise</button>` : ''}
+            <td style="padding:10px 12px; text-align:right; white-space:nowrap;">
+                ${f.franchise_id !== 'Unassigned' ? `
+                    <button type="button" onclick="repairFranchiseFromTable('${f.franchise_id}', this)" style="padding:0.3rem 0.65rem; margin-right:6px; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); color:#38bdf8; border-radius:6px; font-size:0.75rem; cursor:pointer; font-weight:600;" title="Link and activate all records for this franchise">🛠️ Repair Data</button>
+                    <button type="button" onclick="triggerFranchiseSyncFromTable('${f.franchise_id}')" style="padding:0.3rem 0.65rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); color:#6ee7b7; border-radius:6px; font-size:0.75rem; cursor:pointer; font-weight:600;">⚡ Sync</button>
+                ` : ''}
             </td>
         </tr>`;
     }).join('');
 
     tbody.innerHTML = html;
     if (summary) summary.textContent = `Showing ${list.length} franchises (${grandTotal.toLocaleString()} total records)`;
+}
+
+async function repairFranchiseFromTable(franchiseId, btnEl) {
+    if (!confirm('Repair and activate all cached records for this franchise on the map?')) return;
+    const oldText = btnEl ? btnEl.innerHTML : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = '⏳ Repairing...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/repair-franchise/' + encodeURIComponent(franchiseId), {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Repair failed');
+        }
+        let details = Object.entries(data.repaired || {}).map(([m, c]) => `${m}: ${c}`).join(', ');
+        alert(`✅ Repair Successful!\nRepaired ${data.total_repaired} records (${details}).\n\nThese records are now fully active on the map!`);
+        loadFranchiseRecordCounts();
+    } catch(e) {
+        alert('❌ Error repairing franchise records: ' + e.message);
+    } finally {
+        if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = oldText;
+        }
+    }
 }
 
 function filterFranchiseRecordCounts() {
