@@ -1,5 +1,6 @@
 import requests
 import os
+import time
 from configparser import ConfigParser
 from urllib.parse import urlencode
 
@@ -128,12 +129,20 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
         params['fields'] = ','.join(fields)
         
     url = f"{ZOHO_API_URL}/crm/v3/{module_name}"
-    response = requests.get(url, headers=headers, params=params, timeout=12)
-    if response.status_code == 204:
-        return {'data': []} # No content
-    if response.status_code != 200:
-        print(f"[ZOHO API ERROR] fetch_module_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
-    return response.json()
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+            if response.status_code == 204:
+                return {'data': []} # No content
+            if response.status_code != 200:
+                print(f"[ZOHO API ERROR] fetch_module_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[ZOHO API NETWORK ERROR] fetch_module_records attempt {attempt+1} failed for {module_name}: {e}")
+            raise e
 
 def fetch_single_record(module_name, record_id, access_token, fields=None):
     headers = {'Authorization': f'Zoho-oauthtoken {access_token}'}
@@ -197,12 +206,20 @@ def search_records(module_name, criteria, access_token, fields=None, page=1, pag
         
     if fields:
         params['fields'] = ",".join(fields)
-    response = requests.get(url, headers=headers, params=params, timeout=12)
-    if response.status_code == 200:
-        return response.json()
-    if response.status_code != 204:
-        print(f"[ZOHO API ERROR] search_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
-    return {'data': []}
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code != 204:
+                print(f"[ZOHO API ERROR] search_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
+            return {'data': []}
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[ZOHO API NETWORK ERROR] search_records attempt {attempt+1} failed for {module_name}: {e}")
+            return {'data': []}
 
 def coql_query(select_query, access_token):
     """Execute a COQL (CRM Object Query Language) query.

@@ -1731,6 +1731,18 @@ def _process_single_record_tuple(record, module_name, config):
             elif raw_parent:
                 record_data['_dup_parent_id'] = str(raw_parent)
 
+        franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
+        franchise_id = None
+        if franchise_field:
+            fval = record.get(franchise_field)
+            if isinstance(fval, list):
+                first = next((item for item in fval if isinstance(item, dict)), None)
+                franchise_id = str(first.get('id', '')) or None if first else None
+            elif isinstance(fval, dict):
+                franchise_id = str(fval.get('id', '')) or None
+            elif fval:
+                franchise_id = str(fval)
+
         tuple_data = (
             record.get('id'),
             module_name,
@@ -1738,7 +1750,8 @@ def _process_single_record_tuple(record, module_name, config):
             lat,
             lng,
             config['marker_color'],
-            record_data
+            record_data,
+            franchise_id
         )
         return tuple_data, was_geocoded
 
