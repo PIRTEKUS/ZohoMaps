@@ -612,17 +612,17 @@ def callback():
                 log_debug(f"User logged in: {session['user_name']} ({session['user_id']}) - Admin: {session.get('is_admin')}")
                 
                 # Cache the admin's refresh_token globally so it can be used as a fallback
+                # Cache the admin's refresh_token globally so it can be used as a fallback
                 # for team users who lack API scope (CRM profile API access disabled).
                 # SECURITY: This token is ONLY used server-side, never exposed to the frontend.
                 if session['is_admin'] and 'refresh_token' in token_data:
                     encrypted = encrypt_token(token_data['refresh_token'])
                     database.set_global_setting('admin_refresh_token', encrypted)
                     log_debug("Admin refresh token encrypted and cached for team user fallback sync.")
-                    # Immediately cache the module URL map so non-admin users get correct links
-                    _cache_module_url_map(session['access_token'])
+                    # Cache the module URL map in background so it doesn't block login redirect
+                    threading.Thread(target=_cache_module_url_map, args=(session['access_token'],), daemon=True).start()
                 
-                # If user logged in via email fallback, try to resolve their real numeric CRM user ID
-                # using the admin token. This is needed for the Owner.id filter in the fallback sync.
+                # If user logged in via email fallback, resolve their numeric CRM user ID
                 if not session.get('is_admin') and '@' in str(session.get('user_id', '')):
                     try:
                         admin_token = _get_admin_access_token()
@@ -638,31 +638,28 @@ def callback():
                             
                             user_key = user_email.lower().strip()
                             if user_key not in mappings:
-                                log_debug(f"User {user_key} not in cache, rebuilding mappings...")
-                                new_mappings = _refresh_user_mappings(admin_token)
-                                if new_mappings:
-                                    mappings = new_mappings
-                            
-                            user_detail = mappings.get(user_key)
-                            if user_detail:
-                                session['user_id'] = user_detail['id']
-                                session['user_email'] = user_email
-                                log_debug(f"Resolved team user email {user_email} -> CRM ID {user_detail['id']}")
+                                log_debug(f"User {user_key} not in cache, dispatching background refresh...")
+                                threading.Thread(target=_refresh_user_mappings, args=(admin_token,), daemon=True).start()
+                            else:
+                                user_detail = mappings.get(user_key)
+                                if user_detail:
+                                    session['user_id'] = user_detail['id']
+                                    session['user_email'] = user_email
+                                    log_debug(f"Resolved team user email {user_email} -> CRM ID {user_detail['id']}")
                     except Exception as e:
                         log_debug(f"Could not resolve team user CRM ID: {e}")
 
-                # Pre-cache franchise memberships for this user so the first sync is fast.
-                # Run synchronously to check access and prevent map race conditions.
-                uid = session['user_id']
-                try:
-                    tok = _get_admin_access_token()
-                    if tok:
-                        result = _get_user_franchise_ids(uid, tok, force_refresh=True)
-                        log_debug(f"[login] Franchise synchronous cache check for {uid}: {result.get('names', [])}")
-                    else:
-                        log_debug(f"[login] Warning: admin access token not available during login callback for {uid}")
-                except Exception as ex:
-                    log_debug(f"[login] Franchise synchronous cache check failed: {ex}")
+                # For standard users, load cached franchise info instantly (<1ms)
+                # and refresh in background if needed, avoiding blocking 80+ territory API calls.
+                if not session.get('is_admin', False):
+                    uid = session['user_id']
+                    try:
+                        tok = _get_admin_access_token()
+                        if tok:
+                            _get_user_franchise_ids(uid, tok, force_refresh=False)
+                            threading.Thread(target=_get_user_franchise_ids, args=(uid, tok, True), daemon=True).start()
+                    except Exception as ex:
+                        log_debug(f"[login] Franchise background refresh notice: {ex}")
 
             if state and state.startswith('/') and not state.startswith('//'):
                 log_debug(f"Redirecting user to preserved state target: {state}")
@@ -1731,17 +1728,25 @@ def _process_single_record_tuple(record, module_name, config):
             elif raw_parent:
                 record_data['_dup_parent_id'] = str(raw_parent)
 
-        franchise_field = _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)
         franchise_id = None
-        if franchise_field:
-            fval = record.get(franchise_field)
+        for ff in ([_NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name)] if _NIGHTLY_FRANCHISE_FIELD_MAP.get(module_name) else []) + ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
+            if not ff:
+                continue
+            fval = record.get(ff)
             if isinstance(fval, list):
-                first = next((item for item in fval if isinstance(item, dict)), None)
-                franchise_id = str(first.get('id', '')) or None if first else None
-            elif isinstance(fval, dict):
-                franchise_id = str(fval.get('id', '')) or None
-            elif fval:
+                for item in fval:
+                    if isinstance(item, dict) and item.get('id'):
+                        franchise_id = str(item['id'])
+                        break
+                    elif item and not _is_null_string(item):
+                        franchise_id = str(item)
+                        break
+            elif isinstance(fval, dict) and fval.get('id'):
+                franchise_id = str(fval['id'])
+            elif fval and not _is_null_string(fval):
                 franchise_id = str(fval)
+            if franchise_id:
+                break
 
         tuple_data = (
             record.get('id'),
@@ -2502,19 +2507,27 @@ def _nightly_sync_module(admin_token, module_name, config):
                     lat, lng = geocode_address(full_address, conn=db_conn)
 
             if lat is not None and lng is not None:
-                # Extract franchise ID — handles regular lookup (dict) AND
-                # multiuserlookup fields (list of dicts, e.g. Select_Your_Franchise1)
+                # Extract franchise ID — handles regular lookup (dict),
+                # multiuserlookup fields (list of dicts, e.g. Select_Your_Franchise1), and name fallbacks
                 franchise_id = None
-                if franchise_field:
-                    fval = record.get(franchise_field)
+                for ff in ([franchise_field] if franchise_field else []) + ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
+                    if not ff:
+                        continue
+                    fval = record.get(ff)
                     if isinstance(fval, list):
-                        # Multiuserlookup: list of {id, name} dicts — take the first
-                        first = next((item for item in fval if isinstance(item, dict)), None)
-                        franchise_id = str(first.get('id', '')) or None if first else None
-                    elif isinstance(fval, dict):
-                        franchise_id = str(fval.get('id', '')) or None
-                    elif fval:
+                        for item in fval:
+                            if isinstance(item, dict) and item.get('id'):
+                                franchise_id = str(item['id'])
+                                break
+                            elif item and not _is_null_string(item):
+                                franchise_id = str(item)
+                                break
+                    elif isinstance(fval, dict) and fval.get('id'):
+                        franchise_id = str(fval['id'])
+                    elif fval and not _is_null_string(fval):
                         franchise_id = str(fval)
+                    if franchise_id:
+                        break
 
                 # Store raw payload
                 record_data = record.copy()
@@ -2928,10 +2941,14 @@ def get_map_data():
         s_max_lng = float(request.args.get('sync_max_lng', max_lng))
         
         try:
-            log_debug(f"Triggering background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
-            sync_records_by_bounds(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng, session.get('is_admin', False))
+            log_debug(f"Triggering async background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
+            threading.Thread(
+                target=sync_records_by_bounds,
+                args=(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng, session.get('is_admin', False)),
+                daemon=True
+            ).start()
         except Exception as e:
-            log_debug(f"WARNING: Area sync failed but continuing with local data: {str(e)}")
+            log_debug(f"WARNING: Async area sync dispatch failed: {str(e)}")
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
 
@@ -3096,6 +3113,20 @@ def get_map_data():
 
     include_hidden = request.args.get('include_hidden', 'false').lower() == 'true'
 
+    cached_franchises_raw = database.get_global_setting('cached_all_franchises', '[]')
+    fid_to_name = {}
+    fname_to_id = {}
+    try:
+        for f in json.loads(cached_franchises_raw):
+            _fid = str(f.get('id', '')).strip()
+            _fname = str(f.get('name', '')).strip()
+            if _fid:
+                fid_to_name[_fid] = _fname
+                if _fname:
+                    fname_to_id[_fname.lower()] = _fid
+    except Exception:
+        pass
+
     module_labels_cache = {}
     map_points = []
     for r in records:
@@ -3128,6 +3159,41 @@ def get_map_data():
         if sec_cfg and sec_cfg.get('enabled') and sec_cfg.get('field_api_name'):
             sec_val = extract_secondary_value(r.get('record_data'), sec_cfg.get('field_api_name'))
 
+        # Resolve franchise ID and Name
+        rec_fid = r.get('franchise_id')
+        rec_fname = None
+        rd_raw = r.get('record_data') or {}
+        
+        if not rec_fid and isinstance(rd_raw, dict):
+            for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
+                fval = rd_raw.get(ff)
+                if isinstance(fval, list):
+                    for item in fval:
+                        if isinstance(item, dict) and item.get('id'):
+                            rec_fid = str(item['id'])
+                            rec_fname = item.get('name')
+                            break
+                        elif item:
+                            rec_fid = str(item)
+                            break
+                    if rec_fid:
+                        break
+                elif isinstance(fval, dict) and fval.get('id'):
+                    rec_fid = str(fval['id'])
+                    rec_fname = fval.get('name')
+                    break
+                elif fval and not _is_null_string(fval):
+                    rec_fid = str(fval)
+                    break
+
+        if rec_fid:
+            rec_fid_str = str(rec_fid).strip()
+            if rec_fid_str in fid_to_name:
+                rec_fname = fid_to_name[rec_fid_str]
+            elif rec_fid_str.lower() in fname_to_id:
+                rec_fname = rec_fid_str
+                rec_fid = fname_to_id[rec_fid_str.lower()]
+
         map_points.append({
             'id': r['id'],
             'module': module_label_map.get(r['module_name'], r['module_name']),
@@ -3141,7 +3207,8 @@ def get_map_data():
             'record_data': build_display_record_data(r['record_data'], cfg, field_label_map),
             'filter_config': cfg.get('field_mappings', {}).get('duplicate_filter'),
             'field_mappings': cfg.get('field_mappings', {}),
-            'franchise_id': r.get('franchise_id'),
+            'franchise_id': rec_fid,
+            'franchise_name': rec_fname,
             'secondary_value': str(sec_val) if sec_val is not None else None
         })
 

@@ -6,11 +6,78 @@ let programmaticTimeout = null;
 
 window.selectedFranchiseIds = new Set(['all']);
 window.filterMapData = function(data) {
-    if (!data) return [];
+    if (!data || !Array.isArray(data)) return [];
     if (!window.selectedFranchiseIds || window.selectedFranchiseIds.has('all')) {
         return data;
     }
-    return data.filter(item => window.selectedFranchiseIds.has(String(item.franchise_id)));
+    
+    // Build set of selected IDs and lowercase trimmed names
+    const selectedIds = new Set();
+    const selectedNames = new Set();
+    const list = window.configuredFranchises || [];
+    
+    list.forEach(f => {
+        if (window.selectedFranchiseIds.has(String(f.id))) {
+            selectedIds.add(String(f.id));
+            if (f.name) {
+                selectedNames.add(String(f.name).toLowerCase().trim());
+            }
+        }
+    });
+
+    return data.filter(item => {
+        if (!item) return false;
+        
+        // 1. Direct franchise_id match (numeric ID or string name)
+        if (item.franchise_id !== undefined && item.franchise_id !== null && item.franchise_id !== '') {
+            const fidStr = String(item.franchise_id).trim();
+            if (selectedIds.has(fidStr) || selectedNames.has(fidStr.toLowerCase())) {
+                return true;
+            }
+        }
+        
+        // 2. Direct franchise_name match
+        if (item.franchise_name) {
+            const fnameStr = String(item.franchise_name).toLowerCase().trim();
+            if (selectedNames.has(fnameStr) || selectedIds.has(fnameStr)) {
+                return true;
+            }
+        }
+
+        // 3. Array of franchise_ids or franchise_names (multi-franchise records)
+        if (Array.isArray(item.franchise_ids)) {
+            if (item.franchise_ids.some(id => selectedIds.has(String(id).trim()) || selectedNames.has(String(id).toLowerCase().trim()))) return true;
+        }
+        if (Array.isArray(item.franchise_names)) {
+            if (item.franchise_names.some(name => selectedNames.has(String(name).toLowerCase().trim()))) return true;
+        }
+
+        // 4. Fallback inspection in item.record_data
+        const rd = item.record_data;
+        if (rd && typeof rd === 'object') {
+            const checkVal = (val) => {
+                if (!val) return false;
+                if (typeof val === 'string' || typeof val === 'number') {
+                    const s = String(val).trim();
+                    if (selectedIds.has(s) || selectedNames.has(s.toLowerCase())) return true;
+                } else if (Array.isArray(val)) {
+                    for (const el of val) {
+                        if (checkVal(el)) return true;
+                    }
+                } else if (typeof val === 'object' && val !== null) {
+                    if (val.id && selectedIds.has(String(val.id).trim())) return true;
+                    if (val.name && selectedNames.has(String(val.name).toLowerCase().trim())) return true;
+                }
+                return false;
+            };
+
+            for (const key of ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']) {
+                if (checkVal(rd[key])) return true;
+            }
+        }
+
+        return false;
+    });
 };
 
 window.toggleFranchiseDropdown = function(e) {

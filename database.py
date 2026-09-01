@@ -225,28 +225,46 @@ def repair_single_franchise_records(franchise_id):
     conn = get_db_connection()
     repaired_counts = {}
     try:
-        fid_str = str(franchise_id)
-        # 1. Any record with franchise_id = fid_str
-        rows = exec_query(conn, "SELECT id, module_name, name, lat, lng, color, record_data, franchise_id FROM module_records WHERE franchise_id = ?", (fid_str,), fetchall=True) or []
+        fid_str = str(franchise_id).strip()
         
-        # 2. Also search for records where franchise_id IS NULL or empty but record_data contains this franchise ID
+        # Look up matching franchise names from cache
+        cached_fr_raw = get_global_setting('cached_all_franchises', '[]')
+        fid_names = {fid_str.lower()}
+        try:
+            for f in json.loads(cached_fr_raw):
+                if str(f.get('id', '')) == fid_str:
+                    if f.get('name'):
+                        fid_names.add(str(f['name']).strip().lower())
+        except Exception:
+            pass
+
+        # 1. Any record with franchise_id matching fid_str or one of its known names
+        placeholders = ', '.join(['?' for _ in fid_names])
+        rows = exec_query(conn, f"SELECT id, module_name, name, lat, lng, color, record_data, franchise_id FROM module_records WHERE franchise_id = ? OR LOWER(franchise_id) IN ({placeholders})", (fid_str,) + tuple(fid_names), fetchall=True) or []
+        
+        # 2. Also search for records where franchise_id IS NULL or empty but record_data contains this franchise ID or name
         null_rows = exec_query(conn, "SELECT id, module_name, name, lat, lng, color, record_data, franchise_id FROM module_records WHERE franchise_id IS NULL OR franchise_id = '' OR franchise_id = 'None'", fetchall=True) or []
         for nr in null_rows:
             try:
-                rd = json.loads(nr['record_data'])
+                rd = json.loads(nr['record_data']) if isinstance(nr['record_data'], str) else nr['record_data']
                 found = False
-                for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises']:
+                for ff in ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
                     fval = rd.get(ff)
                     if isinstance(fval, list):
-                        first = next((item for item in fval if isinstance(item, dict)), None)
-                        if first and str(first.get('id')) == fid_str:
+                        for item in fval:
+                            if isinstance(item, dict):
+                                if str(item.get('id', '')) == fid_str or str(item.get('name', '')).strip().lower() in fid_names:
+                                    found = True
+                                    break
+                            elif str(item).strip().lower() in fid_names or str(item).strip() == fid_str:
+                                found = True
+                                break
+                    elif isinstance(fval, dict):
+                        if str(fval.get('id', '')) == fid_str or str(fval.get('name', '')).strip().lower() in fid_names:
                             found = True
-                            break
-                    elif isinstance(fval, dict) and str(fval.get('id')) == fid_str:
+                    elif fval and (str(fval).strip().lower() in fid_names or str(fval).strip() == fid_str):
                         found = True
-                        break
-                    elif fval and str(fval) == fid_str:
-                        found = True
+                    if found:
                         break
                 if found:
                     rows.append(nr)
