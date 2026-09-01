@@ -8,6 +8,7 @@ import time
 import datetime
 import os
 import hashlib
+import threading
 from datetime import timedelta
 
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -588,86 +589,91 @@ def login():
 
 @app.route('/callback')
 def callback():
-    code = request.args.get('code')
-    state = request.args.get('state')
-    if code:
-        # Pick the redirect URI that matches the host the callback arrived on
-        matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
-        log_debug(f"OAuth callback received — using redirect_uri: {matched_uri}")
-        token_data = zoho_api.exchange_code_for_token(code, redirect_uri=matched_uri)
-        if 'access_token' in token_data:
-            session['access_token'] = token_data['access_token']
-            session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
-            if 'refresh_token' in token_data:
-                session['refresh_token'] = token_data['refresh_token']
-            
-            # Fetch User Info to identify them uniquely
-            user_info = zoho_api.fetch_user_info(session['access_token'])
-            log_debug(f"DEBUG: Callback Raw user_info: {user_info}")
-            if 'users' in user_info and len(user_info['users']) > 0:
-                user = user_info['users'][0]
-                session['user_id'] = user['id']
-                session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
-                session['is_admin'] = user.get('profile', {}).get('name') == 'Administrator'
-                log_debug(f"User logged in: {session['user_name']} ({session['user_id']}) - Admin: {session.get('is_admin')}")
+    try:
+        code = request.args.get('code')
+        state = request.args.get('state')
+        if code:
+            matched_uri = zoho_api.get_matching_redirect_uri(request.host_url)
+            log_debug(f"OAuth callback received — using redirect_uri: {matched_uri}")
+            token_data = zoho_api.exchange_code_for_token(code, redirect_uri=matched_uri)
+            if 'access_token' in token_data:
+                session['access_token'] = token_data['access_token']
+                session['expires_at'] = time.time() + token_data.get('expires_in', 3600)
+                if 'refresh_token' in token_data:
+                    session['refresh_token'] = token_data['refresh_token']
                 
-                # Cache the admin's refresh_token globally so it can be used as a fallback
-                # Cache the admin's refresh_token globally so it can be used as a fallback
-                # for team users who lack API scope (CRM profile API access disabled).
-                # SECURITY: This token is ONLY used server-side, never exposed to the frontend.
-                if session['is_admin'] and 'refresh_token' in token_data:
-                    encrypted = encrypt_token(token_data['refresh_token'])
-                    database.set_global_setting('admin_refresh_token', encrypted)
-                    log_debug("Admin refresh token encrypted and cached for team user fallback sync.")
-                    # Cache the module URL map in background so it doesn't block login redirect
-                    threading.Thread(target=_cache_module_url_map, args=(session['access_token'],), daemon=True).start()
-                
-                # If user logged in via email fallback, resolve their numeric CRM user ID
-                if not session.get('is_admin') and '@' in str(session.get('user_id', '')):
-                    try:
-                        admin_token = _get_admin_access_token()
-                        if admin_token:
-                            user_email = session['user_id']
-                            mappings_raw = database.get_global_setting('user_territory_mappings', '')
-                            mappings = {}
-                            if mappings_raw:
-                                try:
-                                    mappings = json.loads(mappings_raw)
-                                except Exception:
-                                    pass
-                            
-                            user_key = user_email.lower().strip()
-                            if user_key not in mappings:
-                                log_debug(f"User {user_key} not in cache, dispatching background refresh...")
-                                threading.Thread(target=_refresh_user_mappings, args=(admin_token,), daemon=True).start()
-                            else:
-                                user_detail = mappings.get(user_key)
-                                if user_detail:
-                                    session['user_id'] = user_detail['id']
-                                    session['user_email'] = user_email
-                                    log_debug(f"Resolved team user email {user_email} -> CRM ID {user_detail['id']}")
-                    except Exception as e:
-                        log_debug(f"Could not resolve team user CRM ID: {e}")
+                # Fetch User Info to identify them uniquely
+                user_info = zoho_api.fetch_user_info(session['access_token'])
+                log_debug(f"DEBUG: Callback Raw user_info: {user_info}")
+                if 'users' in user_info and len(user_info['users']) > 0:
+                    user = user_info['users'][0]
+                    session['user_id'] = user['id']
+                    session['user_name'] = user.get('full_name', user.get('last_name', 'Zoho User'))
+                    session['is_admin'] = user.get('profile', {}).get('name') == 'Administrator'
+                    log_debug(f"User logged in: {session['user_name']} ({session['user_id']}) - Admin: {session.get('is_admin')}")
+                    
+                    # Cache the admin's refresh_token globally so it can be used as a fallback
+                    # for team users who lack API scope (CRM profile API access disabled).
+                    if session['is_admin'] and 'refresh_token' in token_data:
+                        try:
+                            encrypted = encrypt_token(token_data['refresh_token'])
+                            database.set_global_setting('admin_refresh_token', encrypted)
+                            log_debug("Admin refresh token encrypted and cached for team user fallback sync.")
+                        except Exception as enc_e:
+                            log_debug(f"Admin refresh token encrypt failed: {enc_e}")
+                        # Cache module URL map asynchronously
+                        threading.Thread(target=_cache_module_url_map, args=(session['access_token'],), daemon=True).start()
+                    
+                    # If user logged in via email fallback, resolve their numeric CRM user ID
+                    if not session.get('is_admin') and '@' in str(session.get('user_id', '')):
+                        try:
+                            admin_token = _get_admin_access_token()
+                            if admin_token:
+                                user_email = session['user_id']
+                                mappings_raw = database.get_global_setting('user_territory_mappings', '')
+                                mappings = {}
+                                if mappings_raw:
+                                    try:
+                                        mappings = json.loads(mappings_raw)
+                                    except Exception:
+                                        pass
+                                
+                                user_key = user_email.lower().strip()
+                                if user_key not in mappings:
+                                    log_debug(f"User {user_key} not in cache, dispatching background refresh...")
+                                    threading.Thread(target=_refresh_user_mappings, args=(admin_token,), daemon=True).start()
+                                else:
+                                    user_detail = mappings.get(user_key)
+                                    if user_detail:
+                                        session['user_id'] = user_detail['id']
+                                        session['user_email'] = user_email
+                                        log_debug(f"Resolved team user email {user_email} -> CRM ID {user_detail['id']}")
+                        except Exception as e:
+                            log_debug(f"Could not resolve team user CRM ID: {e}")
 
-                # For standard users, load cached franchise info instantly (<1ms)
-                # and refresh in background if needed, avoiding blocking 80+ territory API calls.
-                if not session.get('is_admin', False):
-                    uid = session['user_id']
-                    try:
-                        tok = _get_admin_access_token()
-                        if tok:
-                            _get_user_franchise_ids(uid, tok, force_refresh=False)
-                            threading.Thread(target=_get_user_franchise_ids, args=(uid, tok, True), daemon=True).start()
-                    except Exception as ex:
-                        log_debug(f"[login] Franchise background refresh notice: {ex}")
+                    # For standard users, load cached franchise info instantly (<1ms)
+                    if not session.get('is_admin', False):
+                        uid = session['user_id']
+                        try:
+                            tok = _get_admin_access_token()
+                            if tok:
+                                _get_user_franchise_ids(uid, tok, force_refresh=False)
+                                threading.Thread(target=_get_user_franchise_ids, args=(uid, tok, True), daemon=True).start()
+                        except Exception as ex:
+                            log_debug(f"[login] Franchise background refresh notice: {ex}")
 
-            if state and state.startswith('/') and not state.startswith('//'):
-                log_debug(f"Redirecting user to preserved state target: {state}")
-                return redirect(state)
-            return redirect(url_for('index'))
-        else:
-            log_debug(f"OAuth token exchange failed! token_data response: {token_data}")
-    return "Error in Zoho Authentication", 400
+                if state and state.startswith('/') and not state.startswith('//'):
+                    log_debug(f"Redirecting user to preserved state target: {state}")
+                    return redirect(state)
+                return redirect(url_for('index'))
+            else:
+                log_debug(f"OAuth token exchange failed! token_data response: {token_data}")
+        return "Error in Zoho Authentication", 400
+    except Exception as e:
+        log_debug(f"[callback] Exception during login: {e}")
+        import traceback
+        log_debug(traceback.format_exc())
+        return "Authentication error occurred. Please try logging in again.", 500
 
 @app.route('/logout')
 def logout():
