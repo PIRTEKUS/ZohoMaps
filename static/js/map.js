@@ -534,7 +534,7 @@ function plotData(data) {
 
     window.initDefaultSecondaryFilters();
     const visibleData = data.filter(item => 
-        !(window.hiddenModules && window.hiddenModules.has(item.module)) &&
+        !(window.hiddenModules && (window.hiddenModules.has(item.module) || window.hiddenModules.has(item.api_module_name))) &&
         !isItemSecondaryHidden(item)
     );
 
@@ -926,8 +926,7 @@ function updateLegend(data) {
 
         const color       = config.marker_color || moduleColorByLabel[displayLabel] || moduleColorByLabel[apiName] || '#4f46e5';
         const count       = moduleCounts[displayLabel] || 0;
-        // Store displayLabel in hiddenModules so plotData filter matches item.module
-        const isVisible   = !(window.hiddenModules && window.hiddenModules.has(displayLabel));
+        const isVisible   = !(window.hiddenModules && (window.hiddenModules.has(displayLabel) || window.hiddenModules.has(apiName)));
         const safeLabel   = displayLabel.replace(/'/g, "\\'");
         const safeApiName = apiName.replace(/'/g, "\\'");
 
@@ -1052,17 +1051,29 @@ window.hiddenModules = window.hiddenModules || new Set();
 
 window.toggleModuleVisibility = function(moduleName, makeHidden) {
     if (!window.hiddenModules) window.hiddenModules = new Set();
-    if (makeHidden) {
-        window.hiddenModules.add(moduleName);
-    } else {
-        window.hiddenModules.delete(moduleName);
+    const cfg = (window.configuredModules || []).find(
+        c => c.module_name === moduleName || c.module_label === moduleName
+    );
+    const names = [moduleName];
+    if (cfg) {
+        if (cfg.module_name) names.push(cfg.module_name);
+        if (cfg.module_label) names.push(cfg.module_label);
     }
+
+    names.forEach(n => {
+        if (makeHidden) {
+            window.hiddenModules.add(n);
+        } else {
+            window.hiddenModules.delete(n);
+        }
+    });
+
     if (window.lastMapData) {
         plotData(window.lastMapData);
         updateLegend(window.lastMapData);
         // Pass only the visible records to the list
         const visibleForList = window.lastMapData.filter(
-            item => !window.hiddenModules.has(item.module) && !isItemSecondaryHidden(item)
+            item => !window.hiddenModules.has(item.module) && !window.hiddenModules.has(item.api_module_name) && !isItemSecondaryHidden(item)
         );
         if (window.updateRecordList) window.updateRecordList(visibleForList);
     }
