@@ -26,6 +26,10 @@
             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
             System & Sync
         </button>
+        <button class="settings-tab-btn" onclick="switchTab('kml-tab')">
+            <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+            KML Management
+        </button>
         <button class="settings-tab-btn" onclick="switchTab('perf-tab')">
             <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
             Performance Monitoring
@@ -898,11 +902,26 @@
                 <div id="manual-sync-result" style="display:none; margin-top:1.25rem; padding:1rem 1.25rem; border-radius:8px; font-size:0.9rem;"></div>
             </div>
 
-            <!-- Franchise Boundaries (KML Import) -->
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ── KML MANAGEMENT TAB ── -->
+    {% if is_admin %}
+    <div id="kml-tab" class="settings-tab-content">
+        <div class="settings-grid">
+            <!-- 1. KML File Import & Parser Card -->
             <div class="settings-card glass" id="kml-import-card" style="border-color: rgba(99,102,241,0.35);">
-                <h2>Franchise Territory Boundaries <span style="font-size:0.75rem; color:var(--primary); font-weight:400;">(Admin only)</span></h2>
-                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
-                    Upload a KML file containing franchise territory shapes. Boundaries will be rendered as outlines on the map to define franchise areas.
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+                    <h2 style="margin:0; display:flex; align-items:center; gap:0.75rem;">
+                        <svg viewBox="0 0 24 24" width="22" height="22" stroke="var(--primary)" stroke-width="2" fill="none"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+                        KML Boundary File Import
+                    </h2>
+                    <span style="font-size:0.8rem; color:var(--primary); background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.3); padding:0.25rem 0.65rem; border-radius:12px; font-weight:600;">Admin Utility</span>
+                </div>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem; line-height:1.5;">
+                    Upload a <code>.kml</code> file containing franchise territory boundary shapes. Boundaries will be automatically parsed, matched against CRM Franchise records, and rendered as outlines on the map.
                 </p>
 
                 <div id="kml-dropzone" style="background: rgba(0,0,0,0.15); padding: 1.5rem; border-radius: 10px; border: 1px dashed rgba(255,255,255,0.15); text-align: center; margin-bottom: 1.5rem; transition: border-color 0.2s;" ondragover="event.preventDefault(); this.style.borderColor='var(--primary)';" ondragleave="this.style.borderColor='rgba(255,255,255,0.15)';" ondrop="handleKmlDrop(event)">
@@ -946,173 +965,213 @@
                         </button>
                     </div>
                 </div>
+            </div>
 
-                <!-- Boundary Style Configurations -->
-                <div style="margin-top: 2.5rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem;">
-                    <h3 style="font-size: 1.05rem; color: #f8fafc; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                        🎨 Boundary Styling Settings
-                    </h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); margin-bottom: 1.5rem;">
-                        
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Outline Color</label>
-                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
-                                <input type="color" id="boundary-color-picker" value="{{ boundary_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-color-text').value = this.value">
-                                <input type="text" id="boundary-color-text" value="{{ boundary_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#6366F1" oninput="document.getElementById('boundary-color-picker').value = this.value">
-                            </div>
+            <!-- 2. Boundary Style Configurations Card -->
+            <div class="settings-card glass" id="kml-styling-card" style="border-color: rgba(99,102,241,0.35);">
+                <h2 style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem;">
+                    🎨 Boundary Styling & Display Settings
+                </h2>
+                <p style="color:#94a3b8; font-size:0.875rem; margin-bottom:1.5rem;">
+                    Customize how franchise boundaries, highlight borders, labels, and adjacent neighbor territories are presented on the map.
+                </p>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; background: rgba(0,0,0,0.15); padding: 1.25rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.03); margin-bottom: 1.5rem;">
+                    
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Outline Color</label>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                            <input type="color" id="boundary-color-picker" value="{{ boundary_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-color-text').value = this.value">
+                            <input type="text" id="boundary-color-text" value="{{ boundary_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#6366F1" oninput="document.getElementById('boundary-color-picker').value = this.value">
                         </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Fill Transparency (0.0 - 1.0)</label>
-                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
-                                <input type="range" id="boundary-fill-opacity" min="0" max="1" step="0.01" value="{{ boundary_fill_opacity }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-fill-opacity-val').textContent = parseFloat(this.value).toFixed(2)">
-                                <span id="boundary-fill-opacity-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 35px; text-align: right;">{{ boundary_fill_opacity }}</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Stroke Weight (1px - 10px)</label>
-                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
-                                <input type="range" id="boundary-stroke-weight" min="1" max="10" step="1" value="{{ boundary_stroke_weight }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-stroke-weight-val').textContent = this.value + 'px'">
-                                <span id="boundary-stroke-weight-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_stroke_weight }}px</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
-                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #f1f5f9; font-weight: 500;">
-                                <input type="checkbox" id="boundary-show-labels" {% if boundary_show_labels == 'true' %}checked{% endif %} style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: var(--primary);" onchange="toggleLabelSettings(this.checked)">
-                                Show Franchise Name on Map
-                            </label>
-                        </div>
-
-                        <div class="form-group label-settings-group" id="label-settings-size-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Label Font Size (10px - 24px)</label>
-                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
-                                <input type="range" id="boundary-label-size" min="10" max="24" step="1" value="{{ boundary_label_size }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-label-size-val').textContent = this.value + 'px'">
-                                <span id="boundary-label-size-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_label_size }}px</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group label-settings-group" id="label-settings-color-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Label Color</label>
-                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
-                                <input type="color" id="boundary-label-color-picker" value="{{ boundary_label_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-label-color-text').value = this.value">
-                                <input type="text" id="boundary-label-color-text" value="{{ boundary_label_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#FFFFFF" oninput="document.getElementById('boundary-label-color-picker').value = this.value">
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Selected Highlight Color</label>
-                            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
-                                <input type="color" id="boundary-highlight-color-picker" value="{{ boundary_highlight_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-highlight-color-text').value = this.value">
-                                <input type="text" id="boundary-highlight-color-text" value="{{ boundary_highlight_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#10B981" oninput="document.getElementById('boundary-highlight-color-picker').value = this.value">
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Neighbor Boundaries Visibility</label>
-                            <select id="boundary-neighbors-mode" style="width: 100%; margin-top: 5px; padding: 0.55rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" onchange="toggleNeighborsRadiusInput(this.value)">
-                                <option value="no_all" {% if boundary_neighbors_mode == 'no_all' %}selected{% endif %}>No to all (Hide all others)</option>
-                                <option value="yes_all" {% if boundary_neighbors_mode == 'yes_all' %}selected{% endif %}>Yes to all (Show all others)</option>
-                                <option value="same_state" {% if boundary_neighbors_mode == 'same_state' %}selected{% endif %}>Only show same State</option>
-                                <option value="close_neighbors" {% if boundary_neighbors_mode == 'close_neighbors' %}selected{% endif %}>Only show close neighbors</option>
-                            </select>
-                        </div>
-
-                        <div class="form-group" id="boundary-neighbors-radius-group" style="margin: 0; {% if boundary_neighbors_mode != 'close_neighbors' %}display: none;{% endif %}">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Neighbors Radius (Miles)</label>
-                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
-                                <input type="range" id="boundary-neighbors-radius" min="10" max="1000" step="10" value="{{ boundary_neighbors_radius }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-neighbors-radius-val').textContent = this.value + ' mi'">
-                                <span id="boundary-neighbors-radius-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 60px; text-align: right;">{{ boundary_neighbors_radius }} mi</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Selected Highlight Stroke Weight</label>
-                            <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
-                                <input type="range" id="boundary-highlight-stroke-weight" min="1" max="10" step="1" value="{{ boundary_highlight_stroke_weight }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-highlight-stroke-weight-val').textContent = this.value + 'px'">
-                                <span id="boundary-highlight-stroke-weight-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_highlight_stroke_weight }}px</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Label Font Family (CSS)</label>
-                            <input type="text" id="boundary-label-font" value="{{ boundary_label_font }}" style="width: 100%; margin-top: 5px; padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" placeholder="'Outfit', sans-serif">
-                        </div>
-
-                        <div class="form-group" style="margin: 0;">
-                            <label style="color: #94a3b8; font-size: 0.85rem;">Custom Font CSS URL (Optional)</label>
-                            <input type="text" id="boundary-font-url" value="{{ boundary_font_url }}" style="width: 100%; margin-top: 5px; padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" placeholder="https://use.typekit.net/xxxx.css">
-                        </div>
-
                     </div>
-                    <div style="display: flex; justify-content: flex-end; align-items: center;">
-                        <span id="boundary-styles-status" style="font-size: 0.85rem; color: #10b981; margin-right: 1rem; display: none;">✓ Styles saved!</span>
-                        <button id="save-boundary-styles-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; background: linear-gradient(135deg,var(--primary),#4f46e5); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;" onclick="saveBoundaryStyles()">
-                            Save Style Settings
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Fill Transparency (0.0 - 1.0)</label>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                            <input type="range" id="boundary-fill-opacity" min="0" max="1" step="0.01" value="{{ boundary_fill_opacity }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-fill-opacity-val').textContent = parseFloat(this.value).toFixed(2)">
+                            <span id="boundary-fill-opacity-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 35px; text-align: right;">{{ boundary_fill_opacity }}</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Stroke Weight (1px - 10px)</label>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                            <input type="range" id="boundary-stroke-weight" min="1" max="10" step="1" value="{{ boundary_stroke_weight }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-stroke-weight-val').textContent = this.value + 'px'">
+                            <span id="boundary-stroke-weight-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_stroke_weight }}px</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0; display: flex; flex-direction: column; justify-content: center;">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #f1f5f9; font-weight: 500;">
+                            <input type="checkbox" id="boundary-show-labels" {% if boundary_show_labels == 'true' %}checked{% endif %} style="width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: var(--primary);" onchange="toggleLabelSettings(this.checked)">
+                            Show Franchise Name on Map
+                        </label>
+                    </div>
+
+                    <div class="form-group label-settings-group" id="label-settings-size-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Label Font Size (10px - 24px)</label>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                            <input type="range" id="boundary-label-size" min="10" max="24" step="1" value="{{ boundary_label_size }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-label-size-val').textContent = this.value + 'px'">
+                            <span id="boundary-label-size-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_label_size }}px</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group label-settings-group" id="label-settings-color-group" style="margin: 0; {% if boundary_show_labels != 'true' %}display: none;{% endif %}">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Label Color</label>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                            <input type="color" id="boundary-label-color-picker" value="{{ boundary_label_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-label-color-text').value = this.value">
+                            <input type="text" id="boundary-label-color-text" value="{{ boundary_label_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#FFFFFF" oninput="document.getElementById('boundary-label-color-picker').value = this.value">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Selected Highlight Color</label>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 5px;">
+                            <input type="color" id="boundary-highlight-color-picker" value="{{ boundary_highlight_color }}" style="width: 40px; height: 35px; border: none; border-radius: 4px; background: none; cursor: pointer;" oninput="document.getElementById('boundary-highlight-color-text').value = this.value">
+                            <input type="text" id="boundary-highlight-color-text" value="{{ boundary_highlight_color }}" style="flex: 1; padding: 0.45rem; text-transform: uppercase; font-family: monospace; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc;" placeholder="#10B981" oninput="document.getElementById('boundary-highlight-color-picker').value = this.value">
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Neighbor Boundaries Visibility</label>
+                        <select id="boundary-neighbors-mode" style="width: 100%; margin-top: 5px; padding: 0.55rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" onchange="toggleNeighborsRadiusInput(this.value)">
+                            <option value="no_all" {% if boundary_neighbors_mode == 'no_all' %}selected{% endif %}>No to all (Hide all others)</option>
+                            <option value="yes_all" {% if boundary_neighbors_mode == 'yes_all' %}selected{% endif %}>Yes to all (Show all others)</option>
+                            <option value="same_state" {% if boundary_neighbors_mode == 'same_state' %}selected{% endif %}>Only show same State</option>
+                            <option value="close_neighbors" {% if boundary_neighbors_mode == 'close_neighbors' %}selected{% endif %}>Only show close neighbors</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="boundary-neighbors-radius-group" style="margin: 0; {% if boundary_neighbors_mode != 'close_neighbors' %}display: none;{% endif %}">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Neighbors Radius (Miles)</label>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                            <input type="range" id="boundary-neighbors-radius" min="10" max="1000" step="10" value="{{ boundary_neighbors_radius }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-neighbors-radius-val').textContent = this.value + ' mi'">
+                            <span id="boundary-neighbors-radius-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 60px; text-align: right;">{{ boundary_neighbors_radius }} mi</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Selected Highlight Stroke Weight</label>
+                        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 5px;">
+                            <input type="range" id="boundary-highlight-stroke-weight" min="1" max="10" step="1" value="{{ boundary_highlight_stroke_weight }}" style="flex: 1; accent-color: var(--primary);" oninput="document.getElementById('boundary-highlight-stroke-weight-val').textContent = this.value + 'px'">
+                            <span id="boundary-highlight-stroke-weight-val" style="font-family: monospace; color: #e2e8f0; font-weight: 600; width: 40px; text-align: right;">{{ boundary_highlight_stroke_weight }}px</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Label Font Family (CSS)</label>
+                        <input type="text" id="boundary-label-font" value="{{ boundary_label_font }}" style="width: 100%; margin-top: 5px; padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" placeholder="'Outfit', sans-serif">
+                    </div>
+
+                    <div class="form-group" style="margin: 0;">
+                        <label style="color: #94a3b8; font-size: 0.85rem;">Custom Font CSS URL (Optional)</label>
+                        <input type="text" id="boundary-font-url" value="{{ boundary_font_url }}" style="width: 100%; margin-top: 5px; padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6); color: #f8fafc; font-family: inherit; font-size: 0.85rem; outline: none;" placeholder="https://use.typekit.net/xxxx.css">
+                    </div>
+
+                </div>
+                <div style="display: flex; justify-content: flex-end; align-items: center;">
+                    <span id="boundary-styles-status" style="font-size: 0.85rem; color: #10b981; margin-right: 1rem; display: none;">✓ Styles saved!</span>
+                    <button id="save-boundary-styles-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; background: linear-gradient(135deg,var(--primary),#4f46e5); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;" onclick="saveBoundaryStyles()">
+                        Save Style Settings
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. Active Franchises & Boundary Status Card with Column Filtering -->
+            <div class="settings-card glass" id="kml-status-card" style="border-color: rgba(99,102,241,0.35);">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.75rem;">
+                    <div>
+                        <h2 style="margin:0; display:flex; align-items:center; gap:0.75rem;">
+                            📋 Active Franchises & Boundary Status
+                        </h2>
+                        <p style="color:#94a3b8; font-size:0.85rem; margin:0.35rem 0 0 0;">
+                            Inspect loaded boundary polygons and filter by status or keyword.
+                        </p>
+                    </div>
+                    <span id="boundary-status-summary" style="font-size:0.8rem; color:#38bdf8; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:0.3rem 0.8rem; border-radius:12px; font-weight:600;">
+                        Loading franchises...
+                    </span>
+                </div>
+
+                <!-- Multi-Column Search & Filter Toolbar -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) auto; gap:0.75rem; align-items:center; margin-bottom:1rem; background:rgba(0,0,0,0.2); padding:0.85rem 1rem; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">
+                    <div>
+                        <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Search Franchise / ID</label>
+                        <input type="text" id="boundary-status-search" oninput="filterBoundaryStatusTable()" placeholder="🔍 Type franchise name or ID..." style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none;">
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Boundary Status</label>
+                        <select id="boundary-status-filter" onchange="filterBoundaryStatusTable()" style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none; cursor:pointer;">
+                            <option value="all">All Franchises</option>
+                            <option value="imported">✅ Imported (KML Loaded)</option>
+                            <option value="missing">❌ Missing (No KML)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:flex-end; height:100%;">
+                        <button type="button" onclick="clearBoundaryStatusFilters()" class="btn-secondary" style="padding:0.5rem 1rem; font-size:0.82rem; color:#94a3b8; border-color:rgba(255,255,255,0.15); height:36px; white-space:nowrap;" title="Reset filters">
+                            ↺ Clear Filters
                         </button>
                     </div>
                 </div>
 
-                <!-- Franchise Boundaries Status List -->
-                <div style="margin-top: 2.5rem; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 1.5rem;">
-                    <h3 style="font-size: 1.05rem; color: #f8fafc; margin-bottom: 0.75rem;">
-                        📋 Active Franchises & Boundary Status
-                    </h3>
-                    <div style="max-height: 250px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 1.5rem;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
-                            <thead>
-                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); position: sticky; top: 0; z-index: 1;">
-                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Franchise Name</th>
-                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 150px;">Status</th>
-                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; width: 180px;">CRM Franchise ID</th>
-                                    <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 120px;">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for f in all_franchises %}
-                                {% set has_boundary = f.id in franchise_boundaries_dict %}
-                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
-                                    <td style="padding: 0.75rem 1.25rem; color: #f1f5f9; font-weight: 500;">
-                                        {{ f.name }}
-                                    </td>
-                                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
-                                        {% if has_boundary %}
-                                        <span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
-                                            ✅ Imported
-                                        </span>
-                                        {% else %}
-                                        <span style="background: rgba(100,116,139,0.15); color: #94a3b8; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
-                                            ❌ Missing
-                                        </span>
-                                        {% endif %}
-                                    </td>
-                                    <td style="padding: 0.75rem 1.25rem; font-family: monospace; color: #94a3b8; font-size: 0.8rem;">
-                                        {{ f.id }}
-                                    </td>
-                                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
-                                        {% if has_boundary %}
-                                        <button type="button" onclick="deleteIndividualBoundary('{{ f.id }}', '{{ f.name | escape }}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
-                                            🗑️ Remove
-                                        </button>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                                {% if not all_franchises %}
-                                <tr>
-                                    <td colspan="3" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
-                                        No active franchises found in CRM cache.
-                                    </td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div style="max-height: 400px; overflow-y: auto; background: rgba(0,0,0,0.25); border-radius: 10px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 0.5rem;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;" id="boundary-status-table">
+                        <thead>
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.02); position: sticky; top: 0; z-index: 1;">
+                                <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a;">Franchise Name</th>
+                                <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 150px;">Status</th>
+                                <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; width: 220px;">CRM Franchise ID</th>
+                                <th style="padding: 0.75rem 1.25rem; color: #94a3b8; font-weight: 600; background: #0f172a; text-align: center; width: 120px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="boundary-status-tbody">
+                            {% for f in all_franchises %}
+                            {% set has_boundary = f.id in franchise_boundaries_dict %}
+                            <tr class="boundary-status-row" data-name="{{ f.name | lower }}" data-id="{{ f.id | lower }}" data-status="{% if has_boundary %}imported{% else %}missing{% endif %}" style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
+                                <td style="padding: 0.75rem 1.25rem; color: #f1f5f9; font-weight: 500;">
+                                    {{ f.name }}
+                                </td>
+                                <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                                    {% if has_boundary %}
+                                    <span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                        ✅ Imported
+                                    </span>
+                                    {% else %}
+                                    <span style="background: rgba(100,116,139,0.15); color: #94a3b8; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                                        ❌ Missing
+                                    </span>
+                                    {% endif %}
+                                </td>
+                                <td style="padding: 0.75rem 1.25rem; font-family: monospace; color: #94a3b8; font-size: 0.8rem;">
+                                    {{ f.id }}
+                                </td>
+                                <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                                    {% if has_boundary %}
+                                    <button type="button" onclick="deleteIndividualBoundary('{{ f.id }}', '{{ f.name | escape }}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                                        🗑️ Remove
+                                    </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            <tr id="boundary-status-no-match" style="display:none;">
+                                <td colspan="4" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
+                                    No franchises match the selected filter criteria.
+                                </td>
+                            </tr>
+                            {% if not all_franchises %}
+                            <tr>
+                                <td colspan="4" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
+                                    No active franchises found in CRM cache.
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
-    </div>
     </div>
     {% endif %}
 
@@ -1319,6 +1378,9 @@ window.switchTab = function(tabId) {
     }
     if (tabId === 'diagnostics-tab' && typeof loadFranchiseRecordCounts === 'function') {
         loadFranchiseRecordCounts();
+    }
+    if (tabId === 'kml-tab' && typeof filterBoundaryStatusTable === 'function') {
+        filterBoundaryStatusTable();
     }
 };
 
@@ -3605,6 +3667,67 @@ async function saveBoundaryStyles() {
         btn.textContent = 'Save Style Settings';
     }
 }
+
+// ── Active Franchises & Boundary Status Table Filtering ─────────────────────────
+function filterBoundaryStatusTable() {
+    const q = (document.getElementById('boundary-status-search')?.value || '').toLowerCase().trim();
+    const statusFilter = document.getElementById('boundary-status-filter')?.value || 'all';
+    const rows = document.querySelectorAll('.boundary-status-row');
+    const noMatchRow = document.getElementById('boundary-status-no-match');
+    const summary = document.getElementById('boundary-status-summary');
+    
+    let visibleCount = 0;
+    let importedCount = 0;
+    let missingCount = 0;
+
+    rows.forEach(row => {
+        const name = (row.getAttribute('data-name') || '').toLowerCase();
+        const id = (row.getAttribute('data-id') || '').toLowerCase();
+        const status = row.getAttribute('data-status') || '';
+
+        if (status === 'imported') {
+            importedCount++;
+        } else {
+            missingCount++;
+        }
+
+        const matchesQuery = !q || name.includes(q) || id.includes(q);
+        const matchesStatus = statusFilter === 'all' || status === statusFilter;
+
+        if (matchesQuery && matchesStatus) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    if (noMatchRow) {
+        noMatchRow.style.display = (visibleCount === 0 && rows.length > 0) ? '' : 'none';
+    }
+
+    if (summary) {
+        if (rows.length === 0) {
+            summary.textContent = '0 Franchises';
+        } else if (q || statusFilter !== 'all') {
+            summary.textContent = `Showing ${visibleCount} of ${rows.length} franchises (${importedCount} Imported, ${missingCount} Missing)`;
+        } else {
+            summary.textContent = `${rows.length} Franchises (${importedCount} Imported, ${missingCount} Missing)`;
+        }
+    }
+}
+
+function clearBoundaryStatusFilters() {
+    const searchInput = document.getElementById('boundary-status-search');
+    const statusFilter = document.getElementById('boundary-status-filter');
+    if (searchInput) searchInput.value = '';
+    if (statusFilter) statusFilter.value = 'all';
+    filterBoundaryStatusTable();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    filterBoundaryStatusTable();
+});
 
 async function runManualFranchiseSync() {
     const btn = document.getElementById('manual-sync-btn');
