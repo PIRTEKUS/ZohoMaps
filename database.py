@@ -199,6 +199,18 @@ def init_db():
         )
     ''')
 
+    # App Users table (records users who have logged into ZohoMap)
+    exec_query(conn, '''
+        CREATE TABLE IF NOT EXISTS app_users (
+            id TEXT PRIMARY KEY,
+            email TEXT,
+            name TEXT,
+            role TEXT,
+            profile TEXT,
+            last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     # Ensure unique index exists for safety and performance indexes
     try:
         exec_query(conn, "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
@@ -834,5 +846,124 @@ def get_performance_stats(range_hours=24):
         }
     finally:
         conn.close()
+
+
+def record_app_user(user_id, email, name=None, role=None, profile=None):
+    """Record or update a user who has logged in or accessed ZohoMap."""
+    if not user_id and not email:
+        return
+    conn = get_db_connection()
+    try:
+        u_id = str(user_id or email).strip()
+        u_email = str(email or '').strip().lower()
+        u_name = str(name or u_email or u_id).strip()
+        u_role = str(role or 'Standard').strip()
+        u_profile = str(profile or 'Standard').strip()
+
+        if IS_POSTGRES:
+            exec_query(conn, """
+                INSERT INTO app_users (id, email, name, role, profile, last_login)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    email = COALESCE(NULLIF(EXCLUDED.email, ''), app_users.email),
+                    name = COALESCE(NULLIF(EXCLUDED.name, ''), app_users.name),
+                    role = COALESCE(NULLIF(EXCLUDED.role, ''), app_users.role),
+                    profile = COALESCE(NULLIF(EXCLUDED.profile, ''), app_users.profile),
+                    last_login = CURRENT_TIMESTAMP
+            """, (u_id, u_email, u_name, u_role, u_profile))
+        else:
+            exec_query(conn, """
+                INSERT INTO app_users (id, email, name, role, profile, last_login)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    email = COALESCE(NULLIF(excluded.email, ''), app_users.email),
+                    name = COALESCE(NULLIF(excluded.name, ''), app_users.name),
+                    role = COALESCE(NULLIF(excluded.role, ''), app_users.role),
+                    profile = COALESCE(NULLIF(excluded.profile, ''), app_users.profile),
+                    last_login = CURRENT_TIMESTAMP
+            """, (u_id, u_email, u_name, u_role, u_profile))
+        if '@' not in u_id and u_email:
+            try:
+                exec_query(conn, "DELETE FROM app_users WHERE id = ? AND id != ?", (u_email, u_id))
+            except Exception:
+                pass
+        conn.commit()
+    except Exception as e:
+        print(f"Error recording app_user: {e}")
+    finally:
+        conn.close()
+
+
+def get_all_known_users_from_db():
+    """Retrieve all users discovered from app_users, global_settings, and module_records."""
+    conn = get_db_connection()
+    known_users = {}
+    try:
+        # 1. Users from app_users
+        try:
+            rows = exec_query(conn, "SELECT id, email, name, role, profile, last_login FROM app_users", fetchall=True)
+            for r in (rows or []):
+                uid = str(r['id'] or '').strip()
+                email = str(r['email'] or '').strip().lower()
+                key = email or uid
+                if key:
+                    known_users[key] = {
+                        'id': uid,
+                        'email': email,
+                        'name': r['name'] or email or uid,
+                        'role': r['role'] or 'Standard',
+                        'profile': r['profile'] or 'Standard',
+                        'source': 'app_login'
+                    }
+        except Exception:
+            pass
+
+        # 2. Users from global_settings franchise_ids_%
+        try:
+            rows = exec_query(conn, "SELECT key, value FROM global_settings WHERE key LIKE 'franchise_ids_%'", fetchall=True)
+            for r in (rows or []):
+                k = r['key'].replace('franchise_ids_', '').strip()
+                k_lower = k.lower()
+                is_email = '@' in k_lower
+                uid = k if not is_email else ''
+                email = k_lower if is_email else ''
+                key = email or uid
+                if key and key not in known_users and email not in known_users and uid not in known_users:
+                    known_users[key] = {
+                        'id': uid,
+                        'email': email,
+                        'name': email or uid,
+                        'role': 'Standard',
+                        'profile': 'Standard',
+                        'source': 'franchise_cache'
+                    }
+        except Exception:
+            pass
+
+        # 3. Users from module_records distinct user_id
+        try:
+            rows = exec_query(conn, "SELECT DISTINCT user_id FROM module_records WHERE user_id NOT IN ('__global__', 'admin', '')", fetchall=True)
+            for r in (rows or []):
+                uid = str(r['user_id'] or '').strip()
+                if not uid: continue
+                is_email = '@' in uid
+                email = uid.lower() if is_email else ''
+                u_id = uid if not is_email else ''
+                key = email or u_id
+                if key and key not in known_users and email not in known_users and u_id not in known_users:
+                    known_users[key] = {
+                        'id': u_id,
+                        'email': email,
+                        'name': email or u_id,
+                        'role': 'Standard',
+                        'profile': 'Standard',
+                        'source': 'module_records'
+                    }
+        except Exception:
+            pass
+
+    finally:
+        conn.close()
+    return list(known_users.values())
 
 

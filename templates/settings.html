@@ -1630,7 +1630,7 @@ function renderUserFranchiseAccessTable(users) {
                         <button type="button" onclick="repairUserFranchiseAccess('${uIdSafe}', '${uEmailSafe}', '${uNameSafe}')" id="ufa-repair-btn-${uIdSafe}" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.65rem; border-radius:6px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Re-detect franchise from Zoho CRM and clear stale cache">
                             🔄 Reset
                         </button>
-                        <button type="button" onclick="openUserOverrideModal('${uIdSafe}')" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.75rem; border-radius:6px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); color:#c084fc; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Manually choose allowed franchises">
+                        <button type="button" onclick="openUserOverrideModal('${uIdSafe}', '${uEmailSafe}')" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.75rem; border-radius:6px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); color:#c084fc; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Manually choose allowed franchises">
                             ✏️ Override
                         </button>
                     </div>
@@ -1691,7 +1691,7 @@ function clearUserFranchiseFilters() {
 }
 
 async function repairUserFranchiseAccess(userId, email, userName) {
-    const btn = document.getElementById(`ufa-repair-btn-${userId}`);
+    const btn = document.getElementById(`ufa-repair-btn-${userId}`) || document.getElementById(`ufa-repair-btn-${email}`);
     if (btn) {
         btn.disabled = true;
         btn.textContent = '⏳ Checking...';
@@ -1715,7 +1715,10 @@ async function repairUserFranchiseAccess(userId, email, userName) {
         }
 
         // Update in-memory user
-        const u = _rawUserFranchiseData.find(x => String(x.id) === String(userId));
+        const u = _rawUserFranchiseData.find(x => 
+            (userId && String(x.id) === String(userId)) || 
+            (email && String(x.email || '').toLowerCase() === String(email).toLowerCase())
+        );
         if (u) {
             u.franchises = data.franchises || [];
             u.has_override = false;
@@ -1735,8 +1738,11 @@ async function repairUserFranchiseAccess(userId, email, userName) {
     }
 }
 
-function openUserOverrideModal(userId) {
-    const user = _rawUserFranchiseData.find(x => String(x.id) === String(userId));
+function openUserOverrideModal(userId, userEmail) {
+    const user = _rawUserFranchiseData.find(x => 
+        (userId && String(x.id) === String(userId)) || 
+        (userEmail && String(x.email || '').toLowerCase() === String(userEmail).toLowerCase())
+    );
     if (!user) {
         alert('User not found.');
         return;
@@ -1861,7 +1867,10 @@ async function submitUserOverride(isClear = false) {
         }
 
         // Update in-memory cache
-        const u = _rawUserFranchiseData.find(x => String(x.id) === String(_currentEditingUser.id));
+        const u = _rawUserFranchiseData.find(x => 
+            (_currentEditingUser.id && String(x.id) === String(_currentEditingUser.id)) ||
+            (_currentEditingUser.email && String(x.email || '').toLowerCase() === String(_currentEditingUser.email).toLowerCase())
+        );
         if (u) {
             u.franchises = data.franchises || [];
             u.has_override = Boolean(data.has_override);
