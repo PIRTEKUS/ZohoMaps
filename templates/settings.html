@@ -1554,8 +1554,19 @@ function renderUserFranchiseAccessTable(users) {
     const summary = document.getElementById('ufa-total-summary');
     if (!tbody) return;
 
-    if (!users || users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#94a3b8;">No users found in CRM.</td></tr>';
+    // Filter out deleted, inactive, or phantom numeric accounts
+    const validUsers = (users || []).filter(u => {
+        const email = (u.email || '').trim().toLowerCase();
+        const name = (u.name || '').trim();
+        const status = (u.status || 'active').trim().toLowerCase();
+        if (!email || !email.includes('@') || !email.includes('.')) return false;
+        if (status === 'deleted' || status === 'deactive' || status === 'inactive' || status === 'suspended') return false;
+        if (/^\d+$/.test(name)) return false;
+        return true;
+    });
+
+    if (!validUsers || validUsers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#94a3b8;">No active users found in CRM.</td></tr>';
         if (summary) summary.textContent = '0 users';
         return;
     }
@@ -1564,7 +1575,7 @@ function renderUserFranchiseAccessTable(users) {
     let multiCount = 0;
     let zeroCount = 0;
 
-    const rowsHtml = users.map(u => {
+    const rowsHtml = validUsers.map(u => {
         const fCount = (u.franchises || []).length;
         if (u.has_override) overrideCount++;
         if (fCount > 1) multiCount++;
@@ -1643,7 +1654,7 @@ function renderUserFranchiseAccessTable(users) {
     tbody.innerHTML = rowsHtml.join('');
 
     if (summary) {
-        summary.textContent = `${users.length} Users (${overrideCount} Overridden, ${multiCount} Multi-Franchise, ${zeroCount} Empty)`;
+        summary.textContent = `${validUsers.length} Users (${overrideCount} Overridden, ${multiCount} Multi-Franchise, ${zeroCount} Empty)`;
     }
 
     filterUserFranchiseAccessTable();

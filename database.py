@@ -895,73 +895,36 @@ def record_app_user(user_id, email, name=None, role=None, profile=None):
 
 
 def get_all_known_users_from_db():
-    """Retrieve all users discovered from app_users, global_settings, and module_records."""
+    """Retrieve all legitimate users discovered from app_users with a valid email."""
+    import re
     conn = get_db_connection()
     known_users = {}
     try:
-        # 1. Users from app_users
+        # Users from app_users (only real users with a valid email address)
         try:
             rows = exec_query(conn, "SELECT id, email, name, role, profile, last_login FROM app_users", fetchall=True)
             for r in (rows or []):
                 uid = str(r['id'] or '').strip()
                 email = str(r['email'] or '').strip().lower()
-                key = email or uid
+                name = str(r['name'] or '').strip()
+                # Must have a valid email containing '@' and '.'
+                if not email or '@' not in email or '.' not in email:
+                    continue
+                # Reject purely numeric phantom names
+                if re.match(r'^\d+$', name):
+                    name = email
+                key = email
                 if key:
                     known_users[key] = {
                         'id': uid,
                         'email': email,
-                        'name': r['name'] or email or uid,
+                        'name': name or email,
                         'role': r['role'] or 'Standard',
                         'profile': r['profile'] or 'Standard',
                         'source': 'app_login'
                     }
         except Exception:
             pass
-
-        # 2. Users from global_settings franchise_ids_%
-        try:
-            rows = exec_query(conn, "SELECT key, value FROM global_settings WHERE key LIKE 'franchise_ids_%'", fetchall=True)
-            for r in (rows or []):
-                k = r['key'].replace('franchise_ids_', '').strip()
-                k_lower = k.lower()
-                is_email = '@' in k_lower
-                uid = k if not is_email else ''
-                email = k_lower if is_email else ''
-                key = email or uid
-                if key and key not in known_users and email not in known_users and uid not in known_users:
-                    known_users[key] = {
-                        'id': uid,
-                        'email': email,
-                        'name': email or uid,
-                        'role': 'Standard',
-                        'profile': 'Standard',
-                        'source': 'franchise_cache'
-                    }
-        except Exception:
-            pass
-
-        # 3. Users from module_records distinct user_id
-        try:
-            rows = exec_query(conn, "SELECT DISTINCT user_id FROM module_records WHERE user_id NOT IN ('__global__', 'admin', '')", fetchall=True)
-            for r in (rows or []):
-                uid = str(r['user_id'] or '').strip()
-                if not uid: continue
-                is_email = '@' in uid
-                email = uid.lower() if is_email else ''
-                u_id = uid if not is_email else ''
-                key = email or u_id
-                if key and key not in known_users and email not in known_users and u_id not in known_users:
-                    known_users[key] = {
-                        'id': u_id,
-                        'email': email,
-                        'name': email or u_id,
-                        'role': 'Standard',
-                        'profile': 'Standard',
-                        'source': 'module_records'
-                    }
-        except Exception:
-            pass
-
     finally:
         conn.close()
     return list(known_users.values())

@@ -4,6 +4,7 @@ import database
 import zoho_api
 import requests
 import json
+import re
 import time
 import datetime
 import os
@@ -1289,7 +1290,10 @@ def _refresh_user_mappings(admin_token):
                 try:
                     for t_name, u in fut.result():
                         email = (u.get('email') or '').strip().lower()
-                        if email:
+                        status = str(u.get('status', 'active')).strip().lower()
+                        if status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                            continue
+                        if email and '@' in email and '.' in email:
                             if email not in email_lookup:
                                 email_lookup[email] = {
                                     'id': str(u.get('id', '')),
@@ -1438,6 +1442,31 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
             log_debug(f"Error checking user_franchise_overrides: {e}")
 
     cache_key = f'franchise_ids_{user_id}'
+
+    # ── Check if user is inactive or deleted in Zoho CRM ─────────────────────
+    raw_crm_active = database.get_global_setting('cached_crm_users', '')
+    if raw_crm_active:
+        try:
+            act_users = json.loads(raw_crm_active)
+            if isinstance(act_users, list) and len(act_users) > 0:
+                act_ids = {str(x.get('id', '')).strip() for x in act_users if x.get('id')}
+                act_emails = {str(x.get('email', '')).lower().strip() for x in act_users if x.get('email')}
+                u_str_chk = str(user_id).strip().lower()
+                if act_ids and (u_str_chk.isdigit() or '@' in u_str_chk):
+                    if u_str_chk not in act_ids and u_str_chk not in act_emails and u_str_chk not in ('admin', '__global__'):
+                        log_debug(f"[franchise_ids] User '{user_id}' is deleted/inactive in Zoho CRM. Blocked.")
+                        database.set_global_setting(cache_key, '')
+                        return {
+                            'ids': [],
+                            'names': [],
+                            'pirtek_ids': [],
+                            'debug': ['User is deleted or inactive in Zoho CRM; data access blocked.'],
+                            'ts': time.time(),
+                            'is_active': False
+                        }
+        except Exception as e_chk:
+            log_debug(f"[user_franchise_ids] Error checking user active status: {e_chk}")
+
     _cached_raw = database.get_global_setting(cache_key, '')
     _cached_data = None
     if _cached_raw:
@@ -3988,7 +4017,13 @@ def admin_users_franchise_access():
         # Fast path: If not forced and we have cached CRM users, load instantly (<10ms) without hitting Zoho API
         if not force and raw_cached_users:
             try:
-                crm_users = json.loads(raw_cached_users)
+                loaded_users = json.loads(raw_cached_users)
+                crm_users = [
+                    u for u in loaded_users
+                    if str(u.get('status', 'active')).lower().strip() in ('active', 'confirmed', '')
+                    and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
+                    and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
+                ]
             except Exception:
                 crm_users = []
 
@@ -3996,10 +4031,21 @@ def admin_users_franchise_access():
             # 1. Fetch CRM users with pagination (capped at 5 pages = 1000 users max)
             page = 1
             while page <= 5:
-                data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200})
+                # Query ONLY active users from Zoho CRM to exclude deleted/inactive accounts
+                data, err = _admin_crm_get('/crm/v3/users', {'type': 'ActiveUsers', 'page': page, 'per_page': 200})
                 if not err and data and 'users' in data:
                     page_users = data.get('users', [])
-                    crm_users.extend(page_users)
+                    for pu in page_users:
+                        p_status = str(pu.get('status', '')).lower().strip()
+                        p_email = str(pu.get('email', '')).lower().strip()
+                        p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
+                        if p_status and p_status not in ('active', 'confirmed'):
+                            continue
+                        if not p_email or '@' not in p_email or '.' not in p_email:
+                            continue
+                        if re.match(r'^\d+$', p_name):
+                            continue
+                        crm_users.append(pu)
                     info = data.get('info', {})
                     if not info.get('more_records', False) or len(page_users) < 200:
                         break
@@ -4016,74 +4062,87 @@ def admin_users_franchise_access():
         elif not crm_users:
             warning_msg = 'No admin token available. Using local user cache.'
 
-        # Build unified user dictionary to guarantee ALL users from CRM and Database are present
+        # Track active CRM IDs and emails to prevent phantom or deleted accounts from surfacing
+        active_crm_ids = {str(u.get('id', '')).strip() for u in crm_users if u.get('id')}
+        active_crm_emails = {str(u.get('email', '')).lower().strip() for u in crm_users if u.get('email')}
+
+        # Purge orphaned franchise cache entries for deleted/non-active CRM user IDs
+        if active_crm_ids:
+            try:
+                conn_clean = database.get_db_connection()
+                c_rows = database.exec_query(conn_clean, "SELECT key FROM global_settings WHERE key LIKE 'franchise_ids_%'", fetchall=True)
+                for cr in (c_rows or []):
+                    raw_key = cr['key']
+                    k_val = raw_key.replace('franchise_ids_', '').strip()
+                    if k_val.isdigit() and k_val not in active_crm_ids:
+                        database.exec_query(conn_clean, "DELETE FROM global_settings WHERE key = ?", (raw_key,))
+                conn_clean.commit()
+                conn_clean.close()
+            except Exception as ec:
+                log_debug(f"[cleanup] Error cleaning phantom franchise keys: {ec}")
+
+        # Build unified user dictionary to guarantee ALL active users from CRM and Database are present
         users_map = {}
 
-        # a) Local Database users (app_users, franchise_ids_*, module_records)
+        # a) Local Database users (app_users - only users who logged in and have valid email)
         try:
             db_users = database.get_all_known_users_from_db()
             for dbu in db_users:
                 uid = str(dbu.get('id', '')).strip()
                 email = str(dbu.get('email', '')).lower().strip()
-                k = email or uid
-                if k:
-                    users_map[k] = {
-                        'id': uid,
-                        'email': email,
-                        'full_name': dbu.get('name') or email or uid,
-                        'status': 'active',
-                        'role': {'name': dbu.get('role', 'Standard')},
-                        'profile': {'name': dbu.get('profile', 'Standard')}
-                    }
+                if not email or '@' not in email or '.' not in email:
+                    continue
+                if active_crm_ids or active_crm_emails:
+                    if email not in active_crm_emails and uid not in active_crm_ids:
+                        continue # Inactive / deleted user
+                users_map[email] = {
+                    'id': uid,
+                    'email': email,
+                    'full_name': dbu.get('name') or email,
+                    'status': 'active',
+                    'role': {'name': dbu.get('role', 'Standard')},
+                    'profile': {'name': dbu.get('profile', 'Standard')},
+                    'source': 'app_login'
+                }
         except Exception as e_db:
             log_debug(f"[users-franchise-access] Error loading DB users: {e_db}")
 
-        # b) Cached CRM users
-        raw_cached_users = database.get_global_setting('cached_crm_users', '')
-        if raw_cached_users:
-            try:
-                for u in json.loads(raw_cached_users):
-                    uid = str(u.get('id', '')).strip()
-                    email = (u.get('email') or '').lower().strip()
-                    k = email or uid
-                    if k:
-                        if k in users_map:
-                            users_map[k].update(u)
-                        else:
-                            users_map[k] = u
-            except Exception:
-                pass
-
-        # c) Fresh CRM users
+        # b) Fresh & Cached CRM users (only active)
         for u in crm_users:
             uid = str(u.get('id', '')).strip()
             email = (u.get('email') or '').lower().strip()
-            k = email or uid
-            if k:
-                if k in users_map:
-                    users_map[k].update(u)
-                else:
-                    users_map[k] = u
+            status = str(u.get('status', 'active')).lower().strip()
+            if status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                continue
+            if not email or '@' not in email or '.' not in email:
+                continue
+            if email in users_map:
+                users_map[email].update(u)
+            else:
+                users_map[email] = u
 
-        # d) Territory mappings
+        # c) Territory mappings
         mappings_raw = database.get_global_setting('user_territory_mappings', '')
         if mappings_raw:
             try:
                 for em, udet in json.loads(mappings_raw).items():
                     em_lower = (em or '').lower().strip()
-                    if em_lower and em_lower not in users_map and str(udet.get('id', '')) not in users_map:
-                        users_map[em_lower] = {
-                            'id': str(udet.get('id', '')),
-                            'email': em_lower,
-                            'full_name': udet.get('name') or em_lower,
-                            'status': 'active',
-                            'role': {'name': 'Standard'},
-                            'profile': {'name': 'Standard'}
-                        }
+                    if em_lower and '@' in em_lower and '.' in em_lower:
+                        if active_crm_emails and em_lower not in active_crm_emails:
+                            continue
+                        if em_lower not in users_map:
+                            users_map[em_lower] = {
+                                'id': str(udet.get('id', '')),
+                                'email': em_lower,
+                                'full_name': udet.get('name') or em_lower,
+                                'status': 'active',
+                                'role': {'name': 'Standard'},
+                                'profile': {'name': 'Standard'}
+                            }
             except Exception:
                 pass
 
-        # e) User overrides
+        # d) User overrides
         overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
         try:
             overrides = json.loads(overrides_raw)
@@ -4092,28 +4151,27 @@ def admin_users_franchise_access():
 
         for k in overrides.keys():
             k_str = str(k).lower().strip()
-            if k_str and k_str not in users_map:
-                is_em = '@' in k_str
+            if k_str and '@' in k_str and '.' in k_str and k_str not in users_map:
+                if active_crm_emails and k_str not in active_crm_emails:
+                    continue
                 users_map[k_str] = {
-                    'id': '' if is_em else k_str,
-                    'email': k_str if is_em else '',
+                    'id': '',
+                    'email': k_str,
                     'full_name': k_str,
                     'status': 'active',
                     'role': {'name': 'Standard'},
                     'profile': {'name': 'Standard'}
                 }
 
-        # Deduplicate users by email (primary) or ID
+        # Deduplicate users by email (primary key)
         unified_users = []
         seen_keys = set()
         for u in users_map.values():
             u_email = (u.get('email') or '').lower().strip()
-            u_id = str(u.get('id', '')).strip()
-            dedup_key = u_email if u_email else u_id
-            if dedup_key and dedup_key not in seen_keys:
-                seen_keys.add(dedup_key)
-                if u_id and u_email:
-                    seen_keys.add(u_id)
+            if not u_email or '@' not in u_email or '.' not in u_email:
+                continue
+            if u_email not in seen_keys:
+                seen_keys.add(u_email)
                 if not u.get('id'):
                     u['id'] = u_email
                 unified_users.append(u)
@@ -4164,8 +4222,21 @@ def admin_users_franchise_access():
         for u in unified_users:
             u_id = str(u.get('id', '')).strip()
             u_email = (u.get('email') or '').lower().strip()
-            u_name = u.get('full_name') or u.get('name') or u_email
-            u_status = u.get('status', 'active')
+            u_name = str(u.get('full_name') or u.get('name') or u_email).strip()
+            u_status = str(u.get('status', 'active')).lower().strip()
+
+            # Strictly skip deleted, deactivated, or invalid users
+            if u_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                continue
+            if not u_email or '@' not in u_email or '.' not in u_email:
+                continue
+            if re.match(r'^\d+$', u_name):
+                continue
+            if active_crm_ids or active_crm_emails:
+                is_crm_active = (u_id and u_id in active_crm_ids) or (u_email and u_email in active_crm_emails)
+                if not is_crm_active and u.get('source') != 'app_login':
+                    continue
+
             u_role = u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else str(u.get('role', ''))
             u_profile = u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else str(u.get('profile', ''))
             is_user_admin = 'administrator' in u_profile.lower() or 'admin' in u_role.lower()
