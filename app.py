@@ -4020,7 +4020,7 @@ def admin_users_franchise_access():
                 loaded_users = json.loads(raw_cached_users)
                 crm_users = [
                     u for u in loaded_users
-                    if str(u.get('status', 'active')).lower().strip() in ('active', 'confirmed', '')
+                    if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive', 'inactive', 'suspended')
                     and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
                     and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
                 ]
@@ -4028,21 +4028,24 @@ def admin_users_franchise_access():
                 crm_users = []
 
         if not crm_users and atk:
-            # 1. Fetch CRM users with pagination (capped at 5 pages = 1000 users max)
+            # 1. Fetch CRM users with pagination (up to 10 pages = 2000 users max)
             page = 1
-            while page <= 5:
-                # Query ONLY active users from Zoho CRM to exclude deleted/inactive accounts
-                data, err = _admin_crm_get('/crm/v3/users', {'type': 'ActiveUsers', 'page': page, 'per_page': 200})
+            while page <= 10:
+                # Query AllUsers to include all team users across franchises & head office
+                data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200})
                 if not err and data and 'users' in data:
                     page_users = data.get('users', [])
                     for pu in page_users:
-                        p_status = str(pu.get('status', '')).lower().strip()
+                        p_status = str(pu.get('status', 'active')).lower().strip()
                         p_email = str(pu.get('email', '')).lower().strip()
                         p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
-                        if p_status and p_status not in ('active', 'confirmed'):
+                        # Strictly exclude deleted or deactivated accounts
+                        if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
                             continue
+                        # Exclude phantom records without valid email
                         if not p_email or '@' not in p_email or '.' not in p_email:
                             continue
+                        # Exclude phantom records whose name is purely numeric digits
                         if re.match(r'^\d+$', p_name):
                             continue
                         crm_users.append(pu)
@@ -4084,7 +4087,7 @@ def admin_users_franchise_access():
         # Build unified user dictionary to guarantee ALL active users from CRM and Database are present
         users_map = {}
 
-        # a) Local Database users (app_users - only users who logged in and have valid email)
+        # a) Local Database users (app_users - users who logged in and have valid email)
         try:
             db_users = database.get_all_known_users_from_db()
             for dbu in db_users:
@@ -4092,9 +4095,6 @@ def admin_users_franchise_access():
                 email = str(dbu.get('email', '')).lower().strip()
                 if not email or '@' not in email or '.' not in email:
                     continue
-                if active_crm_ids or active_crm_emails:
-                    if email not in active_crm_emails and uid not in active_crm_ids:
-                        continue # Inactive / deleted user
                 users_map[email] = {
                     'id': uid,
                     'email': email,
@@ -4107,7 +4107,7 @@ def admin_users_franchise_access():
         except Exception as e_db:
             log_debug(f"[users-franchise-access] Error loading DB users: {e_db}")
 
-        # b) Fresh & Cached CRM users (only active)
+        # b) Fresh & Cached CRM users (team users, admins, franchise staff)
         for u in crm_users:
             uid = str(u.get('id', '')).strip()
             email = (u.get('email') or '').lower().strip()
@@ -4128,8 +4128,6 @@ def admin_users_franchise_access():
                 for em, udet in json.loads(mappings_raw).items():
                     em_lower = (em or '').lower().strip()
                     if em_lower and '@' in em_lower and '.' in em_lower:
-                        if active_crm_emails and em_lower not in active_crm_emails:
-                            continue
                         if em_lower not in users_map:
                             users_map[em_lower] = {
                                 'id': str(udet.get('id', '')),
@@ -4152,8 +4150,6 @@ def admin_users_franchise_access():
         for k in overrides.keys():
             k_str = str(k).lower().strip()
             if k_str and '@' in k_str and '.' in k_str and k_str not in users_map:
-                if active_crm_emails and k_str not in active_crm_emails:
-                    continue
                 users_map[k_str] = {
                     'id': '',
                     'email': k_str,
@@ -4240,6 +4236,14 @@ def admin_users_franchise_access():
             u_role = u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else str(u.get('role', ''))
             u_profile = u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else str(u.get('profile', ''))
             is_user_admin = 'administrator' in u_profile.lower() or 'admin' in u_role.lower()
+
+            is_head_office = (
+                'head office' in u_profile.lower() or
+                'corporate' in u_profile.lower() or
+                'head office' in u_role.lower() or
+                'corporate' in u_role.lower() or
+                u_email.endswith('@pirtekusa.com')
+            )
 
             # Check override by ID or email
             user_override = overrides.get(u_id) or (overrides.get(u_email) if u_email else None)
@@ -4337,6 +4341,7 @@ def admin_users_franchise_access():
                 'role': u_role,
                 'profile': u_profile,
                 'is_admin': is_user_admin,
+                'is_head_office': is_head_office,
                 'has_override': has_override,
                 'override_meta': override_meta,
                 'franchises': franchises,

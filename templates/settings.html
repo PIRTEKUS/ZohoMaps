@@ -1326,6 +1326,7 @@
                         <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Access Filter</label>
                         <select id="ufa-filter-override" onchange="filterUserFranchiseAccessTable()" style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none; cursor:pointer;">
                             <option value="all">All Users</option>
+                            <option value="head_office">🏢 Head Office Users</option>
                             <option value="override">⚡ Overridden Only</option>
                             <option value="auto">🤖 Auto-Detected Only</option>
                             <option value="multi">⚠️ Multi-Franchise Users (>1)</option>
@@ -1574,12 +1575,21 @@ function renderUserFranchiseAccessTable(users) {
     let overrideCount = 0;
     let multiCount = 0;
     let zeroCount = 0;
+    let headOfficeCount = 0;
 
     const rowsHtml = validUsers.map(u => {
         const fCount = (u.franchises || []).length;
         if (u.has_override) overrideCount++;
         if (fCount > 1) multiCount++;
         if (fCount === 0) zeroCount++;
+
+        const isHeadOffice = Boolean(
+            u.is_head_office ||
+            (u.profile && String(u.profile).toLowerCase().includes('head office')) ||
+            (u.role && String(u.role).toLowerCase().includes('head office')) ||
+            (u.email && String(u.email).toLowerCase().endsWith('@pirtekusa.com'))
+        );
+        if (isHeadOffice) headOfficeCount++;
 
         // Franchises tags
         let franchiseChips = '';
@@ -1609,20 +1619,24 @@ function renderUserFranchiseAccessTable(users) {
             `<span style="background:rgba(99,102,241,0.2); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Admin</span>` :
             `<span style="background:rgba(255,255,255,0.06); color:#94a3b8; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.role || u.profile || 'Standard'}</span>`;
 
+        const headOfficeBadge = isHeadOffice ?
+            `<span style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); color:#fbbf24; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">🏢 Head Office</span>` : '';
+
         // Search text for filtering
         const fNames = (u.franchises || []).map(f => f.name.toLowerCase()).join(' ');
-        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${fNames}`.replace(/"/g, '&quot;');
+        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${isHeadOffice ? 'head office corporate' : ''} ${fNames}`.replace(/"/g, '&quot;');
 
         const uIdSafe = String(u.id).replace(/"/g, '&quot;');
         const uEmailSafe = String(u.email || '').replace(/"/g, '&quot;');
         const uNameSafe = String(u.name || '').replace(/"/g, '&quot;');
 
         return `
-            <tr class="ufa-user-row" id="ufa-row-${uIdSafe}" data-search="${searchAttr}" data-override="${u.has_override ? 'yes' : 'no'}" data-count="${fCount}" style="border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.015)'" onmouseout="this.style.background='transparent'">
+            <tr class="ufa-user-row" id="ufa-row-${uIdSafe}" data-search="${searchAttr}" data-override="${u.has_override ? 'yes' : 'no'}" data-head-office="${isHeadOffice ? 'yes' : 'no'}" data-count="${fCount}" style="border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.015)'" onmouseout="this.style.background='transparent'">
                 <td style="padding:10px 12px; vertical-align:middle;">
-                    <div style="font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:0.4rem;">
+                    <div style="font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
                         ${u.name}
                         ${roleLabel}
+                        ${headOfficeBadge}
                     </div>
                     <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">${u.email}</div>
                 </td>
@@ -1654,7 +1668,7 @@ function renderUserFranchiseAccessTable(users) {
     tbody.innerHTML = rowsHtml.join('');
 
     if (summary) {
-        summary.textContent = `${validUsers.length} Users (${overrideCount} Overridden, ${multiCount} Multi-Franchise, ${zeroCount} Empty)`;
+        summary.textContent = `${validUsers.length} Users (${headOfficeCount} Head Office, ${overrideCount} Overridden, ${multiCount} Multi-Franchise, ${zeroCount} Empty)`;
     }
 
     filterUserFranchiseAccessTable();
@@ -1670,12 +1684,14 @@ function filterUserFranchiseAccessTable() {
     rows.forEach(r => {
         const text = r.getAttribute('data-search') || '';
         const isOverride = r.getAttribute('data-override') === 'yes';
+        const isHeadOffice = r.getAttribute('data-head-office') === 'yes';
         const fCount = parseInt(r.getAttribute('data-count') || '0', 10);
 
         let matchesSearch = !q || text.includes(q);
         let matchesMode = true;
 
-        if (mode === 'override') matchesMode = isOverride;
+        if (mode === 'head_office') matchesMode = isHeadOffice;
+        else if (mode === 'override') matchesMode = isOverride;
         else if (mode === 'auto') matchesMode = !isOverride;
         else if (mode === 'multi') matchesMode = fCount > 1;
         else if (mode === 'single') matchesMode = fCount === 1;
