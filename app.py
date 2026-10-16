@@ -1235,9 +1235,22 @@ def _is_null_string(val):
     return val is not None and str(val).strip().upper() in ('NULL', 'NONE', 'N/A', 'UNKNOWN')
 
 
+_refresh_mappings_lock = threading.Lock()
+_is_refreshing_mappings = False
+
 def _refresh_user_mappings(admin_token):
-    """Fetch all territories and their users, building a mapping of email -> user details."""
+    """Fetch all territories and their users concurrently, building a mapping of email -> user details."""
+    global _is_refreshing_mappings
+    if not admin_token:
+        return None
+    with _refresh_mappings_lock:
+        if _is_refreshing_mappings:
+            log_debug("[user_mappings] Refresh already in progress, skipping duplicate call.")
+            return None
+        _is_refreshing_mappings = True
+
     try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         t_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories"
         headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
         r = requests.get(t_url, headers=headers, timeout=10)
@@ -1255,34 +1268,39 @@ def _refresh_user_mappings(admin_token):
             log_debug(f"[user_mappings] Error parsing territories JSON: {je}")
             return None
 
-        email_lookup = {}
-        for t in territories:
+        def _fetch_territory_users(t):
             t_name = t.get('name')
             t_id = t.get('id')
             if not t_name or not t_id:
-                continue
-                
+                return []
             u_url = f"{zoho_api.ZOHO_API_URL}/crm/v3/settings/territories/{t_id}/users"
-            u_resp = requests.get(u_url, headers=headers, timeout=10)
-            if u_resp.ok:
-                if u_resp.status_code == 204 or not u_resp.text.strip():
-                    continue
+            try:
+                u_resp = requests.get(u_url, headers=headers, timeout=8)
+                if u_resp.ok and u_resp.status_code != 204 and u_resp.text.strip():
+                    return [(t_name, u) for u in u_resp.json().get('users', [])]
+            except Exception:
+                pass
+            return []
+
+        email_lookup = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_fetch_territory_users, t) for t in territories]
+            for fut in as_completed(futures):
                 try:
-                    t_users = u_resp.json().get('users', [])
-                    for u in t_users:
+                    for t_name, u in fut.result():
                         email = (u.get('email') or '').strip().lower()
                         if email:
                             if email not in email_lookup:
                                 email_lookup[email] = {
-                                    'id': str(u.get('id')),
+                                    'id': str(u.get('id', '')),
                                     'name': u.get('full_name', ''),
                                     'franchise': u.get('Franchise', ''),
                                     'territories': []
                                 }
                             if t_name not in email_lookup[email]['territories']:
                                 email_lookup[email]['territories'].append(t_name)
-                except Exception as parse_err:
-                    log_debug(f"[user_mappings] Error parsing users JSON for territory '{t_name}' ({t_id}): {parse_err}")
+                except Exception:
+                    pass
         
         # Save to database
         database.set_global_setting('user_territory_mappings', json.dumps(email_lookup))
@@ -1292,6 +1310,9 @@ def _refresh_user_mappings(admin_token):
         import traceback
         log_debug(f"[user_mappings] Error building cache: {e}\n{traceback.format_exc()}")
         return None
+    finally:
+        with _refresh_mappings_lock:
+            _is_refreshing_mappings = False
 
 
 def _extract_user_ids_from_field(val):
@@ -1316,8 +1337,18 @@ def _extract_user_ids_from_field(val):
     return uids
 
 
-def _get_all_franchises(admin_token):
+def _get_all_franchises(admin_token, force_refresh=False):
     """Fetch all Franchises from CRM custom module to resolve names to IDs."""
+    if not force_refresh:
+        raw_cached = database.get_global_setting('cached_all_franchises', '')
+        if raw_cached:
+            try:
+                cached_data = json.loads(raw_cached)
+                if isinstance(cached_data, list) and cached_data:
+                    return cached_data
+            except Exception:
+                pass
+
     if admin_token:
         try:
             headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
@@ -1325,7 +1356,7 @@ def _get_all_franchises(admin_token):
                 f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
                 headers=headers,
                 params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
-                timeout=10
+                timeout=8
             )
             if resp.ok:
                 data = resp.json().get('data', [])
@@ -1450,7 +1481,7 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                 user_key = em
                 break
 
-    if force_refresh or not user_key or user_key not in mappings:
+    if force_refresh:
         debug_log.append("Rebuilding territory-to-user mappings cache on-demand...")
         new_mappings = _refresh_user_mappings(admin_token)
         if new_mappings:
@@ -1462,6 +1493,9 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                         break
             elif user_email:
                 user_key = user_email
+    elif (not user_key or user_key not in mappings) and admin_token:
+        # User not yet in territory mappings: dispatch background refresh without blocking web request
+        threading.Thread(target=_refresh_user_mappings, args=(admin_token,), daemon=True).start()
 
     # Now look up user details in the mappings cache
     user_detail = mappings.get(user_key) if user_key else None
@@ -2086,34 +2120,108 @@ def api_admin_franchise_record_counts():
     finally:
         conn.close()
 
+    atk = _get_admin_access_token() or session.get('access_token')
+
     cached_franchises_str = database.get_global_setting('cached_all_franchises', '[]')
     franchise_name_map = {}
     try:
-        for f in json.loads(cached_franchises_str):
-            fid = str(f.get('id'))
-            fname = f.get('name', f'Franchise {fid}')
-            franchise_name_map[fid] = fname
+        raw_list = json.loads(cached_franchises_str) if cached_franchises_str else []
+        for f in raw_list:
+            fid = str(f.get('id', '')).strip()
+            fname = (f.get('Name') or f.get('name') or '').strip()
+            if fid and fname and not fname.startswith('Franchise 6959'):
+                franchise_name_map[fid] = fname
+    except Exception:
+        pass
+
+    # If missing names or empty cache, fetch all from Zoho CRM Franchises module
+    needed_fids = {str(r['franchise_id']) for r in rows if r['franchise_id']}
+    if (not franchise_name_map or any(fid not in franchise_name_map for fid in needed_fids)) and atk:
+        try:
+            crm_franchises = _get_all_franchises(atk)
+            for f in (crm_franchises or []):
+                fid = str(f.get('id', '')).strip()
+                fname = (f.get('Name') or f.get('name') or '').strip()
+                if fid and fname:
+                    franchise_name_map[fid] = fname
+        except Exception as e_f:
+            log_debug(f"[franchise-record-counts] Error fetching all franchises: {e_f}")
+
+    # Also load from franchise_boundaries as secondary source
+    b_str = database.get_global_setting('franchise_boundaries', '{}')
+    try:
+        b_dict = json.loads(b_str)
+        for b_id, b_val in b_dict.items():
+            b_id_str = str(b_id).strip()
+            if b_id_str and b_id_str not in franchise_name_map:
+                b_name = (b_val.get('name') or b_val.get('franchise_name') or '') if isinstance(b_val, dict) else str(b_val)
+                if b_name and b_name != b_id_str and not b_name.startswith('Franchise 6959'):
+                    franchise_name_map[b_id_str] = b_name
     except Exception:
         pass
 
     franchise_data = {}
-    for r in rows:
-        fid = str(r['franchise_id']) if r['franchise_id'] is not None else 'Unassigned'
-        fname = franchise_name_map.get(fid, f'Franchise {fid}' if fid != 'Unassigned' else 'Unassigned / Global')
-        if fid not in franchise_data:
-            franchise_data[fid] = {
-                'franchise_id': fid,
-                'franchise_name': fname,
-                'modules': {},
-                'total_records': 0
+    conn_sub = None
+    try:
+        for r in rows:
+            fid = str(r['franchise_id']) if r['franchise_id'] is not None else 'Unassigned'
+            fname = franchise_name_map.get(fid)
+
+            # Fallback 1: check sample record_data in module_records if name is still missing
+            if not fname and fid != 'Unassigned':
+                try:
+                    if conn_sub is None:
+                        conn_sub = database.get_db_connection()
+                    s_row = database.exec_query(conn_sub, "SELECT record_data FROM module_records WHERE franchise_id = ? AND record_data LIKE '%franchise%' LIMIT 1", (fid,), fetchone=True)
+                    if s_row and s_row['record_data']:
+                        s_data = json.loads(s_row['record_data'])
+                        for k, v in s_data.items():
+                            if 'franchise' in k.lower():
+                                if isinstance(v, dict) and (v.get('name') or v.get('Name')):
+                                    fname = (v.get('name') or v.get('Name')).strip()
+                                    franchise_name_map[fid] = fname
+                                    break
+                                elif isinstance(v, str) and v.strip() and v.strip() != fid and not v.strip().startswith('6959'):
+                                    fname = v.strip()
+                                    franchise_name_map[fid] = fname
+                                    break
+                except Exception:
+                    pass
+
+            # Fallback 2: fetch single record from Zoho CRM if numeric ID
+            if not fname and fid != 'Unassigned' and atk and fid.isdigit() and len(fid) > 10:
+                try:
+                    headers = {'Authorization': f'Zoho-oauthtoken {atk}'}
+                    resp_f = requests.get(f"{zoho_api.ZOHO_API_URL}/crm/v3/Franchises/{fid}", headers=headers, timeout=5)
+                    if resp_f.ok:
+                        f_data = resp_f.json().get('data', [])
+                        if f_data:
+                            fname = (f_data[0].get('Name') or f_data[0].get('name') or '').strip()
+                            if fname:
+                                franchise_name_map[fid] = fname
+                except Exception:
+                    pass
+
+            if not fname:
+                fname = f'Franchise {fid}' if fid != 'Unassigned' else 'Unassigned / Global'
+
+            if fid not in franchise_data:
+                franchise_data[fid] = {
+                    'franchise_id': fid,
+                    'franchise_name': fname,
+                    'modules': {},
+                    'total_records': 0
+                }
+            cnt = r['record_count']
+            geo = r['geocoded_count'] or 0
+            franchise_data[fid]['modules'][r['module_name']] = {
+                'count': cnt,
+                'geocoded': geo
             }
-        cnt = r['record_count']
-        geo = r['geocoded_count'] or 0
-        franchise_data[fid]['modules'][r['module_name']] = {
-            'count': cnt,
-            'geocoded': geo
-        }
-        franchise_data[fid]['total_records'] += cnt
+            franchise_data[fid]['total_records'] += cnt
+    finally:
+        if conn_sub:
+            conn_sub.close()
 
     return jsonify({
         'status': 'success',
@@ -3868,22 +3976,32 @@ def admin_users_franchise_access():
     if not session.get('is_admin', False):
         return jsonify({'error': 'Unauthorized'}), 403
 
+    force = request.args.get('force', 'false').lower() == 'true'
     atk = _get_admin_access_token() or session.get('access_token')
 
     try:
         crm_users = []
         warning_msg = None
 
-        if atk:
-            # 1. Fetch all CRM users with pagination
+        raw_cached_users = database.get_global_setting('cached_crm_users', '')
+
+        # Fast path: If not forced and we have cached CRM users, load instantly (<10ms) without hitting Zoho API
+        if not force and raw_cached_users:
+            try:
+                crm_users = json.loads(raw_cached_users)
+            except Exception:
+                crm_users = []
+
+        if not crm_users and atk:
+            # 1. Fetch CRM users with pagination (capped at 5 pages = 1000 users max)
             page = 1
-            while True:
+            while page <= 5:
                 data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200})
                 if not err and data and 'users' in data:
                     page_users = data.get('users', [])
                     crm_users.extend(page_users)
                     info = data.get('info', {})
-                    if not info.get('more_records', False) or len(page_users) < 200 or page >= 15:
+                    if not info.get('more_records', False) or len(page_users) < 200:
                         break
                     page += 1
                 else:
@@ -3895,7 +4013,7 @@ def admin_users_franchise_access():
                     database.set_global_setting('cached_crm_users', json.dumps(crm_users))
                 except Exception:
                     pass
-        else:
+        elif not crm_users:
             warning_msg = 'No admin token available. Using local user cache.'
 
         # Build unified user dictionary to guarantee ALL users from CRM and Database are present
@@ -4030,7 +4148,8 @@ def admin_users_franchise_access():
             except Exception:
                 pass
         if not territory_mappings and atk:
-            territory_mappings = _refresh_user_mappings(atk) or {}
+            # Dispatch territory mapping refresh in background so web request is never blocked
+            threading.Thread(target=_refresh_user_mappings, args=(atk,), daemon=True).start()
 
         # 4. Resolve franchise access for each user in-memory (0 network calls in this loop!)
         STOP_WORDS = {
@@ -4124,19 +4243,7 @@ def admin_users_franchise_access():
                 assigned_names = [v['name'] for v in assigned_dict.values()]
                 assigned_pirteks = [v['pirtek_id'] for v in assigned_dict.values()]
 
-                # Cache in DB
-                try:
-                    res_obj = {
-                        'ids': assigned_ids,
-                        'names': assigned_names,
-                        'pirtek_ids': assigned_pirteks,
-                        'debug': debug_trace,
-                        'ts': time.time()
-                    }
-                    if u_id: database.set_global_setting(f'franchise_ids_{u_id}', json.dumps(res_obj))
-                    if u_email: database.set_global_setting(f'franchise_ids_{u_email}', json.dumps(res_obj))
-                except Exception:
-                    pass
+
 
             # Map into objects
             franchises = []

@@ -1521,7 +1521,8 @@ async function loadUserFranchiseAccess(forceRefresh = false) {
     }
 
     try {
-        const res = await fetch('/api/admin/users-franchise-access');
+        const url = forceRefresh ? '/api/admin/users-franchise-access?force=true' : '/api/admin/users-franchise-access';
+        const res = await fetch(url);
         const text = await res.text();
         let data;
         try {
@@ -1928,9 +1929,15 @@ function renderFranchiseRecordCountsTable(list) {
         const leads = f.modules.Leads ? `${f.modules.Leads.count.toLocaleString()} <span style="color:#64748b; font-size:0.75rem;">(${f.modules.Leads.geocoded} geo)</span>` : '<span style="color:#64748b;">0</span>';
         const ship = f.modules.Ship_To_Addresses ? `${f.modules.Ship_To_Addresses.count.toLocaleString()} <span style="color:#64748b; font-size:0.75rem;">(${f.modules.Ship_To_Addresses.geocoded} geo)</span>` : '<span style="color:#64748b;">0</span>';
 
+        let displayName = f.franchise_name;
+        if (!displayName || displayName === `Franchise ${f.franchise_id}` || displayName.startsWith('Franchise 6959')) {
+            const known = (_allFranchisesList || []).find(x => String(x.id) === String(f.franchise_id));
+            if (known && known.name) displayName = known.name;
+        }
+
         return `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
             <td style="padding:10px 12px;">
-                <strong style="color:#f8fafc; font-size:0.85rem;">${f.franchise_name}</strong>
+                <strong style="color:#f8fafc; font-size:0.85rem;">${displayName}</strong>
                 <div style="font-size:0.72rem; color:#94a3b8;">ID: <code>${f.franchise_id}</code></div>
             </td>
             <td style="padding:10px 12px; text-align:center;">${acc}</td>
