@@ -3399,7 +3399,10 @@ async function parseAndMatchKml(kmlText) {
                         // Round to 5 decimal places (approx. 1 meter precision) for payload optimization
                         const roundedLng = Math.round(lng * 100000) / 100000;
                         const roundedLat = Math.round(lat * 100000) / 100000;
-                        points.push([roundedLng, roundedLat]);
+                        // Avoid storing redundant consecutive identical points
+                        if (points.length === 0 || points[points.length - 1][0] !== roundedLng || points[points.length - 1][1] !== roundedLat) {
+                            points.push([roundedLng, roundedLat]);
+                        }
                     }
                 }
             });
@@ -3490,39 +3493,87 @@ async function saveKmlBoundaries() {
         return;
     }
 
+    const franchiseIds = Object.keys(window.parsedKmlBoundaries);
+    const totalFranchises = franchiseIds.length;
+
+    // Partition into small chunks (< 200KB or max 5 franchises per request)
+    // to guarantee requests never hit Nginx's default 1MB client_max_body_size limit.
+    const batches = [];
+    let currentBatch = {};
+    let currentBatchBytes = 0;
+
+    for (const fId of franchiseIds) {
+        const item = window.parsedKmlBoundaries[fId];
+        const itemJson = JSON.stringify(item);
+        const itemBytes = itemJson.length;
+
+        // Start a new batch if adding this item exceeds ~200KB or max 5 franchises
+        if ((currentBatchBytes + itemBytes > 200000 || Object.keys(currentBatch).length >= 5) && Object.keys(currentBatch).length > 0) {
+            batches.push(currentBatch);
+            currentBatch = {};
+            currentBatchBytes = 0;
+        }
+
+        currentBatch[fId] = item;
+        currentBatchBytes += itemBytes;
+    }
+    if (Object.keys(currentBatch).length > 0) {
+        batches.push(currentBatch);
+    }
+
     const btn = document.getElementById('save-kml-btn');
     const statusEl = document.getElementById('kml-save-status');
 
     try {
         btn.disabled = true;
-        btn.textContent = 'Saving...';
-        if (statusEl) statusEl.style.display = 'none';
-
-        // POST only the parsed boundaries chunk to avoid HTTP 413 payload size limits
-        const res = await fetch('/api/admin/boundaries/save', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                boundaries: window.parsedKmlBoundaries
-            })
-        });
-
-        if (res.ok) {
-            if (statusEl) {
-                statusEl.style.display = 'inline';
-                setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
-            }
-            alert('Franchise territory boundaries saved successfully!');
-            window.location.reload();
-        } else {
-            let errorBody = '';
-            try {
-                errorBody = await res.text();
-            } catch (e) {}
-            throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorBody || 'No response body'}`);
+        if (statusEl) {
+            statusEl.style.display = 'inline';
+            statusEl.style.color = '#38bdf8';
+            statusEl.textContent = `Saving 0/${totalFranchises} boundaries...`;
         }
+
+        let savedCount = 0;
+        for (let bIndex = 0; bIndex < batches.length; bIndex++) {
+            const batch = batches[bIndex];
+            const batchSize = Object.keys(batch).length;
+
+            btn.textContent = `Saving (${savedCount}/${totalFranchises})...`;
+            if (statusEl) {
+                statusEl.textContent = `Saving batch ${bIndex + 1} of ${batches.length} (${savedCount}/${totalFranchises} saved)...`;
+            }
+
+            const res = await fetch('/api/admin/boundaries/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    boundaries: batch
+                })
+            });
+
+            if (!res.ok) {
+                let errorBody = '';
+                try {
+                    errorBody = await res.text();
+                } catch (e) {}
+                throw new Error(`HTTP ${res.status} ${res.statusText}: ${errorBody || 'No response body'}`);
+            }
+
+            savedCount += batchSize;
+        }
+
+        btn.textContent = 'Saved!';
+        if (statusEl) {
+            statusEl.style.color = '#10b981';
+            statusEl.textContent = `✓ All ${totalFranchises} boundaries saved!`;
+        }
+        alert(`All ${totalFranchises} franchise territory boundaries saved successfully!`);
+        window.location.reload();
     } catch (err) {
         console.error(err);
+        if (statusEl) {
+            statusEl.style.color = '#ef4444';
+            statusEl.textContent = `❌ Error saving boundaries`;
+        }
         alert('Error saving franchise boundaries: ' + err.message);
     } finally {
         btn.disabled = false;

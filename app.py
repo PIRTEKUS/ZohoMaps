@@ -965,7 +965,7 @@ def save_boundaries_incremental():
         if not session.get('is_admin', False):
             return jsonify({'error': 'Admin only'}), 403
             
-        data = request.json
+        data = request.get_json(silent=True) or request.json or {}
         if not data or 'boundaries' not in data:
             return jsonify({'error': 'Missing boundaries data'}), 400
             
