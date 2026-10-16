@@ -1522,9 +1522,18 @@ async function loadUserFranchiseAccess(forceRefresh = false) {
 
     try {
         const res = await fetch('/api/admin/users-franchise-access');
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            if (!res.ok) {
+                throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Request failed'}`);
+            }
+            throw new Error(`Unexpected non-JSON response from server (HTTP ${res.status})`);
+        }
         if (!res.ok || data.error) {
-            throw new Error(data.error || 'Failed to load user access data');
+            throw new Error(data.error || `HTTP ${res.status}: Failed to load user access data`);
         }
 
         _rawUserFranchiseData = data.users || [];
@@ -1694,7 +1703,13 @@ async function repairUserFranchiseAccess(userId, email, userName) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ user_id: userId, email: email })
         });
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Request failed'}`);
+        }
         if (!res.ok || data.error) {
             throw new Error(data.error || 'Failed to repair franchise access');
         }
@@ -1834,7 +1849,13 @@ async function submitUserOverride(isClear = false) {
             })
         });
 
-        const data = await res.json();
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || 'Request failed'}`);
+        }
         if (!res.ok || data.error) {
             throw new Error(data.error || 'Failed to update user override');
         }

@@ -1293,28 +1293,60 @@ def _refresh_user_mappings(admin_token):
         return None
 
 
+def _extract_user_ids_from_field(val):
+    """Extract list of user ID strings from a Zoho user lookup or multi-lookup field."""
+    if not val:
+        return []
+    uids = []
+    if isinstance(val, dict):
+        uid = str(val.get('id', '')).strip()
+        if uid:
+            uids.append(uid)
+    elif isinstance(val, list):
+        for item in val:
+            if isinstance(item, dict):
+                uid = str(item.get('id', '')).strip()
+                if uid:
+                    uids.append(uid)
+            elif item:
+                uids.append(str(item).strip())
+    elif isinstance(val, str) and val.strip():
+        uids.append(val.strip())
+    return uids
+
+
 def _get_all_franchises(admin_token):
     """Fetch all Franchises from CRM custom module to resolve names to IDs."""
-    try:
-        headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
-        resp = requests.get(
-            f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
-            headers=headers,
-            params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
-            timeout=10
-        )
-        if resp.ok:
-            data = resp.json().get('data', [])
-            if data:
-                try:
-                    simple_list = [{'id': str(f['id']), 'name': f.get('Name')} for f in data if f.get('Name') and f.get('id')]
-                    database.set_global_setting('cached_all_franchises', json.dumps(simple_list))
-                except Exception as cache_err:
-                    log_debug(f"[franchises] Cache write failed: {cache_err}")
-            return data
-        log_debug(f"[franchises] Failed to fetch custom module records: {resp.status_code}")
-    except Exception as e:
-        log_debug(f"[franchises] Error fetching franchises: {e}")
+    if admin_token:
+        try:
+            headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
+            resp = requests.get(
+                f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
+                headers=headers,
+                params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
+                timeout=10
+            )
+            if resp.ok:
+                data = resp.json().get('data', [])
+                if data:
+                    try:
+                        database.set_global_setting('cached_all_franchises', json.dumps(data))
+                    except Exception as cache_err:
+                        log_debug(f"[franchises] Cache write failed: {cache_err}")
+                return data
+            log_debug(f"[franchises] Failed to fetch custom module records: {resp.status_code}")
+        except Exception as e:
+            log_debug(f"[franchises] Error fetching franchises: {e}")
+
+    # Fallback to cache if network call fails or token is missing
+    raw_cached = database.get_global_setting('cached_all_franchises', '')
+    if raw_cached:
+        try:
+            cached_data = json.loads(raw_cached)
+            if isinstance(cached_data, list):
+                return cached_data
+        except Exception:
+            pass
     return []
 
 
@@ -1442,9 +1474,28 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     else:
         debug_log.append(f"User '{user_id}' not found in territory user mapping cache.")
 
-    # ── Strategy 1: COQL lookup
+    # ── Strategy 1: In-memory lookup via Franchises module records
     # Check if the user is listed in any Franchise record's "Franchise_Standard_Users" or "Franchise_Admin_User" field.
-    if resolved_id:
+    franchises = _get_all_franchises(admin_token)
+    if resolved_id and franchises:
+        for f in franchises:
+            fid = str(f.get('id', ''))
+            f_name = f.get('Name') or f.get('name', '')
+            f_pirtek = f.get('Pirtek_Franchise_ID', '') or ''
+
+            admin_uids = _extract_user_ids_from_field(f.get('Franchise_Admin_User'))
+            std_uids = _extract_user_ids_from_field(f.get('Franchise_Standard_Users'))
+            if resolved_id in admin_uids or resolved_id in std_uids:
+                if fid and fid not in found:
+                    found[fid] = {
+                        'id': fid,
+                        'name': f_name,
+                        'pirtek_id': f_pirtek
+                    }
+                    debug_log.append(f"Mapped user {resolved_id} to Franchise '{f_name}' ({fid}) via Franchise users field")
+
+    # Optional fallback COQL query ONLY if not found in all_franchises and force_refresh is True
+    if resolved_id and not found and force_refresh and admin_token:
         for coql in [
             f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Standard_Users = '{resolved_id}'",
             f"SELECT id, Name, Pirtek_Franchise_ID FROM Franchises WHERE Franchise_Admin_User = '{resolved_id}'"
@@ -1466,7 +1517,8 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     # ── Strategy 2: Territory-based matching
     # Match territory name to franchise name
     if user_detail and user_territories:
-        franchises = _get_all_franchises(admin_token)
+        if not franchises:
+            franchises = _get_all_franchises(admin_token)
         STOP_WORDS = {'pirtek', 'north', 'south', 'east', 'west', 'central', 'area', 'region', 'territory', 'city', 'center', 'service', 'the', 'and', 'for', 'inc', 'llc'}
         for tname in user_territories:
             matched = False
@@ -3799,6 +3851,10 @@ def admin_users_franchise_access():
             data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers'})
             if not err and data and 'users' in data:
                 crm_users = data.get('users', [])
+                try:
+                    database.set_global_setting('cached_crm_users', json.dumps(crm_users))
+                except Exception:
+                    pass
             else:
                 warning_msg = f'Could not reach Zoho CRM: {err or "No users returned"}. Using local cache.'
         else:
@@ -3806,6 +3862,12 @@ def admin_users_franchise_access():
 
         # Fallback to local cache if crm_users could not be retrieved from Zoho
         if not crm_users:
+            raw_cached_users = database.get_global_setting('cached_crm_users', '')
+            if raw_cached_users:
+                try:
+                    crm_users = json.loads(raw_cached_users)
+                except Exception:
+                    pass
             mappings_raw = database.get_global_setting('user_territory_mappings', '')
             overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
             seen_emails = set()
@@ -3845,16 +3907,48 @@ def admin_users_franchise_access():
                     pass
 
         # 2. Get all available franchises
+        crm_franchises = _get_all_franchises(atk)
         all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
 
-        # 3. Load overrides dictionary
+        # Build fast in-memory index for franchise user lookups
+        user_to_franchises = {}
+        franchise_by_name = {}
+        for f in crm_franchises:
+            fid = str(f.get('id', '')).strip()
+            fname = f.get('Name') or f.get('name', '')
+            fpirtek = f.get('Pirtek_Franchise_ID', '') or ''
+            if not fid or not fname:
+                continue
+            f_item = {'id': fid, 'name': fname, 'pirtek_id': fpirtek}
+            franchise_by_name[fname.strip().lower()] = f_item
+            franchise_by_name[fname.lower().replace('pirtek', '').strip()] = f_item
+
+            for uid in _extract_user_ids_from_field(f.get('Franchise_Admin_User')):
+                user_to_franchises.setdefault(uid, {})[fid] = f_item
+            for uid in _extract_user_ids_from_field(f.get('Franchise_Standard_Users')):
+                user_to_franchises.setdefault(uid, {})[fid] = f_item
+
+        # 3. Load territory mappings once
+        mappings_raw = database.get_global_setting('user_territory_mappings', '')
+        territory_mappings = {}
+        if mappings_raw:
+            try:
+                territory_mappings = json.loads(mappings_raw)
+            except Exception:
+                pass
+        if not territory_mappings and atk:
+            territory_mappings = _refresh_user_mappings(atk) or {}
+
+        # 4. Load overrides dictionary
         overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
         try:
             overrides = json.loads(overrides_raw)
         except Exception:
             overrides = {}
 
-        # 4. Resolve franchise access for each user
+        # 5. Resolve franchise access for each user in-memory (0 network calls in this loop!)
+        STOP_WORDS = {'pirtek', 'north', 'south', 'east', 'west', 'central', 'area', 'region', 'territory', 'city', 'center', 'service', 'the', 'and', 'for', 'inc', 'llc'}
+
         user_list = []
         for u in crm_users:
             u_id = str(u.get('id', '')).strip()
@@ -3880,12 +3974,92 @@ def admin_users_franchise_access():
                 debug_trace = ['Manual administrator override active']
             else:
                 override_meta = None
-                target_key = u_id or u_email
-                fi = _get_user_franchise_ids(target_key, atk)
-                assigned_ids = fi.get('ids', []) if fi else []
-                assigned_names = fi.get('names', []) if fi else []
-                assigned_pirteks = fi.get('pirtek_ids', []) if fi else []
-                debug_trace = fi.get('debug', []) if fi else []
+
+                # Check DB cache first
+                _cached_raw = None
+                if u_id:
+                    _cached_raw = database.get_global_setting(f'franchise_ids_{u_id}', '')
+                if not _cached_raw and u_email:
+                    _cached_raw = database.get_global_setting(f'franchise_ids_{u_email}', '')
+
+                used_cache = False
+                if _cached_raw:
+                    try:
+                        cdata = json.loads(_cached_raw)
+                        if time.time() - cdata.get('ts', 0) < 14400:
+                            assigned_ids = cdata.get('ids', [])
+                            assigned_names = cdata.get('names', [])
+                            assigned_pirteks = cdata.get('pirtek_ids', [])
+                            debug_trace = cdata.get('debug', [])
+                            used_cache = True
+                    except Exception:
+                        pass
+
+                if not used_cache:
+                    assigned_dict = {}
+                    debug_trace = []
+
+                    # Strategy 1: Franchises module fields (Admin/Standard User)
+                    if u_id and u_id in user_to_franchises:
+                        for fid, fobj in user_to_franchises[u_id].items():
+                            assigned_dict[fid] = fobj
+                            debug_trace.append(f"Franchise record match: {fobj['name']} ({fid})")
+
+                    # Strategy 2: Territory mappings
+                    u_detail = territory_mappings.get(u_email) if u_email else None
+                    if not u_detail and u_id:
+                        for em, d in territory_mappings.items():
+                            if str(d.get('id', '')) == u_id:
+                                u_detail = d
+                                break
+
+                    if u_detail:
+                        u_fname = u_detail.get('franchise')
+                        if u_fname:
+                            u_fname_clean = u_fname.strip().lower()
+                            match = franchise_by_name.get(u_fname_clean) or franchise_by_name.get(u_fname_clean.replace('pirtek', '').strip())
+                            if match:
+                                assigned_dict[match['id']] = match
+                                debug_trace.append(f"User Franchise field match: {match['name']}")
+
+                        for tname in u_detail.get('territories', []):
+                            t_lower = tname.strip().lower()
+                            tokens = [tok for tok in t_lower.replace('_', ' ').split() if len(tok) > 2 and tok not in STOP_WORDS]
+                            t_clean = t_lower.replace('pirtek', '').replace('_', ' ').strip()
+                            matched_t = False
+                            for f in crm_franchises:
+                                fid = str(f.get('id', '')).strip()
+                                fname = f.get('Name') or f.get('name', '')
+                                if not fid or not fname: continue
+                                f_clean = fname.lower().replace('pirtek', '').strip()
+                                direct = bool(f_clean) and (f_clean in t_clean or t_clean in f_clean)
+                                tok_m = bool(tokens) and all(tok in fname.lower() for tok in tokens)
+                                if direct or tok_m:
+                                    fpirtek = f.get('Pirtek_Franchise_ID', '') or ''
+                                    assigned_dict[fid] = {'id': fid, 'name': fname, 'pirtek_id': fpirtek}
+                                    debug_trace.append(f"Territory '{tname}' match: {fname}")
+                                    matched_t = True
+                                    break
+                            if not matched_t:
+                                debug_trace.append(f"Unmatched territory: {tname}")
+
+                    assigned_ids = [v['id'] for v in assigned_dict.values()]
+                    assigned_names = [v['name'] for v in assigned_dict.values()]
+                    assigned_pirteks = [v['pirtek_id'] for v in assigned_dict.values()]
+
+                    # Cache in DB
+                    try:
+                        res_obj = {
+                            'ids': assigned_ids,
+                            'names': assigned_names,
+                            'pirtek_ids': assigned_pirteks,
+                            'debug': debug_trace,
+                            'ts': time.time()
+                        }
+                        if u_id: database.set_global_setting(f'franchise_ids_{u_id}', json.dumps(res_obj))
+                        if u_email: database.set_global_setting(f'franchise_ids_{u_email}', json.dumps(res_obj))
+                    except Exception:
+                        pass
 
             # Map into objects
             franchises = []
