@@ -109,13 +109,19 @@ elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.jp"
 
 
 def log_debug(msg):
-    print(msg)
     try:
-        with open(LOG_FILE, 'a') as f:
+        print(msg)
+    except Exception:
+        try:
+            print(str(msg).encode('ascii', errors='replace').decode('ascii'))
+        except Exception:
+            pass
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{ts}] {msg}\n")
     except Exception as e:
-        print(f"Error writing to {LOG_FILE}: {e}")
+        pass
 
 def extract_val(val):
     if isinstance(val, dict):
@@ -1318,6 +1324,39 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     and falls back to standard user profile queries.
     """
     import time
+
+    # ── Check Manual Overrides first (Highest Priority) ─────────────────────
+    overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
+    if overrides_raw:
+        try:
+            overrides = json.loads(overrides_raw)
+            u_str = str(user_id).lower() if '@' in str(user_id) else str(user_id)
+            user_override = overrides.get(u_str)
+            if not user_override and '@' in str(user_id):
+                user_override = overrides.get(str(user_id))
+            if not user_override and '@' not in str(user_id):
+                mappings_raw = database.get_global_setting('user_territory_mappings', '')
+                if mappings_raw:
+                    try:
+                        mappings = json.loads(mappings_raw)
+                        for em, udet in mappings.items():
+                            if str(udet.get('id')) == str(user_id):
+                                user_override = overrides.get(em.lower())
+                                break
+                    except Exception:
+                        pass
+            if user_override:
+                return {
+                    'ids': user_override.get('ids', []),
+                    'names': user_override.get('names', []),
+                    'pirtek_ids': user_override.get('pirtek_ids', []),
+                    'debug': ['Manual administrator override is active'],
+                    'ts': time.time(),
+                    'is_override': True
+                }
+        except Exception as e:
+            log_debug(f"Error checking user_franchise_overrides: {e}")
+
     cache_key = f'franchise_ids_{user_id}'
     _cached_raw = database.get_global_setting(cache_key, '')
     _cached_data = None
@@ -1428,17 +1467,24 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     # Match territory name to franchise name
     if user_detail and user_territories:
         franchises = _get_all_franchises(admin_token)
+        STOP_WORDS = {'pirtek', 'north', 'south', 'east', 'west', 'central', 'area', 'region', 'territory', 'city', 'center', 'service', 'the', 'and', 'for', 'inc', 'llc'}
         for tname in user_territories:
             matched = False
+            t_lower = tname.strip().lower()
+            tokens = [tok for tok in t_lower.replace('_', ' ').split() if len(tok) > 2 and tok not in STOP_WORDS]
+            t_clean = t_lower.replace('pirtek', '').replace('_', ' ').strip()
+
             for f in franchises:
                 f_name = f.get('Name', '').strip().lower()
                 f_id = str(f.get('id'))
                 f_pirtek = f.get('Pirtek_Franchise_ID')
-                t_lower = tname.strip().lower()
-                
-                # Check if Franchise Name is similar
-                tokens = [tok for tok in t_lower.replace('_', ' ').split() if len(tok) > 2]
-                if any(tok in f_name for tok in tokens) or f_name in t_lower or t_lower in f_name:
+                f_name_clean = f_name.replace('pirtek', '').strip()
+
+                # Check for direct containment or matching all distinctive tokens
+                direct_match = bool(f_name_clean) and (f_name_clean in t_clean or t_clean in f_name_clean)
+                token_match = bool(tokens) and all(tok in f_name for tok in tokens)
+
+                if direct_match or token_match:
                     found[f_id] = {
                         'id': f_id,
                         'name': f.get('Name'),
@@ -1467,7 +1513,7 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
     if user_email and resolved_id:
         database.set_global_setting(f'franchise_ids_{resolved_id}', json.dumps(results))
         
-    log_debug(f"[franchise_ids] user {user_id} → {len(results['ids'])} franchise(s): {results['names']}")
+    log_debug(f"[franchise_ids] user {user_id} -> {len(results['ids'])} franchise(s): {results['names']}")
     return results
 
 def build_fields_list(module_name, config, field_metadata):
@@ -3053,6 +3099,10 @@ def get_map_data():
             record_map[(r['id'], r['module_name'])] = r
     for r in user_records:
         if (r['id'], r['module_name']) not in hidden_records:
+            if not is_admin and franchise_ids_for_filter is not None:
+                r_fid = str(r.get('franchise_id') or '')
+                if r_fid and r_fid not in franchise_ids_for_filter:
+                    continue
             record_map[(r['id'], r['module_name'])] = r
         
     records = list(record_map.values())
@@ -3316,7 +3366,7 @@ def crm_explorer_page():
 
 def _admin_crm_get(path, params=None):
     """Make a GET request to Zoho CRM using the admin token."""
-    token = _get_admin_access_token()
+    token = _get_admin_access_token() or session.get('access_token')
     if not token:
         return None, 'No admin token — an admin must log in first'
     headers = {'Authorization': f'Zoho-oauthtoken {token}'}
@@ -3730,6 +3780,329 @@ def debug_franchise_refresh():
         'names':         fi.get('names', []) if fi else [],
         'debug':         fi.get('debug', []) if fi else ['returned None'],
     })
+
+
+# ── Zoho Users & Franchise Access Management Endpoints ─────────────────────────
+@app.route('/api/admin/users-franchise-access', methods=['GET'])
+def admin_users_franchise_access():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    atk = _get_admin_access_token() or session.get('access_token')
+
+    try:
+        crm_users = []
+        warning_msg = None
+
+        if atk:
+            # 1. Fetch all CRM users
+            data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers'})
+            if not err and data and 'users' in data:
+                crm_users = data.get('users', [])
+            else:
+                warning_msg = f'Could not reach Zoho CRM: {err or "No users returned"}. Using local cache.'
+        else:
+            warning_msg = 'No admin token available. Using local user cache.'
+
+        # Fallback to local cache if crm_users could not be retrieved from Zoho
+        if not crm_users:
+            mappings_raw = database.get_global_setting('user_territory_mappings', '')
+            overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
+            seen_emails = set()
+            if mappings_raw:
+                try:
+                    mappings = json.loads(mappings_raw)
+                    for em, udet in mappings.items():
+                        em_lower = (em or '').lower().strip()
+                        if em_lower:
+                            seen_emails.add(em_lower)
+                            crm_users.append({
+                                'id': str(udet.get('id', '')),
+                                'email': em_lower,
+                                'full_name': udet.get('name') or em_lower,
+                                'status': 'active',
+                                'role': {'name': 'Standard'},
+                                'profile': {'name': 'Standard'}
+                            })
+                except Exception:
+                    pass
+            if overrides_raw:
+                try:
+                    overrides = json.loads(overrides_raw)
+                    for k, ov in overrides.items():
+                        k_str = str(k).lower().strip()
+                        if k_str not in seen_emails and '@' in k_str:
+                            seen_emails.add(k_str)
+                            crm_users.append({
+                                'id': '',
+                                'email': k_str,
+                                'full_name': k_str,
+                                'status': 'active',
+                                'role': {'name': 'Standard'},
+                                'profile': {'name': 'Standard'}
+                            })
+                except Exception:
+                    pass
+
+        # 2. Get all available franchises
+        all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
+
+        # 3. Load overrides dictionary
+        overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
+        try:
+            overrides = json.loads(overrides_raw)
+        except Exception:
+            overrides = {}
+
+        # 4. Resolve franchise access for each user
+        user_list = []
+        for u in crm_users:
+            u_id = str(u.get('id', '')).strip()
+            u_email = (u.get('email') or '').lower().strip()
+            u_name = u.get('full_name') or u.get('name') or u_email
+            u_status = u.get('status', 'active')
+            u_role = u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else ''
+            u_profile = u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else ''
+            is_user_admin = 'administrator' in u_profile.lower() or 'admin' in u_role.lower()
+
+            # Check override by ID or email
+            user_override = overrides.get(u_id) or (overrides.get(u_email) if u_email else None)
+            has_override = bool(user_override)
+
+            if has_override:
+                assigned_ids = user_override.get('ids', [])
+                assigned_names = user_override.get('names', [])
+                assigned_pirteks = user_override.get('pirtek_ids', [])
+                override_meta = {
+                    'updated_at': user_override.get('updated_at', ''),
+                    'updated_by': user_override.get('updated_by', 'Administrator')
+                }
+                debug_trace = ['Manual administrator override active']
+            else:
+                override_meta = None
+                target_key = u_id or u_email
+                fi = _get_user_franchise_ids(target_key, atk)
+                assigned_ids = fi.get('ids', []) if fi else []
+                assigned_names = fi.get('names', []) if fi else []
+                assigned_pirteks = fi.get('pirtek_ids', []) if fi else []
+                debug_trace = fi.get('debug', []) if fi else []
+
+            # Map into objects
+            franchises = []
+            for fid, fname, fpirtek in zip(
+                assigned_ids,
+                assigned_names if len(assigned_names) == len(assigned_ids) else [f'Franchise {i}' for i in assigned_ids],
+                assigned_pirteks if len(assigned_pirteks) == len(assigned_ids) else ['' for _ in assigned_ids]
+            ):
+                franchises.append({
+                    'id': str(fid),
+                    'name': fname,
+                    'pirtek_id': fpirtek
+                })
+
+            user_list.append({
+                'id': u_id,
+                'name': u_name,
+                'email': u_email,
+                'status': u_status,
+                'role': u_role,
+                'profile': u_profile,
+                'is_admin': is_user_admin,
+                'has_override': has_override,
+                'override_meta': override_meta,
+                'franchises': franchises,
+                'debug_trace': debug_trace
+            })
+
+        user_list.sort(key=lambda x: x['name'].lower())
+
+        resp_data = {
+            'users': user_list,
+            'all_franchises': all_franchises
+        }
+        if warning_msg:
+            resp_data['warning'] = warning_msg
+        return jsonify(resp_data)
+    except Exception as e:
+        import traceback
+        log_debug(f"[users-franchise-access] Exception: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-franchise-repair', methods=['POST'])
+def admin_user_franchise_repair():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    atk = _get_admin_access_token() or session.get('access_token')
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get('user_id', '')).strip()
+    email = str(data.get('email', '')).strip().lower()
+
+    if not user_id and not email:
+        return jsonify({'error': 'Missing user_id or email'}), 400
+
+    try:
+        # 1. Clear cached franchise mappings
+        if user_id:
+            database.set_global_setting(f'franchise_ids_{user_id}', '')
+        if email:
+            database.set_global_setting(f'franchise_ids_{email}', '')
+
+        # 2. Purge personal module_records cache to prevent cross-franchise leaks
+        conn = database.get_db_connection()
+        try:
+            if user_id:
+                database.exec_query(conn, "DELETE FROM module_records WHERE user_id = ?", (user_id,))
+            if email and email != user_id:
+                database.exec_query(conn, "DELETE FROM module_records WHERE user_id = ?", (email,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 3. Force re-detection from Zoho CRM if token available, or resolve via local cache
+        target = user_id or email
+        if atk:
+            fi = _get_user_franchise_ids(target, atk, force_refresh=True)
+        else:
+            fi = _get_user_franchise_ids(target, None, force_refresh=False)
+
+        assigned_ids = fi.get('ids', []) if fi else []
+        assigned_names = fi.get('names', []) if fi else []
+        assigned_pirteks = fi.get('pirtek_ids', []) if fi else []
+
+        franchises = []
+        for fid, fname, fpirtek in zip(
+            assigned_ids,
+            assigned_names if len(assigned_names) == len(assigned_ids) else [f'Franchise {i}' for i in assigned_ids],
+            assigned_pirteks if len(assigned_pirteks) == len(assigned_ids) else ['' for _ in assigned_ids]
+        ):
+            franchises.append({'id': str(fid), 'name': fname, 'pirtek_id': fpirtek})
+
+        response_data = {
+            'success': True,
+            'user_id': user_id,
+            'franchises': franchises,
+            'debug_trace': fi.get('debug', []) if fi else []
+        }
+        if not atk:
+            response_data['warning'] = 'Cache purged and personal records cleared. Live re-sync requires an active Zoho CRM admin token.'
+        return jsonify(response_data)
+    except Exception as e:
+        import traceback
+        log_debug(f"[user-franchise-repair] Exception: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/user-franchise-override', methods=['POST'])
+def admin_user_franchise_override():
+    if not session.get('is_admin', False):
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    data = request.get_json(silent=True) or {}
+    user_id = str(data.get('user_id', '')).strip()
+    email = str(data.get('email', '')).strip().lower()
+    clear_override = bool(data.get('clear_override', False))
+    franchise_ids = [str(fid).strip() for fid in data.get('franchise_ids', []) if str(fid).strip()]
+
+    if not user_id and not email:
+        return jsonify({'error': 'Missing user_id or email'}), 400
+
+    try:
+        overrides_raw = database.get_global_setting('user_franchise_overrides', '{}')
+        try:
+            overrides = json.loads(overrides_raw)
+        except Exception:
+            overrides = {}
+
+        keys_to_update = []
+        if user_id: keys_to_update.append(user_id)
+        if email and email not in keys_to_update: keys_to_update.append(email)
+
+        # ── Clear Override branch ────────────────────────────────────────────
+        if clear_override:
+            for k in keys_to_update:
+                if k in overrides:
+                    del overrides[k]
+            database.set_global_setting('user_franchise_overrides', json.dumps(overrides))
+
+            # Bust user franchise cache
+            for k in keys_to_update:
+                database.set_global_setting(f'franchise_ids_{k}', '')
+
+            # Re-detect from Zoho
+            atk = _get_admin_access_token() or session.get('access_token')
+            fi = _get_user_franchise_ids(user_id or email, atk, force_refresh=True) if atk else None
+            assigned_ids = fi.get('ids', []) if fi else []
+            assigned_names = fi.get('names', []) if fi else []
+            assigned_pirteks = fi.get('pirtek_ids', []) if fi else []
+            franchises = [{'id': str(fid), 'name': fname, 'pirtek_id': fpirtek}
+                          for fid, fname, fpirtek in zip(assigned_ids, assigned_names, assigned_pirteks)]
+
+            return jsonify({
+                'success': True,
+                'has_override': False,
+                'franchises': franchises,
+                'message': 'Override cleared. User reverted to automatic detection from Zoho CRM.'
+            })
+
+        # ── Save Manual Override branch ──────────────────────────────────────
+        all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
+        f_map = {str(f['id']): f.get('name', f'Franchise {f["id"]}') for f in all_franchises if 'id' in f}
+
+        names = [f_map.get(fid, f'Franchise {fid}') for fid in franchise_ids]
+        pirtek_ids = ['' for _ in franchise_ids]
+
+        override_entry = {
+            'ids': franchise_ids,
+            'names': names,
+            'pirtek_ids': pirtek_ids,
+            'updated_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'updated_by': session.get('user_name', 'Administrator')
+        }
+
+        for k in keys_to_update:
+            overrides[k] = override_entry
+            database.set_global_setting(f'franchise_ids_{k}', json.dumps({
+                'ids': franchise_ids,
+                'names': names,
+                'pirtek_ids': pirtek_ids,
+                'debug': ['Manual administrator override active'],
+                'ts': time.time(),
+                'is_override': True
+            }))
+
+        database.set_global_setting('user_franchise_overrides', json.dumps(overrides))
+
+        # Purge personal user records to ensure clean view without cross-franchise leaks
+        conn = database.get_db_connection()
+        try:
+            if user_id:
+                database.exec_query(conn, "DELETE FROM module_records WHERE user_id = ?", (user_id,))
+            if email and email != user_id:
+                database.exec_query(conn, "DELETE FROM module_records WHERE user_id = ?", (email,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        franchises = [{'id': fid, 'name': fname, 'pirtek_id': fpirtek}
+                      for fid, fname, fpirtek in zip(franchise_ids, names, pirtek_ids)]
+
+        return jsonify({
+            'success': True,
+            'has_override': True,
+            'franchises': franchises,
+            'override_meta': {
+                'updated_at': override_entry['updated_at'],
+                'updated_by': override_entry['updated_by']
+            },
+            'message': f'Manual access override saved! Access restricted to {len(franchises)} franchise(s).'
+        })
+    except Exception as e:
+        import traceback
+        log_debug(f"[user-franchise-override] Exception: {e}\n{traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/webhooks/zoho-update', methods=['POST'])

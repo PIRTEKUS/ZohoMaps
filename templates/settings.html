@@ -954,10 +954,7 @@
                     </div>
                 </div>
 
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
-                    <button id="clear-boundaries-btn" class="btn-secondary" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; font-size: 0.875rem; padding: 0.6rem 1.5rem; {% if franchise_boundaries and franchise_boundaries != '{}' %}{% else %}display: none;{% endif %}" onclick="clearSavedBoundaries()">
-                        🗑️ Delete All Boundaries
-                    </button>
+                <div style="display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 1rem;">
                     <div style="display: flex; gap: 1rem; margin-left: auto; align-items: center;">
                         <span id="kml-save-status" style="font-size: 0.85rem; color: #10b981; display: none;">✓ Boundaries saved!</span>
                         <button id="save-kml-btn" class="btn-primary" style="padding: 0.6rem 2rem; font-size: 0.875rem; display: none; background: linear-gradient(135deg,#10b981,#059669); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer;" onclick="saveKmlBoundaries()">
@@ -1292,6 +1289,75 @@
                 </div>
             </div>
 
+            <!-- Zoho Users & Franchise Access Card -->
+            <div class="settings-card glass" id="user-franchise-access-card" style="border-color: rgba(168,85,247,0.35); margin-top: 1.5rem;">
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1rem; flex-wrap:wrap; gap:0.75rem;">
+                    <div>
+                        <h2 style="margin:0; display:flex; align-items:center; gap:0.75rem; font-size:1.25rem;">
+                            <svg viewBox="0 0 24 24" width="22" height="22" stroke="#c084fc" stroke-width="2" fill="none">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                <circle cx="9" cy="7" r="4"></circle>
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                            </svg>
+                            Zoho Users &amp; Franchise Access Permissions
+                        </h2>
+                        <p style="color:#94a3b8; font-size:0.85rem; margin:0.35rem 0 0 0;">
+                            Inspect which franchise locations each user can view. Reset detection or manually override access.
+                        </p>
+                    </div>
+                    <div style="display:flex; gap:0.75rem; align-items:center;">
+                        <span id="ufa-total-summary" style="font-size:0.8rem; color:#c084fc; background:rgba(168,85,247,0.1); border:1px solid rgba(168,85,247,0.3); padding:0.3rem 0.8rem; border-radius:12px; font-weight:600;">
+                            Loading users...
+                        </span>
+                        <button type="button" onclick="loadUserFranchiseAccess(true)" style="padding:0.45rem 1rem; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.4); color:#c084fc; border-radius:7px; cursor:pointer; font-size:0.82rem; font-weight:600;">
+                            🔄 Refresh Users
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Multi-Filter Toolbar -->
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) auto; gap:0.75rem; align-items:center; margin-bottom:1rem; background:rgba(0,0,0,0.2); padding:0.85rem 1rem; border-radius:8px; border:1px solid rgba(255,255,255,0.05);">
+                    <div>
+                        <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Search User / Email / Franchise</label>
+                        <input type="text" id="ufa-search-input" oninput="filterUserFranchiseAccessTable()" placeholder="🔍 Type name, email, or franchise..." style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none;">
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Access Filter</label>
+                        <select id="ufa-filter-override" onchange="filterUserFranchiseAccessTable()" style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none; cursor:pointer;">
+                            <option value="all">All Users</option>
+                            <option value="override">⚡ Overridden Only</option>
+                            <option value="auto">🤖 Auto-Detected Only</option>
+                            <option value="multi">⚠️ Multi-Franchise Users (>1)</option>
+                            <option value="single">✅ Single Franchise Users (=1)</option>
+                            <option value="none">❌ Zero Franchises (=0)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; align-items:flex-end; height:100%;">
+                        <button type="button" onclick="clearUserFranchiseFilters()" class="btn-secondary" style="padding:0.5rem 1rem; font-size:0.82rem; color:#94a3b8; border-color:rgba(255,255,255,0.15); height:36px; white-space:nowrap;" title="Reset filters">
+                            ↺ Clear Filters
+                        </button>
+                    </div>
+                </div>
+
+                <div style="overflow-x:auto; background:rgba(0,0,0,0.25); border-radius:10px; border:1px solid rgba(255,255,255,0.06);">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.85rem; text-align:left;" id="ufa-table">
+                        <thead>
+                            <tr style="border-bottom:1px solid rgba(255,255,255,0.1); color:#94a3b8; background:rgba(255,255,255,0.02);">
+                                <th style="padding:10px 12px; width:220px;">User &amp; Profile</th>
+                                <th style="padding:10px 12px; width:130px;">Zoho CRM ID</th>
+                                <th style="padding:10px 12px;">Accessible Franchises / Locations</th>
+                                <th style="padding:10px 12px; text-align:center; width:140px;">Access Mode</th>
+                                <th style="padding:10px 12px; text-align:right; width:220px;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ufa-table-body">
+                            <tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#94a3b8;">Click "Refresh Users" or open Diagnostics to load permissions.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Franchise Record Inspector Card -->
             <div class="settings-card glass" id="franchise-records-card" style="border-color: rgba(56,189,248,0.35); margin-top: 1.5rem;">
                 <h2 style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
@@ -1328,6 +1394,60 @@
                             <tr><td colspan="6" style="padding:1.5rem; text-align:center; color:#94a3b8;">Click "Refresh Record Counts" to inspect database contents.</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── USER FRANCHISE OVERRIDE MODAL ── -->
+    <div id="user-override-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.75); z-index:9999; backdrop-filter:blur(6px); align-items:center; justify-content:center; padding:1.5rem;">
+        <div style="background:#0f172a; border:1px solid rgba(168,85,247,0.35); border-radius:14px; width:100%; max-width:650px; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 40px rgba(0,0,0,0.6); overflow:hidden;">
+            <!-- Modal Header -->
+            <div style="padding:1.25rem 1.5rem; border-bottom:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-between; background:rgba(168,85,247,0.08);">
+                <div>
+                    <h3 style="margin:0; font-size:1.1rem; color:#f8fafc; display:flex; align-items:center; gap:0.5rem;">
+                        <span>✏️ Override Franchise Access</span>
+                    </h3>
+                    <div id="uom-user-desc" style="font-size:0.82rem; color:#c084fc; margin-top:0.25rem;">
+                        User: Loading...
+                    </div>
+                </div>
+                <button type="button" onclick="closeUserOverrideModal()" style="background:none; border:none; color:#94a3b8; font-size:1.5rem; cursor:pointer; line-height:1;" title="Close">&times;</button>
+            </div>
+
+            <!-- Modal Body -->
+            <div style="padding:1.25rem 1.5rem; overflow-y:auto; flex:1;">
+                <p style="font-size:0.82rem; color:#94a3b8; margin:0 0 1rem 0; line-height:1.5;">
+                    Select the exact franchise location(s) this user is permitted to see on the map. This overrides automatic Zoho territory detection and guarantees they only access the chosen locations.
+                </p>
+
+                <!-- Search and bulk controls -->
+                <div style="display:flex; gap:0.75rem; align-items:center; margin-bottom:1rem; flex-wrap:wrap;">
+                    <input type="text" id="uom-search-franchises" oninput="filterOverrideFranchiseList()" placeholder="🔍 Search franchises..." style="flex:1; min-width:200px; padding:0.45rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.4); color:#fff; font-size:0.82rem; outline:none;">
+                    <button type="button" onclick="setAllOverrideCheckboxes(true)" style="padding:0.45rem 0.75rem; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; border-radius:6px; font-size:0.75rem; cursor:pointer;">Select All</button>
+                    <button type="button" onclick="setAllOverrideCheckboxes(false)" style="padding:0.45rem 0.75rem; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); color:#cbd5e1; border-radius:6px; font-size:0.75rem; cursor:pointer;">Deselect All</button>
+                </div>
+
+                <div id="uom-selected-counter" style="font-size:0.8rem; color:#38bdf8; margin-bottom:0.5rem; font-weight:600;">
+                    0 selected
+                </div>
+
+                <!-- Franchise Checkbox List -->
+                <div id="uom-franchise-list" style="max-height:280px; overflow-y:auto; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:0.5rem;">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div style="padding:1rem 1.5rem; border-top:1px solid rgba(255,255,255,0.08); background:rgba(0,0,0,0.2); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+                <button type="button" id="uom-clear-override-btn" onclick="submitUserOverride(true)" style="padding:0.5rem 1rem; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.35); color:#fca5a5; border-radius:7px; font-size:0.82rem; cursor:pointer; font-weight:600;">
+                    ↺ Clear Override (Revert to Auto)
+                </button>
+                <div style="display:flex; gap:0.75rem; margin-left:auto;">
+                    <button type="button" onclick="closeUserOverrideModal()" class="btn-secondary" style="padding:0.5rem 1rem; font-size:0.82rem;">Cancel</button>
+                    <button type="button" id="uom-save-btn" onclick="submitUserOverride(false)" class="btn-primary" style="padding:0.5rem 1.25rem; font-size:0.82rem; background:linear-gradient(135deg,#a855f7,#7c3aed); border:none; border-radius:7px; font-weight:600;">
+                        💾 Save Manual Override
+                    </button>
                 </div>
             </div>
         </div>
@@ -1376,13 +1496,368 @@ window.switchTab = function(tabId) {
     if (tabId === 'perf-tab' && typeof loadPerformanceStats === 'function') {
         loadPerformanceStats(window.currentPerfRangeHours || 24);
     }
-    if (tabId === 'diagnostics-tab' && typeof loadFranchiseRecordCounts === 'function') {
-        loadFranchiseRecordCounts();
+    if (tabId === 'diagnostics-tab') {
+        if (typeof loadFranchiseRecordCounts === 'function') loadFranchiseRecordCounts();
+        if (typeof loadUserFranchiseAccess === 'function') loadUserFranchiseAccess(false);
     }
     if (tabId === 'kml-tab' && typeof filterBoundaryStatusTable === 'function') {
         filterBoundaryStatusTable();
     }
 };
+
+// ── Zoho Users & Franchise Access Management Logic ─────────────────────────────
+let _rawUserFranchiseData = [];
+let _allFranchisesList = [];
+let _currentEditingUser = null;
+
+async function loadUserFranchiseAccess(forceRefresh = false) {
+    const tbody = document.getElementById('ufa-table-body');
+    const summary = document.getElementById('ufa-total-summary');
+    if (!tbody) return;
+
+    if (forceRefresh || _rawUserFranchiseData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#c084fc;">⏳ Loading Zoho users and franchise permissions...</td></tr>';
+        if (summary) summary.textContent = 'Loading...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/users-franchise-access');
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to load user access data');
+        }
+
+        _rawUserFranchiseData = data.users || [];
+        _allFranchisesList = data.all_franchises || [];
+        renderUserFranchiseAccessTable(_rawUserFranchiseData);
+    } catch (e) {
+        console.error('Error loading user franchise access:', e);
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#fca5a5;">❌ Error: ${e.message}</td></tr>`;
+        }
+        if (summary) summary.textContent = 'Error loading';
+    }
+}
+
+function renderUserFranchiseAccessTable(users) {
+    const tbody = document.getElementById('ufa-table-body');
+    const summary = document.getElementById('ufa-total-summary');
+    if (!tbody) return;
+
+    if (!users || users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:1.5rem; text-align:center; color:#94a3b8;">No users found in CRM.</td></tr>';
+        if (summary) summary.textContent = '0 users';
+        return;
+    }
+
+    let overrideCount = 0;
+    let multiCount = 0;
+    let zeroCount = 0;
+
+    const rowsHtml = users.map(u => {
+        const fCount = (u.franchises || []).length;
+        if (u.has_override) overrideCount++;
+        if (fCount > 1) multiCount++;
+        if (fCount === 0) zeroCount++;
+
+        // Franchises tags
+        let franchiseChips = '';
+        if (fCount === 0) {
+            franchiseChips = `<span style="display:inline-flex; align-items:center; gap:4px; padding:0.2rem 0.6rem; border-radius:6px; background:rgba(239,68,68,0.12); color:#fca5a5; font-size:0.75rem; font-weight:600;">⚠️ 0 Franchises (No markers visible)</span>`;
+        } else {
+            const chips = u.franchises.map(f => {
+                const pTag = f.pirtek_id ? `<span style="opacity:0.7; font-size:0.7rem; margin-left:3px;">#${f.pirtek_id}</span>` : '';
+                return `<span title="ID: ${f.id}" style="display:inline-flex; align-items:center; padding:0.2rem 0.55rem; border-radius:6px; background:rgba(168,85,247,0.12); border:1px solid rgba(168,85,247,0.25); color:#e9d5ff; font-size:0.75rem; font-weight:500; margin:2px;">
+                    ${f.name}${pTag}
+                </span>`;
+            });
+            franchiseChips = chips.join(' ');
+        }
+
+        // Access mode badge
+        let modeBadge = '';
+        if (u.has_override) {
+            const metaInfo = u.override_meta ? `title="Set by ${u.override_meta.updated_by || 'Admin'} at ${u.override_meta.updated_at || ''}"` : '';
+            modeBadge = `<span ${metaInfo} style="display:inline-block; padding:0.2rem 0.65rem; border-radius:12px; background:rgba(234,179,8,0.15); border:1px solid rgba(234,179,8,0.35); color:#fde047; font-size:0.75rem; font-weight:600; cursor:help;">⚡ Manual Override</span>`;
+        } else {
+            modeBadge = `<span style="display:inline-block; padding:0.2rem 0.65rem; border-radius:12px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.25); color:#7dd3fc; font-size:0.75rem; font-weight:600;">🤖 Auto-Detected</span>`;
+        }
+
+        // Role / profile tag
+        const roleLabel = u.is_admin ?
+            `<span style="background:rgba(99,102,241,0.2); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Admin</span>` :
+            `<span style="background:rgba(255,255,255,0.06); color:#94a3b8; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.role || u.profile || 'Standard'}</span>`;
+
+        // Search text for filtering
+        const fNames = (u.franchises || []).map(f => f.name.toLowerCase()).join(' ');
+        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${fNames}`.replace(/"/g, '&quot;');
+
+        const uIdSafe = String(u.id).replace(/"/g, '&quot;');
+        const uEmailSafe = String(u.email || '').replace(/"/g, '&quot;');
+        const uNameSafe = String(u.name || '').replace(/"/g, '&quot;');
+
+        return `
+            <tr class="ufa-user-row" id="ufa-row-${uIdSafe}" data-search="${searchAttr}" data-override="${u.has_override ? 'yes' : 'no'}" data-count="${fCount}" style="border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.015)'" onmouseout="this.style.background='transparent'">
+                <td style="padding:10px 12px; vertical-align:middle;">
+                    <div style="font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:0.4rem;">
+                        ${u.name}
+                        ${roleLabel}
+                    </div>
+                    <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">${u.email}</div>
+                </td>
+                <td style="padding:10px 12px; font-family:monospace; color:#94a3b8; font-size:0.78rem; vertical-align:middle;">
+                    ${u.id}
+                </td>
+                <td style="padding:10px 12px; vertical-align:middle;">
+                    <div style="display:flex; flex-wrap:wrap; gap:4px; align-items:center;">
+                        ${franchiseChips}
+                    </div>
+                </td>
+                <td style="padding:10px 12px; text-align:center; vertical-align:middle;">
+                    ${modeBadge}
+                </td>
+                <td style="padding:10px 12px; text-align:right; vertical-align:middle;">
+                    <div style="display:inline-flex; gap:6px; align-items:center;">
+                        <button type="button" onclick="repairUserFranchiseAccess('${uIdSafe}', '${uEmailSafe}', '${uNameSafe}')" id="ufa-repair-btn-${uIdSafe}" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.65rem; border-radius:6px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Re-detect franchise from Zoho CRM and clear stale cache">
+                            🔄 Reset
+                        </button>
+                        <button type="button" onclick="openUserOverrideModal('${uIdSafe}')" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.75rem; border-radius:6px; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); color:#c084fc; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Manually choose allowed franchises">
+                            ✏️ Override
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+
+    tbody.innerHTML = rowsHtml.join('');
+
+    if (summary) {
+        summary.textContent = `${users.length} Users (${overrideCount} Overridden, ${multiCount} Multi-Franchise, ${zeroCount} Empty)`;
+    }
+
+    filterUserFranchiseAccessTable();
+}
+
+function filterUserFranchiseAccessTable() {
+    const q = (document.getElementById('ufa-search-input')?.value || '').toLowerCase().trim();
+    const mode = document.getElementById('ufa-filter-override')?.value || 'all';
+    const rows = document.querySelectorAll('.ufa-user-row');
+    const summary = document.getElementById('ufa-total-summary');
+
+    let visibleCount = 0;
+    rows.forEach(r => {
+        const text = r.getAttribute('data-search') || '';
+        const isOverride = r.getAttribute('data-override') === 'yes';
+        const fCount = parseInt(r.getAttribute('data-count') || '0', 10);
+
+        let matchesSearch = !q || text.includes(q);
+        let matchesMode = true;
+
+        if (mode === 'override') matchesMode = isOverride;
+        else if (mode === 'auto') matchesMode = !isOverride;
+        else if (mode === 'multi') matchesMode = fCount > 1;
+        else if (mode === 'single') matchesMode = fCount === 1;
+        else if (mode === 'none') matchesMode = fCount === 0;
+
+        if (matchesSearch && matchesMode) {
+            r.style.display = '';
+            visibleCount++;
+        } else {
+            r.style.display = 'none';
+        }
+    });
+
+    if (summary && (q || mode !== 'all')) {
+        summary.textContent = `Showing ${visibleCount} of ${rows.length} users`;
+    }
+}
+
+function clearUserFranchiseFilters() {
+    const search = document.getElementById('ufa-search-input');
+    const filter = document.getElementById('ufa-filter-override');
+    if (search) search.value = '';
+    if (filter) filter.value = 'all';
+    filterUserFranchiseAccessTable();
+}
+
+async function repairUserFranchiseAccess(userId, email, userName) {
+    const btn = document.getElementById(`ufa-repair-btn-${userId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Checking...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/user-franchise-repair', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ user_id: userId, email: email })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to repair franchise access');
+        }
+
+        // Update in-memory user
+        const u = _rawUserFranchiseData.find(x => String(x.id) === String(userId));
+        if (u) {
+            u.franchises = data.franchises || [];
+            u.has_override = false;
+            u.override_meta = null;
+        }
+
+        renderUserFranchiseAccessTable(_rawUserFranchiseData);
+        alert(`Franchise access for "${userName || userId}" repaired successfully!\nAssigned franchises: ${data.franchises.map(f => f.name).join(', ') || 'None'}`);
+    } catch (e) {
+        console.error('Error repairing user franchise access:', e);
+        alert(`Error repairing franchise access: ${e.message}`);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '🔄 Reset';
+        }
+    }
+}
+
+function openUserOverrideModal(userId) {
+    const user = _rawUserFranchiseData.find(x => String(x.id) === String(userId));
+    if (!user) {
+        alert('User not found.');
+        return;
+    }
+    _currentEditingUser = user;
+
+    document.getElementById('uom-user-desc').textContent = `User: ${user.name} (${user.email || user.id})`;
+
+    const clearBtn = document.getElementById('uom-clear-override-btn');
+    if (clearBtn) {
+        clearBtn.style.display = user.has_override ? 'inline-block' : 'none';
+    }
+
+    // Populate franchise checklist
+    const assignedIds = new Set((user.franchises || []).map(f => String(f.id)));
+    const listContainer = document.getElementById('uom-franchise-list');
+
+    const searchInput = document.getElementById('uom-search-franchises');
+    if (searchInput) searchInput.value = '';
+
+    const sortedFranchises = [..._allFranchisesList].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    const itemsHtml = sortedFranchises.map(f => {
+        const fid = String(f.id);
+        const checked = assignedIds.has(fid) ? 'checked' : '';
+        const safeName = (f.name || '').replace(/"/g, '&quot;');
+        return `
+            <label class="uom-item" data-text="${safeName.toLowerCase()} ${fid}" style="display:flex; align-items:center; gap:0.6rem; padding:0.4rem 0.6rem; border-radius:6px; cursor:pointer; font-size:0.82rem; color:#f1f5f9; margin-bottom:2px;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+                <input type="checkbox" value="${fid}" class="uom-cb" ${checked} onchange="updateOverrideCounter()" style="accent-color:#a855f7; width:16px; height:16px; cursor:pointer;">
+                <span style="flex:1;">${f.name}</span>
+                <span style="font-family:monospace; font-size:0.75rem; color:#94a3b8;">${fid}</span>
+            </label>
+        `;
+    });
+
+    listContainer.innerHTML = itemsHtml.join('') || '<div style="padding:1rem; color:#94a3b8; text-align:center;">No franchises available.</div>';
+
+    updateOverrideCounter();
+
+    const modal = document.getElementById('user-override-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeUserOverrideModal() {
+    const modal = document.getElementById('user-override-modal');
+    if (modal) modal.style.display = 'none';
+    _currentEditingUser = null;
+}
+
+function updateOverrideCounter() {
+    const checked = document.querySelectorAll('.uom-cb:checked').length;
+    const total = document.querySelectorAll('.uom-cb').length;
+    const counter = document.getElementById('uom-selected-counter');
+    if (counter) {
+        counter.textContent = `${checked} of ${total} franchises selected`;
+    }
+}
+
+function filterOverrideFranchiseList() {
+    const q = (document.getElementById('uom-search-franchises')?.value || '').toLowerCase().trim();
+    const items = document.querySelectorAll('.uom-item');
+    items.forEach(it => {
+        const txt = it.getAttribute('data-text') || '';
+        it.style.display = (!q || txt.includes(q)) ? 'flex' : 'none';
+    });
+}
+
+function setAllOverrideCheckboxes(check) {
+    const visibleCbs = document.querySelectorAll('.uom-item:not([style*="display: none"]) .uom-cb');
+    visibleCbs.forEach(cb => { cb.checked = check; });
+    updateOverrideCounter();
+}
+
+async function submitUserOverride(isClear = false) {
+    if (!_currentEditingUser) return;
+
+    const saveBtn = document.getElementById('uom-save-btn');
+    const clearBtn = document.getElementById('uom-clear-override-btn');
+
+    if (isClear) {
+        if (!confirm(`Revert "${_currentEditingUser.name}" to automatic franchise detection from Zoho CRM?`)) {
+            return;
+        }
+    }
+
+    const selectedIds = [];
+    if (!isClear) {
+        document.querySelectorAll('.uom-cb:checked').forEach(cb => {
+            selectedIds.push(cb.value);
+        });
+        if (selectedIds.length === 0) {
+            if (!confirm(`Warning: No franchises selected for "${_currentEditingUser.name}". This will prevent the user from seeing ANY records on the map. Proceed?`)) {
+                return;
+            }
+        }
+    }
+
+    try {
+        if (saveBtn) saveBtn.disabled = true;
+        if (clearBtn) clearBtn.disabled = true;
+
+        const res = await fetch('/api/admin/user-franchise-override', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                user_id: _currentEditingUser.id,
+                email: _currentEditingUser.email,
+                franchise_ids: selectedIds,
+                clear_override: isClear
+            })
+        });
+
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to update user override');
+        }
+
+        // Update in-memory cache
+        const u = _rawUserFranchiseData.find(x => String(x.id) === String(_currentEditingUser.id));
+        if (u) {
+            u.franchises = data.franchises || [];
+            u.has_override = Boolean(data.has_override);
+            u.override_meta = data.override_meta || null;
+        }
+
+        renderUserFranchiseAccessTable(_rawUserFranchiseData);
+        closeUserOverrideModal();
+        alert(data.message || 'Franchise permissions saved successfully!');
+    } catch (e) {
+        console.error('Error saving user override:', e);
+        alert(`Error saving user override: ${e.message}`);
+    } finally {
+        if (saveBtn) saveBtn.disabled = false;
+        if (clearBtn) clearBtn.disabled = false;
+    }
+}
 
 let _rawFranchiseCounts = [];
 
@@ -3619,8 +4094,10 @@ async function clearSavedBoundaries() {
 
     const btn = document.getElementById('clear-boundaries-btn');
     try {
-        btn.disabled = true;
-        btn.textContent = 'Deleting...';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Deleting...';
+        }
 
         const res = await fetch('/api/settings/global', {
             method: 'POST',
@@ -3641,8 +4118,10 @@ async function clearSavedBoundaries() {
         console.error(err);
         alert('Error clearing franchise boundaries: ' + err.message);
     } finally {
-        btn.disabled = false;
-        btn.textContent = '🗑️ Delete All Boundaries';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🗑️ Delete All Boundaries';
+        }
     }
 }
 
