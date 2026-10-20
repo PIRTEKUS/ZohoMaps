@@ -364,32 +364,56 @@ def _get_franchises_for_ui(user_id, is_admin):
     if is_admin:
         # Load from cache first
         raw = database.get_global_setting('cached_all_franchises', '')
+        raw_list = []
         if raw:
             try:
-                franchises = json.loads(raw)
+                raw_list = json.loads(raw)
             except Exception:
                 pass
         
         # If still empty, try to fetch using admin token on-the-fly
-        if not franchises:
+        if not raw_list:
             token = _get_admin_access_token()
             if token:
                 data = _get_all_franchises(token)
                 if data:
-                    franchises = [{'id': str(f['id']), 'name': f.get('Name')} for f in data if f.get('Name') and f.get('id')]
-                    # cache it
-                    database.set_global_setting('cached_all_franchises', json.dumps(franchises))
+                    raw_list = data
+
+        if raw_list and isinstance(raw_list, list):
+            for f in raw_list:
+                fid = str(f.get('id', '')).strip()
+                fname = (f.get('Name') or f.get('name') or '').strip()
+                fpirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
+                if fid and fname:
+                    franchises.append({
+                        'id': fid,
+                        'name': fname,
+                        'Name': fname,
+                        'pirtek_id': fpirtek,
+                        'Pirtek_Franchise_ID': fpirtek
+                    })
     else:
         # Standard user: load via _get_user_franchise_ids which handles overrides, cache, and token refresh
         token = _get_admin_access_token()
         _fi = _get_user_franchise_ids(user_id, token, force_refresh=False)
         if _fi:
-            for fid, fname in zip(_fi.get('ids', []), _fi.get('names', [])):
+            fids = _fi.get('ids', [])
+            fnames = _fi.get('names', [])
+            fpirteks = _fi.get('pirtek_ids', [])
+            for i, fid in enumerate(fids):
                 if not str(fid).startswith('territory_'):
-                    franchises.append({'id': str(fid), 'name': fname})
+                    fname = fnames[i] if i < len(fnames) else ''
+                    fpirtek = fpirteks[i] if i < len(fpirteks) else ''
+                    franchises.append({
+                        'id': str(fid),
+                        'name': fname,
+                        'Name': fname,
+                        'pirtek_id': str(fpirtek),
+                        'Pirtek_Franchise_ID': str(fpirtek)
+                    })
                     
     # Sort franchises by name alphabetically for UI convenience
-    franchises = sorted(franchises, key=lambda x: x['name'].lower() if x.get('name') else '')
+    franchises = sorted(franchises, key=lambda x: (x.get('name') or x.get('Name') or '').lower())
     return franchises
 
 
@@ -1349,6 +1373,10 @@ def _get_all_franchises(admin_token, force_refresh=False):
             try:
                 cached_data = json.loads(raw_cached)
                 if isinstance(cached_data, list) and cached_data:
+                    for f in cached_data:
+                        fname = (f.get('Name') or f.get('name') or '').strip()
+                        f['name'] = fname
+                        f['Name'] = fname
                     return cached_data
             except Exception:
                 pass
@@ -1365,6 +1393,15 @@ def _get_all_franchises(admin_token, force_refresh=False):
             if resp.ok:
                 data = resp.json().get('data', [])
                 if data:
+                    for f in data:
+                        fname = (f.get('Name') or f.get('name') or '').strip()
+                        fid = str(f.get('id') or '').strip()
+                        fpirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
+                        f['name'] = fname
+                        f['Name'] = fname
+                        f['id'] = fid
+                        f['pirtek_id'] = fpirtek
+                        f['Pirtek_Franchise_ID'] = fpirtek
                     try:
                         database.set_global_setting('cached_all_franchises', json.dumps(data))
                     except Exception as cache_err:
@@ -1380,6 +1417,10 @@ def _get_all_franchises(admin_token, force_refresh=False):
         try:
             cached_data = json.loads(raw_cached)
             if isinstance(cached_data, list):
+                for f in cached_data:
+                    fname = (f.get('Name') or f.get('name') or '').strip()
+                    f['name'] = fname
+                    f['Name'] = fname
                 return cached_data
         except Exception:
             pass
@@ -1994,7 +2035,7 @@ def api_admin_sync_franchise_module():
         try:
             for f in json.loads(cached_franchises_str):
                 if str(f.get('id')) == str(franchise_id):
-                    franchise_name = f.get('name', franchise_id)
+                    franchise_name = f.get('name') or f.get('Name') or franchise_id
                     break
         except Exception:
             pass
@@ -3392,7 +3433,7 @@ def get_map_data():
     try:
         for f in json.loads(cached_franchises_raw):
             _fid = str(f.get('id', '')).strip()
-            _fname = str(f.get('name', '')).strip()
+            _fname = str(f.get('name') or f.get('Name') or '').strip()
             if _fid:
                 fid_to_name[_fid] = _fname
                 if _fname:
@@ -4483,7 +4524,7 @@ def admin_user_franchise_override():
 
         # ── Save Manual Override branch ──────────────────────────────────────
         all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
-        f_map = {str(f['id']): f.get('name', f'Franchise {f["id"]}') for f in all_franchises if 'id' in f}
+        f_map = {str(f['id']): (f.get('name') or f.get('Name') or f'Franchise {f["id"]}') for f in all_franchises if 'id' in f}
 
         names = [f_map.get(fid, f'Franchise {fid}') for fid in franchise_ids]
         pirtek_ids = ['' for _ in franchise_ids]

@@ -1125,9 +1125,10 @@
                         <tbody id="boundary-status-tbody">
                             {% for f in all_franchises %}
                             {% set has_boundary = f.id in franchise_boundaries_dict %}
-                            <tr class="boundary-status-row" data-name="{{ f.name | lower }}" data-id="{{ f.id | lower }}" data-status="{% if has_boundary %}imported{% else %}missing{% endif %}" style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
+                            {% set display_name = f.name or f.Name or ('Franchise ' ~ f.id) %}
+                            <tr class="boundary-status-row" data-name="{{ display_name | lower }}" data-id="{{ f.id | lower }}" data-status="{% if has_boundary %}imported{% else %}missing{% endif %}" style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
                                 <td style="padding: 0.75rem 1.25rem; color: #f1f5f9; font-weight: 500;">
-                                    {{ f.name }}
+                                    {{ display_name }}
                                 </td>
                                 <td style="padding: 0.75rem 1.25rem; text-align: center;">
                                     {% if has_boundary %}
@@ -1145,7 +1146,7 @@
                                 </td>
                                 <td style="padding: 0.75rem 1.25rem; text-align: center;">
                                     {% if has_boundary %}
-                                    <button type="button" onclick="deleteIndividualBoundary('{{ f.id }}', '{{ f.name | escape }}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                                    <button type="button" onclick="deleteIndividualBoundary('{{ f.id }}', '{{ display_name | escape }}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
                                         🗑️ Remove
                                     </button>
                                     {% endif %}
@@ -3838,6 +3839,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── KML Boundaries Import Logic ───────────────────────────────────────────────────
 window.parsedKmlBoundaries = null;
+window.parsedKmlItems = [];
+window.cachedCrmFranchises = [];
 
 function handleKmlDrop(e) {
     e.preventDefault();
@@ -3877,24 +3880,130 @@ async function parseAndMatchKml(kmlText) {
     if (!res.ok) throw new Error('Could not fetch CRM franchises');
     const data = await res.json();
     const crmFranchises = data.franchises || [];
+    window.cachedCrmFranchises = crmFranchises;
     
-    // Normalize franchise names for matching
-    const normalizeName = (name) => {
-        if (!name) return '';
-        return name.toLowerCase()
-            .replace(/^pirtek\s+/i, '') // Remove 'PIRTEK ' prefix
-            .replace(/\s+/g, ' ')       // Normalize spaces
+    // Normalization & cleaning helpers
+    const strVal = (v) => (v === undefined || v === null) ? '' : String(v).trim();
+
+    const cleanText = (text) => {
+        if (!text) return '';
+        return strVal(text)
+            .toLowerCase()
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/[\r\n\t]+/g, ' ')
+            .replace(/\s+/g, ' ')
             .trim();
     };
 
-    // Build lookup map: normalized_name -> franchise
-    const franchiseLookup = {};
+    const stripNoise = (text) => {
+        if (!text) return '';
+        let s = cleanText(text);
+        s = s.replace(/\bpirtek\b/g, '');
+        s = s.replace(/#\s*\w+/g, '');
+        s = s.replace(/\b\d{2,5}\b/g, '');
+        s = s.replace(/\b(franchise|territory|boundary|branch|store|location|polygon|placemark)\b/g, '');
+        s = s.replace(/[^a-z0-9\s]/g, ' ');
+        return s.replace(/\s+/g, ' ').trim();
+    };
+
+    // Build indexing lookups
+    const crmIdLookup = {};
+    const pirtekIdLookup = {};
+    const exactNameLookup = {};
+    const noPirtekNameLookup = {};
+    const noiseStrippedLookup = {};
+
     crmFranchises.forEach(f => {
-        const norm = normalizeName(f.name);
-        if (norm) {
-            franchiseLookup[norm] = f;
+        const fid = strVal(f.id);
+        const fname = strVal(f.name || f.Name);
+        const fpirtek = strVal(f.pirtek_id || f.Pirtek_Franchise_ID);
+
+        if (fid) crmIdLookup[fid] = f;
+        if (fpirtek) {
+            pirtekIdLookup[fpirtek.toLowerCase()] = f;
+            pirtekIdLookup['#' + fpirtek.toLowerCase()] = f;
+        }
+        if (fname) {
+            const clean = cleanText(fname);
+            const noP = cleanText(fname.replace(/\bpirtek\b/gi, ''));
+            const stripped = stripNoise(fname);
+
+            if (clean) exactNameLookup[clean] = f;
+            if (noP) noPirtekNameLookup[noP] = f;
+            if (stripped) noiseStrippedLookup[stripped] = f;
         }
     });
+
+    // Placemark matching logic
+    const findMatch = (rawName, rawDesc) => {
+        const rawTrim = strVal(rawName);
+        const cleanRaw = cleanText(rawName);
+        const strippedRaw = stripNoise(rawName);
+
+        // 1. Direct CRM ID match (exact match with CRM 19-digit record ID)
+        if (crmIdLookup[rawTrim]) return crmIdLookup[rawTrim];
+        for (const f of crmFranchises) {
+            const fid = strVal(f.id);
+            if (fid && (rawTrim.includes(fid) || (rawDesc && rawDesc.includes(fid)))) {
+                return f;
+            }
+        }
+
+        // 2. Pirtek Franchise ID match (e.g. #398, #159, 398, DSM)
+        const hashMatch = rawTrim.match(/#\s*(\w+)/);
+        if (hashMatch) {
+            const cand = hashMatch[1].toLowerCase();
+            if (pirtekIdLookup[cand]) return pirtekIdLookup[cand];
+        }
+        const tokens = cleanRaw.split(/[\s\-_,]+/);
+        for (const tok of tokens) {
+            if (tok && pirtekIdLookup[tok]) return pirtekIdLookup[tok];
+        }
+
+        // 3. Exact clean name match
+        if (exactNameLookup[cleanRaw]) return exactNameLookup[cleanRaw];
+
+        // 4. Exact name without 'pirtek'
+        const noP = cleanText(cleanRaw.replace(/\bpirtek\b/gi, ''));
+        if (noP && noPirtekNameLookup[noP]) return noPirtekNameLookup[noP];
+
+        // 5. Stripped noise match
+        if (strippedRaw && noiseStrippedLookup[strippedRaw]) return noiseStrippedLookup[strippedRaw];
+
+        // 6. Substring / Containment match
+        if (strippedRaw && strippedRaw.length >= 4) {
+            for (const f of crmFranchises) {
+                const fname = (f.name || f.Name || '');
+                const fStripped = stripNoise(fname);
+                if (fStripped && fStripped.length >= 4) {
+                    if (strippedRaw === fStripped || strippedRaw.includes(fStripped) || fStripped.includes(strippedRaw)) {
+                        return f;
+                    }
+                }
+            }
+        }
+
+        // 7. Check description text fallback
+        if (rawDesc) {
+            const cleanDesc = cleanText(rawDesc);
+            const strippedDesc = stripNoise(rawDesc);
+            if (exactNameLookup[cleanDesc]) return exactNameLookup[cleanDesc];
+            if (noPirtekNameLookup[cleanDesc]) return noPirtekNameLookup[cleanDesc];
+            if (strippedDesc && noiseStrippedLookup[strippedDesc]) return noiseStrippedLookup[strippedDesc];
+
+            for (const f of crmFranchises) {
+                const fname = (f.name || f.Name || '');
+                const fStripped = stripNoise(fname);
+                if (fStripped && fStripped.length >= 4 && cleanDesc.includes(fStripped)) {
+                    return f;
+                }
+            }
+        }
+
+        return null;
+    };
 
     // 2. Parse KML using DOMParser
     const parser = new DOMParser();
@@ -3911,9 +4020,31 @@ async function parseAndMatchKml(kmlText) {
         throw new Error('No Placemark tags found in KML');
     }
 
+    // Helper to parse a coordinates text block
+    const parseCoordsText = (txt) => {
+        const points = [];
+        const pairs = txt.trim().split(/\s+/);
+        pairs.forEach(p => {
+            const parts = p.split(',');
+            if (parts.length >= 2) {
+                const lng = parseFloat(parts[0]);
+                const lat = parseFloat(parts[1]);
+                if (!isNaN(lng) && !isNaN(lat)) {
+                    // Round to 5 decimal places (approx. 1 meter precision) for payload optimization
+                    const roundedLng = Math.round(lng * 100000) / 100000;
+                    const roundedLat = Math.round(lat * 100000) / 100000;
+                    // Avoid storing redundant consecutive identical points
+                    if (points.length === 0 || points[points.length - 1][0] !== roundedLng || points[points.length - 1][1] !== roundedLat) {
+                        points.push([roundedLng, roundedLat]);
+                    }
+                }
+            }
+        });
+        return points;
+    };
+
+    const parsedItems = [];
     const matchedBoundaries = {};
-    const previewRowsHtml = [];
-    let matchCount = 0;
 
     for (let i = 0; i < placemarks.length; i++) {
         const pm = placemarks[i];
@@ -3921,32 +4052,13 @@ async function parseAndMatchKml(kmlText) {
         // Extract Name
         const nameNode = pm.getElementsByTagName('name')[0];
         const rawName = nameNode ? nameNode.textContent.trim() : `Placemark #${i+1}`;
+
+        // Extract Description
+        const descNode = pm.getElementsByTagName('description')[0];
+        const rawDesc = descNode ? descNode.textContent.trim() : '';
         
         // Extract Geometries (Polygon or MultiGeometry)
         let coordinatesList = [];
-        
-        // Helper to parse a coordinates text block
-        const parseCoordsText = (txt) => {
-            const points = [];
-            const pairs = txt.trim().split(/\s+/);
-            pairs.forEach(p => {
-                const parts = p.split(',');
-                if (parts.length >= 2) {
-                    const lng = parseFloat(parts[0]);
-                    const lat = parseFloat(parts[1]);
-                    if (!isNaN(lng) && !isNaN(lat)) {
-                        // Round to 5 decimal places (approx. 1 meter precision) for payload optimization
-                        const roundedLng = Math.round(lng * 100000) / 100000;
-                        const roundedLat = Math.round(lat * 100000) / 100000;
-                        // Avoid storing redundant consecutive identical points
-                        if (points.length === 0 || points[points.length - 1][0] !== roundedLng || points[points.length - 1][1] !== roundedLat) {
-                            points.push([roundedLng, roundedLat]);
-                        }
-                    }
-                }
-            });
-            return points;
-        };
 
         const polygonNodes = pm.getElementsByTagName('Polygon');
         for (let j = 0; j < polygonNodes.length; j++) {
@@ -3957,7 +4069,6 @@ async function parseAndMatchKml(kmlText) {
                 if (coordsNode) {
                     const ring = parseCoordsText(coordsNode.textContent);
                     if (ring.length > 0) {
-                        // GeoJSON Polygon coordinates structure: [[ring1], [ring2]...]
                         coordinatesList.push(ring);
                     }
                 }
@@ -3982,48 +4093,134 @@ async function parseAndMatchKml(kmlText) {
             };
         }
 
-        // Try to match the name
-        const normName = normalizeName(rawName);
-        const match = franchiseLookup[normName];
-
-        let statusCell = '';
-        let idCell = '';
+        const match = findMatch(rawName, rawDesc);
+        parsedItems.push({
+            index: parsedItems.length,
+            rawName: rawName,
+            rawDesc: rawDesc,
+            geometry: geometry,
+            match: match,
+            manuallyAssigned: false
+        });
 
         if (match) {
-            matchCount++;
-            statusCell = `<span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500;">✓ Matched</span>`;
-            idCell = `<span style="font-family: monospace; color: #94a3b8;">${match.id}</span>`;
-            
-            // Add to boundaries object
             matchedBoundaries[match.id] = {
-                name: match.name,
+                name: match.name || match.Name,
                 type: geometry.type,
                 coordinates: geometry.coordinates
             };
+        }
+    }
+
+    if (parsedItems.length === 0) {
+        throw new Error('No polygon geometries found in KML Placemark tags');
+    }
+
+    window.parsedKmlItems = parsedItems;
+    window.parsedKmlBoundaries = matchedBoundaries;
+    renderKmlPreviewTable();
+}
+
+function renderKmlPreviewTable() {
+    const items = window.parsedKmlItems || [];
+    const crmFranchises = window.cachedCrmFranchises || [];
+    let matchCount = 0;
+    const previewRowsHtml = [];
+
+    items.forEach((item, idx) => {
+        let statusCell = '';
+        let idCell = '';
+
+        if (item.match) {
+            matchCount++;
+            const isManual = item.manuallyAssigned;
+            statusCell = `<span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500;">✓ ${isManual ? 'Assigned' : 'Matched'}</span>`;
+            idCell = `<div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                <div>
+                    <span style="font-weight: 600; color: #f1f5f9;">${item.match.name || item.match.Name}</span>
+                    <span style="font-family: monospace; color: #94a3b8; font-size: 0.75rem; margin-left: 0.5rem;">(${item.match.id})</span>
+                </div>
+                <button type="button" onclick="changeKmlAssignment(${idx})" style="background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #94a3b8; font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 4px; cursor: pointer;" title="Change franchise">✏️ Change</button>
+            </div>`;
         } else {
             statusCell = `<span style="background: rgba(245,158,11,0.15); color: #fcd34d; padding: 0.15rem 0.5rem; border-radius: 4px; font-weight: 500;">⚠ Unmatched</span>`;
-            idCell = `<span style="color: #64748b; font-style: italic;">No CRM match for "${rawName}"</span>`;
+            
+            let optionsHtml = `<option value="">-- Manually Select CRM Franchise --</option>`;
+            crmFranchises.forEach(f => {
+                const fname = f.name || f.Name || '';
+                const fid = f.id || '';
+                optionsHtml += `<option value="${fid}">${fname} (${fid})</option>`;
+            });
+
+            idCell = `
+                <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                    <span style="color: #f87171; font-size: 0.75rem;">No automatic match found for "${item.rawName}"</span>
+                    <select onchange="manuallyAssignKmlBoundary(${idx}, this.value)" style="width: 100%; padding: 0.35rem 0.5rem; border-radius: 5px; border: 1px solid rgba(245,158,11,0.4); background: rgba(15,23,42,0.9); color: #f8fafc; font-size: 0.75rem; outline: none; cursor: pointer;">
+                        ${optionsHtml}
+                    </select>
+                </div>
+            `;
         }
 
         previewRowsHtml.push(`
             <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 0.6rem 1rem; color: #f1f5f9; font-weight: 500;">${rawName}</td>
+                <td style="padding: 0.6rem 1rem; color: #f1f5f9; font-weight: 500;">${item.rawName}</td>
                 <td style="padding: 0.6rem 1rem;">${statusCell}</td>
                 <td style="padding: 0.6rem 1rem;">${idCell}</td>
             </tr>
         `);
-    }
+    });
 
-    // Update preview container
     document.getElementById('kml-preview-body').innerHTML = previewRowsHtml.join('');
-    document.getElementById('kml-preview-stats').textContent = `Matched ${matchCount} of ${previewRowsHtml.length} shapes`;
+    document.getElementById('kml-preview-stats').textContent = `Matched ${matchCount} of ${items.length} shapes`;
     document.getElementById('kml-preview-section').style.display = 'block';
 
-    // Store globally to save on click
-    window.parsedKmlBoundaries = matchedBoundaries;
-    
-    // Toggle save button
-    document.getElementById('save-kml-btn').style.display = 'inline-flex';
+    const saveBtn = document.getElementById('save-kml-btn');
+    if (saveBtn) {
+        saveBtn.style.display = matchCount > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+function manuallyAssignKmlBoundary(idx, selectedId) {
+    if (!window.parsedKmlItems || !window.parsedKmlItems[idx]) return;
+    const item = window.parsedKmlItems[idx];
+    const crmFranchises = window.cachedCrmFranchises || [];
+
+    if (selectedId) {
+        const found = crmFranchises.find(f => String(f.id) === String(selectedId));
+        if (found) {
+            item.match = found;
+            item.manuallyAssigned = true;
+        }
+    } else {
+        item.match = null;
+        item.manuallyAssigned = false;
+    }
+
+    rebuildParsedKmlBoundaries();
+    renderKmlPreviewTable();
+}
+
+function changeKmlAssignment(idx) {
+    if (!window.parsedKmlItems || !window.parsedKmlItems[idx]) return;
+    const item = window.parsedKmlItems[idx];
+    item.match = null;
+    item.manuallyAssigned = false;
+    rebuildParsedKmlBoundaries();
+    renderKmlPreviewTable();
+}
+
+function rebuildParsedKmlBoundaries() {
+    window.parsedKmlBoundaries = {};
+    (window.parsedKmlItems || []).forEach(item => {
+        if (item.match && item.geometry) {
+            window.parsedKmlBoundaries[item.match.id] = {
+                name: item.match.name || item.match.Name,
+                type: item.geometry.type,
+                coordinates: item.geometry.coordinates
+            };
+        }
+    });
 }
 
 async function saveKmlBoundaries() {
