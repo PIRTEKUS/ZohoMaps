@@ -1105,9 +1105,12 @@
                             <option value="missing">❌ Missing (No KML)</option>
                         </select>
                     </div>
-                    <div style="display:flex; align-items:flex-end; height:100%;">
+                    <div style="display:flex; align-items:flex-end; gap:0.5rem; height:100%;">
                         <button type="button" onclick="clearBoundaryStatusFilters()" class="btn-secondary" style="padding:0.5rem 1rem; font-size:0.82rem; color:#94a3b8; border-color:rgba(255,255,255,0.15); height:36px; white-space:nowrap;" title="Reset filters">
                             ↺ Clear Filters
+                        </button>
+                        <button type="button" id="btn-sync-crm-franchises" onclick="syncFranchisesFromZoho()" class="btn-primary" style="padding:0.5rem 1rem; font-size:0.82rem; height:36px; display:inline-flex; align-items:center; gap:0.4rem; white-space:nowrap;" title="Fetch latest active franchises from Zoho CRM">
+                            ⚡ Sync CRM Franchises
                         </button>
                     </div>
                 </div>
@@ -4542,6 +4545,110 @@ function clearBoundaryStatusFilters() {
     if (searchInput) searchInput.value = '';
     if (statusFilter) statusFilter.value = 'all';
     filterBoundaryStatusTable();
+}
+
+async function syncFranchisesFromZoho() {
+    const btn = document.getElementById('btn-sync-crm-franchises');
+    const originalText = btn ? btn.innerHTML : '⚡ Sync CRM Franchises';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Syncing CRM...';
+    }
+
+    try {
+        const res = await fetch('/api/admin/franchises/refresh', { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to sync franchises from CRM`);
+        const data = await res.json();
+        const franchises = data.franchises || [];
+        window.cachedCrmFranchises = franchises;
+
+        // Collect existing boundary imported status
+        const importedSet = new Set();
+        if (window.savedFranchiseBoundaries && typeof window.savedFranchiseBoundaries === 'object') {
+            Object.keys(window.savedFranchiseBoundaries).forEach(k => importedSet.add(k.toString().trim()));
+        }
+        document.querySelectorAll('.boundary-status-row').forEach(row => {
+            if (row.getAttribute('data-status') === 'imported') {
+                const rid = row.getAttribute('data-id');
+                if (rid) importedSet.add(rid.toString().trim());
+            }
+        });
+
+        // Re-render table tbody
+        const tbody = document.getElementById('boundary-status-tbody');
+        if (tbody && franchises.length > 0) {
+            let html = '';
+            franchises.forEach(f => {
+                const fid = (f.id || '').toString().trim();
+                const displayName = f.name || f.Name || ('Franchise ' + fid);
+                const hasBoundary = importedSet.has(fid);
+                const safeName = displayName.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+                html += `
+                <tr class="boundary-status-row" data-name="${safeName.toLowerCase()}" data-id="${fid.toLowerCase()}" data-status="${hasBoundary ? 'imported' : 'missing'}" style="border-bottom: 1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.01)'" onmouseout="this.style.background='transparent'">
+                    <td style="padding: 0.75rem 1.25rem; color: #f1f5f9; font-weight: 500;">
+                        ${safeName}
+                    </td>
+                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                        ${hasBoundary ? `
+                        <span style="background: rgba(16,185,129,0.15); color: #6ee7b7; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                            ✅ Imported
+                        </span>` : `
+                        <span style="background: rgba(100,116,139,0.15); color: #94a3b8; padding: 0.2rem 0.65rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; display: inline-block;">
+                            ❌ Missing
+                        </span>`}
+                    </td>
+                    <td style="padding: 0.75rem 1.25rem; font-family: monospace; color: #94a3b8; font-size: 0.8rem;">
+                        ${fid}
+                    </td>
+                    <td style="padding: 0.75rem 1.25rem; text-align: center;">
+                        ${hasBoundary ? `
+                        <button type="button" onclick="deleteIndividualBoundary('${fid}', '${safeName}')" style="background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.75rem; transition: opacity 0.15s; outline: none;" onmouseover="this.style.opacity='0.85'" onmouseout="this.style.opacity='1'">
+                            🗑️ Remove
+                        </button>` : ''}
+                    </td>
+                </tr>`;
+            });
+
+            html += `
+            <tr id="boundary-status-no-match" style="display:none;">
+                <td colspan="4" style="padding: 2.5rem; text-align: center; color: #94a3b8; font-style: italic;">
+                    No franchises match the selected filter criteria.
+                </td>
+            </tr>`;
+
+            tbody.innerHTML = html;
+        }
+
+        // Update Manual Franchise Sync dropdown
+        const manualSelect = document.getElementById('manual-sync-franchise');
+        if (manualSelect) {
+            const currentVal = manualSelect.value;
+            let optHtml = '<option value="all">-- All Franchises --</option>';
+            franchises.forEach(f => {
+                const fid = (f.id || '').toString().trim();
+                const fname = f.name || f.Name || ('Franchise ' + fid);
+                optHtml += `<option value="${fid}">${fname}</option>`;
+            });
+            manualSelect.innerHTML = optHtml;
+            manualSelect.value = currentVal;
+        }
+
+        if (typeof _allFranchisesList !== 'undefined') {
+            _allFranchisesList = franchises;
+        }
+
+        filterBoundaryStatusTable();
+        alert(`Successfully synced ${franchises.length} active franchises from Zoho CRM!`);
+    } catch (err) {
+        console.error('Error syncing franchises:', err);
+        alert('Failed to sync CRM franchises: ' + err.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

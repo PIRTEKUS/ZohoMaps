@@ -357,45 +357,144 @@ def _get_target_record_coordinates(module_name, record_id, effective_configs, us
     return resolved_module_name, target_lat, target_lng
 
 
-def _get_franchises_for_ui(user_id, is_admin):
-    """Get the list of franchises to display in the UI filter dropdown."""
+def _get_franchises_for_ui(user_id, is_admin, force_refresh=False):
+    """Get the list of franchises to display in the UI filter dropdown and settings."""
     franchises = []
     
     if is_admin:
-        # Load from cache first
-        raw = database.get_global_setting('cached_all_franchises', '')
-        raw_list = []
-        if raw:
-            try:
-                raw_list = json.loads(raw)
-            except Exception:
-                pass
+        token = _get_admin_access_token()
+        # Fetch CRM franchises via _get_all_franchises (which enforces 1-hour TTL and force_refresh)
+        crm_franchises = _get_all_franchises(token, force_refresh=force_refresh) if token else []
         
-        # If still empty, try to fetch using admin token on-the-fly
-        if not raw_list:
-            token = _get_admin_access_token()
-            if token:
-                data = _get_all_franchises(token)
-                if data:
-                    raw_list = data
+        # If token was missing or CRM call returned nothing, load from existing cache
+        if not crm_franchises:
+            raw = database.get_global_setting('cached_all_franchises', '')
+            if raw:
+                try:
+                    crm_franchises = json.loads(raw)
+                except Exception:
+                    crm_franchises = []
 
-        if raw_list and isinstance(raw_list, list):
-            for f in raw_list:
+        seen_ids = set()
+        if crm_franchises and isinstance(crm_franchises, list):
+            for f in crm_franchises:
                 fid = str(f.get('id', '')).strip()
                 fname = (f.get('Name') or f.get('name') or '').strip()
                 fpirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
-                if fid and fname:
+                if fid:
+                    seen_ids.add(fid)
+                    display_name = fname or f'Franchise {fid}'
                     franchises.append({
                         'id': fid,
-                        'name': fname,
-                        'Name': fname,
+                        'name': display_name,
+                        'Name': display_name,
                         'pirtek_id': fpirtek,
                         'Pirtek_Franchise_ID': fpirtek
                     })
+
+        # Database discovery fallback:
+        # Check module_records and franchise_boundaries for any franchise IDs not in seen_ids
+        try:
+            conn = database.get_db_connection()
+            db_fids = set()
+            try:
+                m_rows = database.exec_query(
+                    conn,
+                    "SELECT DISTINCT franchise_id FROM module_records WHERE franchise_id IS NOT NULL AND franchise_id != '' AND franchise_id != 'Unassigned'",
+                    fetchall=True
+                )
+                for r in (m_rows or []):
+                    fid = str(r['franchise_id']).strip()
+                    if fid and fid not in seen_ids:
+                        db_fids.add(fid)
+            except Exception as e_m:
+                log_debug(f"[_get_franchises_for_ui] Failed to query module_records fids: {e_m}")
+
+            # Also check franchise_boundaries setting
+            b_raw = database.get_global_setting('franchise_boundaries', '{}')
+            b_dict = {}
+            if b_raw:
+                try:
+                    b_dict = json.loads(b_raw)
+                    for b_id in b_dict.keys():
+                        b_id_str = str(b_id).strip()
+                        if b_id_str and b_id_str not in seen_ids:
+                            db_fids.add(b_id_str)
+                except Exception:
+                    pass
+
+            for fid in db_fids:
+                fname = ''
+                fpirtek = ''
+                
+                # Check boundary table first
+                if b_dict:
+                    b_obj = b_dict.get(fid, {})
+                    if isinstance(b_obj, dict):
+                        fname = (b_obj.get('franchise_name') or b_obj.get('name') or '').strip()
+
+                # Check sample record_data in module_records
+                if not fname:
+                    try:
+                        s_row = database.exec_query(
+                            conn,
+                            "SELECT record_data FROM module_records WHERE franchise_id = ? AND record_data LIKE '%franchise%' LIMIT 1",
+                            (fid,),
+                            fetchone=True
+                        )
+                        if s_row and s_row['record_data']:
+                            s_data = json.loads(s_row['record_data'])
+                            for k, v in s_data.items():
+                                if 'franchise' in k.lower():
+                                    if isinstance(v, dict) and (v.get('name') or v.get('Name')):
+                                        fname = (v.get('name') or v.get('Name')).strip()
+                                        fpirtek = str(v.get('id') or '').strip()
+                                        break
+                                    elif isinstance(v, str) and v.strip() and v.strip() != fid and not v.strip().startswith('6959'):
+                                        fname = v.strip()
+                                        break
+                    except Exception:
+                        pass
+
+                # Fetch single record from Zoho CRM if token available and numeric ID
+                if not fname and token and fid.isdigit() and len(fid) > 10:
+                    try:
+                        headers = {'Authorization': f'Zoho-oauthtoken {token}'}
+                        resp_f = requests.get(f"{zoho_api.ZOHO_API_URL}/crm/v3/Franchises/{fid}", headers=headers, timeout=5)
+                        if resp_f.ok:
+                            f_data = resp_f.json().get('data', [])
+                            if f_data:
+                                fname = (f_data[0].get('Name') or f_data[0].get('name') or '').strip()
+                                fpirtek = str(f_data[0].get('Pirtek_Franchise_ID') or f_data[0].get('pirtek_id') or '').strip()
+                    except Exception:
+                        pass
+
+                display_name = fname or f'Franchise {fid}'
+                seen_ids.add(fid)
+                franchises.append({
+                    'id': fid,
+                    'name': display_name,
+                    'Name': display_name,
+                    'pirtek_id': fpirtek,
+                    'Pirtek_Franchise_ID': fpirtek
+                })
+
+            if db_fids:
+                try:
+                    database.set_global_setting('cached_all_franchises', json.dumps(franchises))
+                except Exception:
+                    pass
+        except Exception as e_db:
+            log_debug(f"[_get_franchises_for_ui] Error during db discovery fallback: {e_db}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     else:
         # Standard user: load via _get_user_franchise_ids which handles overrides, cache, and token refresh
         token = _get_admin_access_token()
-        _fi = _get_user_franchise_ids(user_id, token, force_refresh=False)
+        _fi = _get_user_franchise_ids(user_id, token, force_refresh=force_refresh)
         if _fi:
             fids = _fi.get('ids', [])
             fnames = _fi.get('names', [])
@@ -1366,48 +1465,86 @@ def _extract_user_ids_from_field(val):
 
 
 def _get_all_franchises(admin_token, force_refresh=False):
-    """Fetch all Franchises from CRM custom module to resolve names to IDs."""
+    """Fetch all Franchises from CRM custom module to resolve names to IDs.
+    Uses 1-hour TTL cache and paginates through all pages in Zoho CRM."""
+    now_ts = time.time()
     if not force_refresh:
-        raw_cached = database.get_global_setting('cached_all_franchises', '')
-        if raw_cached:
-            try:
-                cached_data = json.loads(raw_cached)
-                if isinstance(cached_data, list) and cached_data:
-                    for f in cached_data:
-                        fname = (f.get('Name') or f.get('name') or '').strip()
-                        f['name'] = fname
-                        f['Name'] = fname
-                    return cached_data
-            except Exception:
-                pass
+        cached_time_str = database.get_global_setting('cached_all_franchises_time', '0')
+        try:
+            cached_age = now_ts - float(cached_time_str)
+        except Exception:
+            cached_age = 999999
+            
+        # Return cache if less than 1 hour old (3600 seconds)
+        if cached_age < 3600:
+            raw_cached = database.get_global_setting('cached_all_franchises', '')
+            if raw_cached:
+                try:
+                    cached_data = json.loads(raw_cached)
+                    if isinstance(cached_data, list) and cached_data:
+                        for f in cached_data:
+                            fname = (f.get('Name') or f.get('name') or '').strip()
+                            f['name'] = fname
+                            f['Name'] = fname
+                        return cached_data
+                except Exception:
+                    pass
 
     if admin_token:
         try:
             headers = {'Authorization': f'Zoho-oauthtoken {admin_token}'}
-            resp = requests.get(
-                f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
-                headers=headers,
-                params={'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User', 'per_page': 200},
-                timeout=8
-            )
-            if resp.ok:
-                data = resp.json().get('data', [])
-                if data:
-                    for f in data:
-                        fname = (f.get('Name') or f.get('name') or '').strip()
-                        fid = str(f.get('id') or '').strip()
-                        fpirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
-                        f['name'] = fname
-                        f['Name'] = fname
-                        f['id'] = fid
-                        f['pirtek_id'] = fpirtek
-                        f['Pirtek_Franchise_ID'] = fpirtek
-                    try:
-                        database.set_global_setting('cached_all_franchises', json.dumps(data))
-                    except Exception as cache_err:
-                        log_debug(f"[franchises] Cache write failed: {cache_err}")
-                return data
-            log_debug(f"[franchises] Failed to fetch custom module records: {resp.status_code}")
+            all_records = []
+            page = 1
+            last_resp = None
+            while True:
+                resp = requests.get(
+                    f'{zoho_api.ZOHO_API_URL}/crm/v3/Franchises',
+                    headers=headers,
+                    params={
+                        'fields': 'id,Name,Pirtek_Franchise_ID,Franchise_Standard_Users,Franchise_Admin_User',
+                        'per_page': 200,
+                        'page': page
+                    },
+                    timeout=12
+                )
+                last_resp = resp
+                if not resp.ok:
+                    log_debug(f"[franchises] Failed page {page}: HTTP {resp.status_code}")
+                    break
+                res_json = resp.json()
+                data_page = res_json.get('data', [])
+                if not data_page:
+                    break
+                all_records.extend(data_page)
+                info = res_json.get('info', {})
+                if not info.get('more_records', False):
+                    break
+                page += 1
+                if page > 10:  # safety bound (up to 2000 franchises)
+                    break
+
+            if all_records:
+                for f in all_records:
+                    fname = (f.get('Name') or f.get('name') or '').strip()
+                    fid = str(f.get('id') or '').strip()
+                    fpirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
+                    f['name'] = fname
+                    f['Name'] = fname
+                    f['id'] = fid
+                    f['pirtek_id'] = fpirtek
+                    f['Pirtek_Franchise_ID'] = fpirtek
+                try:
+                    database.set_global_setting('cached_all_franchises', json.dumps(all_records))
+                    database.set_global_setting('cached_all_franchises_time', str(now_ts))
+                    log_debug(f"[franchises] Successfully fetched and cached {len(all_records)} franchises from CRM.")
+                except Exception as cache_err:
+                    log_debug(f"[franchises] Cache write failed: {cache_err}")
+                return all_records
+            elif last_resp is not None and last_resp.status_code in (204, 200) and page == 1:
+                # Zoho CRM returns 204 No Content when module is empty
+                pass
+            status_code = getattr(last_resp, 'status_code', 'unknown') if last_resp is not None else 'no_request'
+            log_debug(f"[franchises] Failed to fetch custom module records: status={status_code}")
         except Exception as e:
             log_debug(f"[franchises] Error fetching franchises: {e}")
 
@@ -2208,7 +2345,7 @@ def api_admin_franchise_record_counts():
     needed_fids = {str(r['franchise_id']) for r in rows if r['franchise_id']}
     if (not franchise_name_map or any(fid not in franchise_name_map for fid in needed_fids)) and atk:
         try:
-            crm_franchises = _get_all_franchises(atk)
+            crm_franchises = _get_all_franchises(atk, force_refresh=True)
             for f in (crm_franchises or []):
                 fid = str(f.get('id', '')).strip()
                 fname = (f.get('Name') or f.get('name') or '').strip()
@@ -2998,6 +3135,12 @@ def do_nightly_sync(is_manual=False, module_filter=None):
     except Exception as e:
         log_debug(f"[nightly] Error refreshing module URL map: {e}")
 
+    # Refresh CRM Franchises cache nightly
+    try:
+        _get_all_franchises(admin_token, force_refresh=True)
+    except Exception as e:
+        log_debug(f"[nightly] Error refreshing franchises cache: {e}")
+
     elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
     database.set_global_setting('last_nightly_sync',
                                 datetime.datetime.now(datetime.timezone.utc).isoformat())
@@ -3720,12 +3863,18 @@ def admin_crm_users():
     ]
     return jsonify({'users': users})
 
-@app.route('/api/admin/franchises')
+@app.route('/api/admin/franchises/refresh', methods=['GET', 'POST'])
+@app.route('/api/admin/franchises', methods=['GET', 'POST'])
 def admin_franchises():
     if not session.get('is_admin', False):
         return jsonify({'error': 'Unauthorized'}), 403
-    franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
-    return jsonify({'franchises': franchises})
+    force_refresh = (request.args.get('refresh', 'false').lower() == 'true') or request.path.endswith('/refresh')
+    if force_refresh:
+        token = _get_admin_access_token()
+        if token:
+            _get_all_franchises(token, force_refresh=True)
+    franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True, force_refresh=force_refresh)
+    return jsonify({'franchises': franchises, 'count': len(franchises), 'refreshed': force_refresh})
 
 @app.route('/api/admin/test-franchise-lookup')
 def admin_test_franchise_lookup():
@@ -4214,8 +4363,8 @@ def admin_users_franchise_access():
                 unified_users.append(u)
 
         # 2. Get all available franchises
-        crm_franchises = _get_all_franchises(atk)
-        all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True)
+        crm_franchises = _get_all_franchises(atk, force_refresh=force)
+        all_franchises = _get_franchises_for_ui(session.get('user_id'), is_admin=True, force_refresh=force)
 
         # Build fast in-memory index for franchise user lookups
         user_to_franchises = {}
@@ -4758,7 +4907,7 @@ def clear_all_franchise_caches():
     try:
         conn = database.get_db_connection()
         try:
-            database.exec_query(conn, "DELETE FROM global_settings WHERE key LIKE 'franchise_ids_%'")
+            database.exec_query(conn, "DELETE FROM global_settings WHERE key LIKE 'franchise_ids_%' OR key IN ('cached_all_franchises', 'cached_all_franchises_time')")
             conn.commit()
         finally:
             conn.close()
