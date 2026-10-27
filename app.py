@@ -3507,26 +3507,39 @@ def get_map_data():
 
     # ── On-demand email → CRM ID resolution ─────────────────────────────────
     if not is_admin and '@' in str(user_id):
-        _resolve_tok = _get_admin_access_token()
-        if _resolve_tok:
+        _resolved_numeric = None
+        _raw_cached = database.get_global_setting('cached_crm_users', '')
+        if _raw_cached:
             try:
-                all_users = requests.get(
-                    f"{zoho_api.ZOHO_API_URL}/crm/v3/users?type=AllUsers",
-                    headers={'Authorization': f'Zoho-oauthtoken {_resolve_tok}'},
-                    timeout=8
-                ).json()
-                for _u in all_users.get('users', []):
-                    if _u.get('email', '').lower() == user_id.lower():
-                        _numeric_id = _u['id']
-                        # Clear stale email-keyed franchise cache so next lookup uses numeric key
-                        database.set_global_setting(f'franchise_ids_{user_id}', '')
-                        session['user_id'] = _numeric_id
-                        session['user_email'] = user_id
-                        user_id = _numeric_id
-                        log_debug(f"[map] Resolved email → CRM ID {_numeric_id} (session updated).")
+                for _cu in json.loads(_raw_cached):
+                    if _cu.get('email', '').strip().lower() == str(user_id).strip().lower():
+                        _resolved_numeric = str(_cu.get('id', '')).strip()
                         break
-            except Exception as _e:
-                log_debug(f"[map] Email→ID resolution failed: {_e}")
+            except Exception:
+                pass
+
+        if _resolved_numeric:
+            database.set_global_setting(f'franchise_ids_{user_id}', '')
+            session['user_id'] = _resolved_numeric
+            session['user_email'] = user_id
+            user_id = _resolved_numeric
+            log_debug(f"[map] Resolved email → CRM ID {_resolved_numeric} via local cache.")
+        else:
+            _resolve_tok = _get_admin_access_token()
+            if _resolve_tok:
+                try:
+                    all_users, _ = _fetch_all_crm_users(_resolve_tok)
+                    for _u in all_users:
+                        if _u.get('email', '').strip().lower() == str(user_id).strip().lower():
+                            _numeric_id = str(_u.get('id', '')).strip()
+                            database.set_global_setting(f'franchise_ids_{user_id}', '')
+                            session['user_id'] = _numeric_id
+                            session['user_email'] = user_id
+                            user_id = _numeric_id
+                            log_debug(f"[map] Resolved email → CRM ID {_numeric_id} via fresh fetch.")
+                            break
+                except Exception as _e:
+                    log_debug(f"[map] Email→ID resolution failed: {_e}")
 
     franchise_ids_for_filter = None   # None = admin
     franchise_lookup_succeeded = False  # True once we have a definitive answer
@@ -3861,9 +3874,9 @@ def crm_explorer_page():
                            user_name=session.get('user_name', ''),
                            is_admin=True)
 
-def _admin_crm_get(path, params=None):
+def _admin_crm_get(path, params=None, token=None):
     """Make a GET request to Zoho CRM using the admin token."""
-    token = _get_admin_access_token() or session.get('access_token')
+    token = token or _get_admin_access_token() or session.get('access_token')
     if not token:
         return None, 'No admin token — an admin must log in first'
     headers = {'Authorization': f'Zoho-oauthtoken {token}'}
@@ -3875,6 +3888,78 @@ def _admin_crm_get(path, params=None):
         return resp.json(), None
     except Exception as e:
         return None, str(e)
+
+
+def _fetch_all_crm_users(admin_token=None):
+    """
+    Fetch all CRM users across all pages and license tiers (Regular, Team User, etc.).
+    Tries /crm/v6/users first (modern API supporting Team Users and CRM for Everyone)
+    and falls back to /crm/v3/users.
+    Properly paginates across ActiveUsers and AllUsers without premature breaks.
+    """
+    token = admin_token or _get_admin_access_token() or session.get('access_token')
+    if not token:
+        return [], 'No admin token available'
+
+    all_users = []
+    seen_keys = set()
+    errors = []
+
+    # Prioritize /crm/v6/users for Team Users / CRM for Everyone support, fallback to /crm/v3/users
+    endpoints = ['/crm/v6/users', '/crm/v3/users']
+
+    for endpoint in endpoints:
+        endpoint_has_data = False
+        # ActiveUsers retrieves the 345+ active users in the org; AllUsers captures unconfirmed/invited accounts
+        for utype in ('ActiveUsers', 'AllUsers'):
+            page = 1
+            while page <= 15:
+                data, err = _admin_crm_get(endpoint, {'type': utype, 'page': page, 'per_page': 200}, token=token)
+                if err or not data or 'users' not in data:
+                    if err and 'Empty response' not in str(err):
+                        errors.append(f"{endpoint}?type={utype}&page={page}: {err}")
+                    break
+
+                page_users = data.get('users', [])
+                if not page_users:
+                    break
+
+                endpoint_has_data = True
+                for pu in page_users:
+                    p_id = str(pu.get('id', '')).strip()
+                    p_status = str(pu.get('status', 'active')).lower().strip()
+                    p_email = str(pu.get('email', '')).lower().strip()
+                    p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
+
+                    # Exclude deleted or deactivated users
+                    if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                        continue
+                    # Exclude invalid emails
+                    if not p_email or '@' not in p_email or '.' not in p_email:
+                        continue
+                    # Exclude corrupted purely numeric names
+                    if re.match(r'^\d+$', p_name):
+                        continue
+
+                    # Deduplicate by ID and Email
+                    dedup_key = p_id or p_email
+                    if dedup_key not in seen_keys and p_email not in seen_keys:
+                        seen_keys.add(dedup_key)
+                        if p_email:
+                            seen_keys.add(p_email)
+                        all_users.append(pu)
+
+                # Zoho Users API returns at most 200 items per page. Fewer than 200 indicates the end.
+                if len(page_users) < 200:
+                    break
+                page += 1
+
+        # If the modern endpoint successfully returned users, we do not need the legacy endpoint
+        if endpoint_has_data and all_users:
+            break
+
+    err_str = "; ".join(errors) if (not all_users and errors) else None
+    return all_users, err_str
 
 @app.route('/api/admin/crm-modules')
 def admin_crm_modules():
@@ -3944,18 +4029,35 @@ def admin_crm_territories():
 def admin_crm_users():
     if not session.get('is_admin', False):
         return jsonify({'error': 'Unauthorized'}), 403
-    data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers'})
-    if err:
+    raw_cached = database.get_global_setting('cached_crm_users', '')
+    if raw_cached:
+        try:
+            cached_list = json.loads(raw_cached)
+            if cached_list:
+                return jsonify({'users': [
+                    {'id': u.get('id'),
+                     'name': u.get('full_name', u.get('name', '')),
+                     'email': u.get('email', ''),
+                     'role': u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else str(u.get('role', '')),
+                     'profile': u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else str(u.get('profile', '')),
+                     'user_type': u.get('type__s') or u.get('user_type') or '',
+                     'territories': u.get('territories', [])}
+                    for u in cached_list
+                ]})
+        except Exception:
+            pass
+    users_data, err = _fetch_all_crm_users()
+    if err and not users_data:
         return jsonify({'error': err}), 500
-    # Normalise: keep only what the explorer needs
     users = [
         {'id': u.get('id'),
          'name': u.get('full_name', u.get('name', '')),
          'email': u.get('email', ''),
-         'role': u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else '',
-         'profile': u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else '',
+         'role': u.get('role', {}).get('name', '') if isinstance(u.get('role'), dict) else str(u.get('role', '')),
+         'profile': u.get('profile', {}).get('name', '') if isinstance(u.get('profile'), dict) else str(u.get('profile', '')),
+         'user_type': u.get('type__s') or u.get('user_type') or '',
          'territories': u.get('territories', [])}
-        for u in data.get('users', [])
+        for u in users_data
     ]
     return jsonify({'users': users})
 
@@ -4318,41 +4420,16 @@ def admin_users_franchise_access():
                 crm_users = []
 
         if not crm_users and atk:
-            # 1. Fetch CRM users with pagination (up to 15 pages = 3000 users max)
-            page = 1
-            while page <= 15:
-                # Query AllUsers to include all team users across franchises & head office
-                data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200})
-                if not err and data and 'users' in data:
-                    page_users = data.get('users', [])
-                    for pu in page_users:
-                        p_status = str(pu.get('status', 'active')).lower().strip()
-                        p_email = str(pu.get('email', '')).lower().strip()
-                        p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
-                        # Strictly exclude deleted or deactivated accounts
-                        if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
-                            continue
-                        # Exclude phantom records without valid email
-                        if not p_email or '@' not in p_email or '.' not in p_email:
-                            continue
-                        # Exclude phantom records whose name is purely numeric digits
-                        if re.match(r'^\d+$', p_name):
-                            continue
-                        crm_users.append(pu)
-                    info = data.get('info', {})
-                    if not info.get('more_records', False) or len(page_users) < 200:
-                        break
-                    page += 1
-                else:
-                    if not crm_users:
-                        warning_msg = f'Could not reach Zoho CRM: {err or "No users returned"}. Using local cache.'
-                    break
-            if crm_users:
+            fetched_users, fetch_err = _fetch_all_crm_users(atk)
+            if fetched_users:
+                crm_users = fetched_users
                 try:
                     database.set_global_setting('cached_crm_users', json.dumps(crm_users))
                     database.set_global_setting('cached_crm_users_time', str(now_ts))
                 except Exception:
                     pass
+            elif fetch_err:
+                warning_msg = f'Could not reach Zoho CRM: {fetch_err}. Using local cache.'
         elif not crm_users:
             warning_msg = 'No admin token available. Using local user cache.'
 
@@ -4665,6 +4742,7 @@ def admin_users_franchise_access():
                 'status': u_status,
                 'role': u_role,
                 'profile': u_profile,
+                'user_type': str(u.get('type__s') or u.get('user_type') or ''),
                 'is_admin': is_user_admin,
                 'is_head_office': is_head_office,
                 'has_override': has_override,

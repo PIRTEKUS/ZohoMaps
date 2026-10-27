@@ -1598,7 +1598,8 @@ function renderUserFranchiseAccessTable(users) {
         if (isHeadOffice) headOfficeCount++;
 
         const isAdmin = Boolean(u.is_admin);
-        const isTeam = !isAdmin && !isHeadOffice;
+        const isTeamUser = (u.user_type === 'Team User') || (u.role && String(u.role).toLowerCase().includes('team')) || (u.profile && String(u.profile).toLowerCase().includes('team'));
+        const isTeam = isTeamUser || (!isAdmin && !isHeadOffice);
 
         // Franchises tags
         let franchiseChips = '';
@@ -1624,16 +1625,28 @@ function renderUserFranchiseAccessTable(users) {
         }
 
         // Role / profile tag
-        const roleLabel = u.is_admin ?
-            `<span style="background:rgba(99,102,241,0.2); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Admin</span>` :
-            `<span style="background:rgba(255,255,255,0.06); color:#94a3b8; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.role || u.profile || 'Standard'}</span>`;
+        let roleBadges = '';
+        if (u.is_admin) {
+            roleBadges += `<span style="background:rgba(99,102,241,0.2); color:#a5b4fc; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Admin</span> `;
+        }
+        if (isTeamUser) {
+            roleBadges += `<span style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Team User</span> `;
+        }
+        if (u.profile && !String(u.profile).toLowerCase().includes('administrator') && !String(u.profile).toLowerCase().includes('team')) {
+            roleBadges += `<span style="background:rgba(255,255,255,0.06); color:#cbd5e1; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.profile}</span> `;
+        } else if (u.role && !u.is_admin && !isTeamUser) {
+            roleBadges += `<span style="background:rgba(255,255,255,0.06); color:#94a3b8; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.role}</span> `;
+        }
+        if (!roleBadges.trim()) {
+            roleBadges = `<span style="background:rgba(255,255,255,0.06); color:#94a3b8; padding:1px 6px; border-radius:4px; font-size:0.7rem;">Standard</span>`;
+        }
 
         const headOfficeBadge = isHeadOffice ?
             `<span style="background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.35); color:#fbbf24; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">🏢 Head Office</span>` : '';
 
         // Search text for filtering
         const fNames = (u.franchises || []).map(f => f.name.toLowerCase()).join(' ');
-        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${isHeadOffice ? 'head office corporate' : ''} ${fNames}`.replace(/"/g, '&quot;');
+        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${(u.role || '').toLowerCase()} ${(u.profile || '').toLowerCase()} ${(u.user_type || '').toLowerCase()} ${isHeadOffice ? 'head office corporate' : ''} ${fNames}`.replace(/"/g, '&quot;');
 
         const uIdSafe = String(u.id).replace(/"/g, '&quot;');
         const uEmailSafe = String(u.email || '').replace(/"/g, '&quot;');
@@ -1644,7 +1657,7 @@ function renderUserFranchiseAccessTable(users) {
                 <td style="padding:10px 12px; vertical-align:middle;">
                     <div style="font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
                         ${u.name}
-                        ${roleLabel}
+                        ${roleBadges}
                         ${headOfficeBadge}
                     </div>
                     <div style="font-size:0.75rem; color:#94a3b8; margin-top:2px;">${u.email}</div>
