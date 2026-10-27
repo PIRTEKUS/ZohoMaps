@@ -95,8 +95,11 @@ CACHE_BUST = APP_VERSION if APP_VERSION != 'unknown' else str(uuid.uuid4())[:8]
 def inject_cache_bust():
     return {'cache_bust': CACHE_BUST, 'app_version': APP_VERSION}
 
-# Initialize Database
-database.init_db()
+# Initialize Database safely (don't fail worker boot on transient DB latency)
+try:
+    database.init_db()
+except Exception as _e_init:
+    print(f"WARNING: database.init_db() deferred during worker boot: {_e_init}")
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
 
@@ -391,6 +394,10 @@ def _get_franchises_for_ui(user_id, is_admin, force_refresh=False):
                         'pirtek_id': fpirtek,
                         'Pirtek_Franchise_ID': fpirtek
                     })
+
+        # Skip heavy database discovery table scan if franchises were already loaded from cache
+        if not force_refresh and franchises:
+            return sorted(franchises, key=lambda x: (x.get('name') or x.get('Name') or '').lower())
 
         # Database discovery fallback:
         # Check module_records and franchise_boundaries for any franchise IDs not in seen_ids
@@ -3205,6 +3212,9 @@ def get_nightly_sync_status():
     })
 
 
+_last_area_sync_by_user = {}
+_area_sync_lock = threading.Lock()
+
 def sync_records_by_bounds(user_id, access_token, min_lat, max_lat, min_lng, max_lng, is_admin=False):
     """
     Background sync for records in the current map viewport.
@@ -3387,21 +3397,33 @@ def get_map_data():
     do_sync = request.args.get('sync', 'false').lower() == 'true'
     
     if do_sync:
-        # Use sync-specific bounds if provided (capped at 200 miles by frontend)
-        s_min_lat = float(request.args.get('sync_min_lat', min_lat))
-        s_max_lat = float(request.args.get('sync_max_lat', max_lat))
-        s_min_lng = float(request.args.get('sync_min_lng', min_lng))
-        s_max_lng = float(request.args.get('sync_max_lng', max_lng))
-        
-        try:
-            log_debug(f"Triggering async background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
-            threading.Thread(
-                target=sync_records_by_bounds,
-                args=(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng, session.get('is_admin', False)),
-                daemon=True
-            ).start()
-        except Exception as e:
-            log_debug(f"WARNING: Async area sync dispatch failed: {str(e)}")
+        u_id = str(session.get('user_id', ''))
+        now_ts = time.time()
+        should_sync = False
+        with _area_sync_lock:
+            # Allow at most 1 background area sync per user every 8 seconds to prevent thread storms when panning
+            if now_ts - _last_area_sync_by_user.get(u_id, 0) >= 8.0:
+                _last_area_sync_by_user[u_id] = now_ts
+                should_sync = True
+            else:
+                log_debug(f"Debounced background area-sync for user: {u_id} (within 8s interval)")
+
+        if should_sync:
+            # Use sync-specific bounds if provided (capped at 200 miles by frontend)
+            s_min_lat = float(request.args.get('sync_min_lat', min_lat))
+            s_max_lat = float(request.args.get('sync_max_lat', max_lat))
+            s_min_lng = float(request.args.get('sync_min_lng', min_lng))
+            s_max_lng = float(request.args.get('sync_max_lng', max_lng))
+            
+            try:
+                log_debug(f"Triggering async background area-sync for user: {session.get('user_id')} (Capped Area: {s_min_lat} to {s_max_lat})")
+                threading.Thread(
+                    target=sync_records_by_bounds,
+                    args=(session.get('user_id'), session['access_token'], s_min_lat, s_max_lat, s_min_lng, s_max_lng, session.get('is_admin', False)),
+                    daemon=True
+                ).start()
+            except Exception as e:
+                log_debug(f"WARNING: Async area sync dispatch failed: {str(e)}")
     
     log_debug(f"Querying local cache for area: Lat({min_lat} to {max_lat}), Lng({min_lng} to {max_lng}) (User: {session.get('user_id')})")
 

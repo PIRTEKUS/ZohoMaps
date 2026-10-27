@@ -47,13 +47,19 @@ cd "$APP_DIR" 2>/dev/null || {
     exit 1
 }
 
-# Load environment if present
+# Ensure system tools are available in PATH
+SYS_PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH="$SYS_PATH:$PATH"
+
+# Load environment if present (without allowing it to clobber system PATH)
 if [ -f "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090
     source "$ENV_FILE" 2>/dev/null || true
     set +a
 fi
+# Re-ensure system PATH is prioritized over any venv PATH set in app.env
+export PATH="$SYS_PATH:$APP_DIR/venv/bin:$PATH"
 
 echo -e "\n${C_BOLD}${C_MAGENTA}╔══════════════════════════════════════════════════════════════════╗${C_RESET}"
 echo -e "${C_BOLD}${C_MAGENTA}║           ZohoMap Performance & Gateway Diagnostics             ║${C_RESET}"
@@ -272,34 +278,100 @@ hdr "5. Database Health & Query Latency Benchmark"
 DB_URI_VAL="${DATABASE_URI:-sqlite:///database.db}"
 
 if [[ "$DB_URI_VAL" == *"postgres"* ]]; then
-    info "Database engine: PostgreSQL ($DB_URI_VAL)"
+    # Redact password in display output
+    REDACTED_URI=$(echo "$DB_URI_VAL" | sed -E 's/(:)[^@:]+(@)/\1******\2/')
+    info "Database engine: PostgreSQL ($REDACTED_URI)"
     if [ -f "$VENV_PY" ]; then
         PG_BENCH=$("$VENV_PY" -c "
-import time, database
+import time, database, socket, ssl
+from urllib.parse import urlparse
+
+parsed = urlparse(database.DB_URI)
+host = parsed.hostname
+port = parsed.port or 5432
+
+# 1. DNS Resolution
 try:
     t0 = time.time()
-    conn = database.get_db_connection()
-    t_conn = (time.time() - t0) * 1000.0
+    addrs = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    ip = addrs[0][4][0]
+    t_dns = (time.time() - t0) * 1000.0
+except Exception as e:
+    print(f'FAIL_DNS|{host}|{e}')
+    exit(0)
 
+# 2. Raw TCP connect
+try:
     t1 = time.time()
+    s = socket.create_connection((ip, port), timeout=6.0)
+    s.close()
+    t_tcp = (time.time() - t1) * 1000.0
+except Exception as e:
+    print(f'FAIL_TCP|{host}|{ip}|{port}|{e}')
+    exit(0)
+
+# 3. PostgreSQL Auth & Handshake
+try:
+    t2 = time.time()
+    conn = database.get_db_connection()
+    t_auth = (time.time() - t2) * 1000.0
+except Exception as e:
+    print(f'FAIL_AUTH|{ip}|{e}')
+    exit(0)
+
+# 4. Ping query (SELECT 1)
+try:
+    t3 = time.time()
+    database.exec_query(conn, 'SELECT 1')
+    t_ping = (time.time() - t3) * 1000.0
+except Exception as e:
+    conn.close()
+    print(f'FAIL_PING|{ip}|{e}')
+    exit(0)
+
+# 5. Full count query (SELECT count(*) FROM module_records)
+try:
+    t4 = time.time()
     rows = database.exec_query(conn, 'SELECT count(*) as cnt FROM module_records', fetchone=True)
-    t_query = (time.time() - t1) * 1000.0
+    t_query = (time.time() - t4) * 1000.0
     cnt = rows['cnt'] if rows else 0
     conn.close()
-    print(f'OK|{t_conn:.1f}|{t_query:.1f}|{cnt}')
+    print(f'OK|{ip}|{t_dns:.1f}|{t_tcp:.1f}|{t_auth:.1f}|{t_ping:.1f}|{t_query:.1f}|{cnt}')
 except Exception as e:
-    print(f'FAIL|{e}')
+    try: conn.close()
+    except: pass
+    print(f'FAIL_QUERY|{ip}|{t_tcp:.1f}|{t_auth:.1f}|{e}')
 " 2>&1)
         if [[ "$PG_BENCH" == OK* ]]; then
-            IFS='|' read -r _ TCONN TQUERY RECCNT <<< "$PG_BENCH"
-            ok "PostgreSQL connected in ${TCONN}ms | Query completed in ${TQUERY}ms (${RECCNT} module_records)"
+            IFS='|' read -r _ DB_IP TDNS TTCP TAUTH TPING TQUERY RECCNT <<< "$PG_BENCH"
+            ok "PostgreSQL connected ($DB_IP) | TCP: ${TTCP}ms | Auth/SSL: ${TAUTH}ms | Ping: ${TPING}ms"
+            ok "Query 'SELECT count(*) FROM module_records': ${TQUERY}ms (${RECCNT} rows)"
             if (( $(echo "$TQUERY > 2000" | bc -l 2>/dev/null || echo 0) )); then
                 warn "PostgreSQL query latency is slow (${TQUERY}ms). Missing indexes or high database load."
                 WARNING_ISSUES+=("PostgreSQL query time (${TQUERY}ms) is high.")
             fi
+        elif [[ "$PG_BENCH" == FAIL_DNS* ]]; then
+            IFS='|' read -r _ DHOST DERR <<< "$PG_BENCH"
+            fail "PostgreSQL DNS Resolution failed for $DHOST: $DERR"
+            CRITICAL_ISSUES+=("PostgreSQL DNS resolution failure for $DHOST.")
+        elif [[ "$PG_BENCH" == FAIL_TCP* ]]; then
+            IFS='|' read -r _ THOST TIP TPORT TERR <<< "$PG_BENCH"
+            fail "PostgreSQL TCP connection failed to $THOST ($TIP:$TPORT): $TERR"
+            echo -e "${C_RED}    👉 Root Cause: AWS RDS Security Group or Network ACL is BLOCKING port $TPORT from this EC2 instance!${C_RESET}"
+            echo -e "${C_YELLOW}    👉 Fix: In AWS Console -> RDS -> 'zohomap-db' -> Security Group -> Inbound Rules -> Add TCP $TPORT from this EC2 instance / subnet.${C_RESET}"
+            CRITICAL_ISSUES+=("TCP to RDS blocked: $TERR (Check AWS RDS Security Group inbound rules for port $TPORT).")
+        elif [[ "$PG_BENCH" == FAIL_AUTH* ]]; then
+            IFS='|' read -r _ AIP AERR <<< "$PG_BENCH"
+            fail "PostgreSQL Authentication/SSL failed ($AIP): $AERR"
+            CRITICAL_ISSUES+=("PostgreSQL Auth/SSL error: $AERR")
+        elif [[ "$PG_BENCH" == FAIL_QUERY* ]]; then
+            IFS='|' read -r _ QIP QTCP QAUTH QERR <<< "$PG_BENCH"
+            fail "PostgreSQL query failed ($QIP, TCP: ${QTCP}ms, Auth: ${QAUTH}ms): $QERR"
+            echo -e "${C_RED}    👉 Root Cause: Database socket timeout or query lock on module_records.${C_RESET}"
+            CRITICAL_ISSUES+=("PostgreSQL query failed: $QERR")
         else
-            fail "PostgreSQL Connection failed: $PG_BENCH"
-            CRITICAL_ISSUES+=("PostgreSQL connection failure: $PG_BENCH")
+            fail "PostgreSQL test failed: $PG_BENCH"
+            CRITICAL_ISSUES+=("PostgreSQL test error: $PG_BENCH")
         fi
     fi
 else
@@ -434,12 +506,16 @@ if [ "$1" = "--quick-fix" ] || [ "$1" = "-f" ]; then
     fi
 
     echo "  [3/5] Restarting zohomap service..."
-    sudo systemctl restart zohomap.service
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart zohomap.service 2>/dev/null || sudo systemctl restart zohomap.service
+    fi
     sleep 2
 
     echo "  [4/5] Reloading Nginx..."
-    sudo nginx -t && sudo systemctl reload nginx
-    ok "Nginx reloaded."
+    if command -v nginx >/dev/null 2>&1; then
+        (nginx -t 2>/dev/null || sudo nginx -t) && (systemctl reload nginx 2>/dev/null || sudo systemctl reload nginx)
+        ok "Nginx reloaded."
+    fi
 
     echo "  [5/5] Checking /health endpoint..."
     HEALTH_CODE=$(curl -sk -o /dev/null -w "%{http_code}" http://localhost/health 2>/dev/null || echo "000")

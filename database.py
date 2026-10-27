@@ -35,7 +35,7 @@ def get_db_connection():
             port=parsed.port or 5432,
             database=parsed.path.lstrip('/'),
             ssl_context=ssl_ctx,
-            timeout=10
+            timeout=60
         )
         conn.autocommit = True
         return conn
@@ -216,6 +216,7 @@ def init_db():
         exec_query(conn, "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_module ON module_config (user_id, module_name)")
         exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_mod_rec_user_module ON module_records(user_id, module_name)")
         exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_mod_rec_spatial ON module_records(user_id, lat, lng)")
+        exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_mod_rec_franchise ON module_records(franchise_id)")
         exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_perf_logs_ts ON performance_logs(timestamp)")
         exec_query(conn, "CREATE INDEX IF NOT EXISTS idx_perf_logs_ep ON performance_logs(endpoint)")
     except Exception as e:
