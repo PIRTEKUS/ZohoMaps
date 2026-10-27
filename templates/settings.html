@@ -1330,7 +1330,9 @@
                         <label style="display:block; font-size:0.75rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:0.25rem;">Access Filter</label>
                         <select id="ufa-filter-override" onchange="filterUserFranchiseAccessTable()" style="width:100%; padding:0.5rem 0.75rem; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(15,23,42,0.6); color:#f8fafc; font-size:0.85rem; outline:none; cursor:pointer;">
                             <option value="all">All Users</option>
+                            <option value="team">👥 Team / Franchise Users</option>
                             <option value="head_office">🏢 Head Office Users</option>
+                            <option value="admin">🛡️ Admins Only</option>
                             <option value="override">⚡ Overridden Only</option>
                             <option value="auto">🤖 Auto-Detected Only</option>
                             <option value="multi">⚠️ Multi-Franchise Users (>1)</option>
@@ -1353,7 +1355,7 @@
                                 <th style="padding:10px 12px; width:130px;">Zoho CRM ID</th>
                                 <th style="padding:10px 12px;">Accessible Franchises / Locations</th>
                                 <th style="padding:10px 12px; text-align:center; width:140px;">Access Mode</th>
-                                <th style="padding:10px 12px; text-align:right; width:220px;">Actions</th>
+                                <th style="padding:10px 12px; text-align:right; width:300px;">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="ufa-table-body">
@@ -1595,6 +1597,9 @@ function renderUserFranchiseAccessTable(users) {
         );
         if (isHeadOffice) headOfficeCount++;
 
+        const isAdmin = Boolean(u.is_admin);
+        const isTeam = !isAdmin && !isHeadOffice;
+
         // Franchises tags
         let franchiseChips = '';
         if (fCount === 0) {
@@ -1635,7 +1640,7 @@ function renderUserFranchiseAccessTable(users) {
         const uNameSafe = String(u.name || '').replace(/"/g, '&quot;');
 
         return `
-            <tr class="ufa-user-row" id="ufa-row-${uIdSafe}" data-search="${searchAttr}" data-override="${u.has_override ? 'yes' : 'no'}" data-head-office="${isHeadOffice ? 'yes' : 'no'}" data-count="${fCount}" style="border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.015)'" onmouseout="this.style.background='transparent'">
+            <tr class="ufa-user-row" id="ufa-row-${uIdSafe}" data-search="${searchAttr}" data-override="${u.has_override ? 'yes' : 'no'}" data-head-office="${isHeadOffice ? 'yes' : 'no'}" data-is-admin="${isAdmin ? 'yes' : 'no'}" data-is-team="${isTeam ? 'yes' : 'no'}" data-count="${fCount}" style="border-bottom:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.background='rgba(255,255,255,0.015)'" onmouseout="this.style.background='transparent'">
                 <td style="padding:10px 12px; vertical-align:middle;">
                     <div style="font-weight:600; color:#f1f5f9; display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
                         ${u.name}
@@ -1656,7 +1661,10 @@ function renderUserFranchiseAccessTable(users) {
                     ${modeBadge}
                 </td>
                 <td style="padding:10px 12px; text-align:right; vertical-align:middle;">
-                    <div style="display:inline-flex; gap:6px; align-items:center;">
+                    <div style="display:inline-flex; gap:6px; align-items:center; justify-content:flex-end;">
+                        <a href="/admin/impersonate?user_id=${encodeURIComponent(u.id)}&email=${encodeURIComponent(u.email || '')}" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.65rem; border-radius:6px; background:rgba(234,179,8,0.12); border:1px solid rgba(234,179,8,0.35); color:#facc15; font-size:0.75rem; font-weight:600; text-decoration:none; cursor:pointer; transition:all 0.15s ease;" onmouseover="this.style.background='rgba(234,179,8,0.22)'" onmouseout="this.style.background='rgba(234,179,8,0.12)'" title="Open a new tab viewing ZohoMap as this user">
+                            👤 Impersonate
+                        </a>
                         <button type="button" onclick="repairUserFranchiseAccess('${uIdSafe}', '${uEmailSafe}', '${uNameSafe}')" id="ufa-repair-btn-${uIdSafe}" style="display:inline-flex; align-items:center; gap:4px; padding:0.3rem 0.65rem; border-radius:6px; background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); color:#38bdf8; font-size:0.75rem; font-weight:600; cursor:pointer;" title="Re-detect franchise from Zoho CRM and clear stale cache">
                             🔄 Reset
                         </button>
@@ -1689,12 +1697,16 @@ function filterUserFranchiseAccessTable() {
         const text = r.getAttribute('data-search') || '';
         const isOverride = r.getAttribute('data-override') === 'yes';
         const isHeadOffice = r.getAttribute('data-head-office') === 'yes';
+        const isAdmin = r.getAttribute('data-is-admin') === 'yes';
+        const isTeam = r.getAttribute('data-is-team') === 'yes';
         const fCount = parseInt(r.getAttribute('data-count') || '0', 10);
 
         let matchesSearch = !q || text.includes(q);
         let matchesMode = true;
 
         if (mode === 'head_office') matchesMode = isHeadOffice;
+        else if (mode === 'team') matchesMode = isTeam;
+        else if (mode === 'admin') matchesMode = isAdmin;
         else if (mode === 'override') matchesMode = isOverride;
         else if (mode === 'auto') matchesMode = !isOverride;
         else if (mode === 'multi') matchesMode = fCount > 1;

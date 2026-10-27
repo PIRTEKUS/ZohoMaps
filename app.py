@@ -93,7 +93,11 @@ CACHE_BUST = APP_VERSION if APP_VERSION != 'unknown' else str(uuid.uuid4())[:8]
 
 @app.context_processor
 def inject_cache_bust():
-    return {'cache_bust': CACHE_BUST, 'app_version': APP_VERSION}
+    return {
+        'cache_bust': CACHE_BUST,
+        'app_version': APP_VERSION,
+        'impersonator_admin': session.get('impersonator_admin')
+    }
 
 # Initialize Database safely (don't fail worker boot on transient DB latency)
 try:
@@ -833,7 +837,7 @@ def settings():
     if 'access_token' not in session:
         return redirect(url_for('login'))
     # Team users don't need settings — redirect them to the map
-    if not session.get('is_admin', False):
+    if not session.get('is_admin', False) and not session.get('impersonator_admin'):
         return redirect(url_for('index'))
     configs = database.get_all_module_configs(session.get('user_id'))
     shared_configs = database.get_shared_configs()
@@ -871,7 +875,7 @@ def settings():
     boundary_font_url = database.get_global_setting('boundary_font_url', '')
     boundary_highlight_stroke_weight = database.get_global_setting('boundary_highlight_stroke_weight', '4')
 
-    is_admin = session.get('is_admin', False)
+    is_admin = session.get('is_admin', False) or bool(session.get('impersonator_admin'))
     return render_template('settings.html',
                            configs=configs,
                            shared_configs=shared_configs,
@@ -1628,27 +1632,30 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
 
     cache_key = f'franchise_ids_{user_id}'
 
-    # ── Check if user is inactive or deleted in Zoho CRM ─────────────────────
+    # ── Check if user is explicitly deactivated/deleted in Zoho CRM ─────────
     raw_crm_active = database.get_global_setting('cached_crm_users', '')
     if raw_crm_active:
         try:
             act_users = json.loads(raw_crm_active)
             if isinstance(act_users, list) and len(act_users) > 0:
-                act_ids = {str(x.get('id', '')).strip() for x in act_users if x.get('id')}
-                act_emails = {str(x.get('email', '')).lower().strip() for x in act_users if x.get('email')}
                 u_str_chk = str(user_id).strip().lower()
-                if act_ids and (u_str_chk.isdigit() or '@' in u_str_chk):
-                    if u_str_chk not in act_ids and u_str_chk not in act_emails and u_str_chk not in ('admin', '__global__'):
-                        log_debug(f"[franchise_ids] User '{user_id}' is deleted/inactive in Zoho CRM. Blocked.")
-                        database.set_global_setting(cache_key, '')
-                        return {
-                            'ids': [],
-                            'names': [],
-                            'pirtek_ids': [],
-                            'debug': ['User is deleted or inactive in Zoho CRM; data access blocked.'],
-                            'ts': time.time(),
-                            'is_active': False
-                        }
+                for xu in act_users:
+                    x_id = str(xu.get('id', '')).strip().lower()
+                    x_email = str(xu.get('email', '')).strip().lower()
+                    if u_str_chk and (u_str_chk == x_id or u_str_chk == x_email):
+                        x_status = str(xu.get('status', 'active')).lower().strip()
+                        if x_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                            log_debug(f"[franchise_ids] User '{user_id}' has status '{x_status}' in Zoho CRM. Blocked.")
+                            database.set_global_setting(cache_key, '')
+                            return {
+                                'ids': [],
+                                'names': [],
+                                'pirtek_ids': [],
+                                'debug': [f'User account is {x_status} in Zoho CRM; data access blocked.'],
+                                'ts': time.time(),
+                                'is_active': False
+                            }
+                        break
         except Exception as e_chk:
             log_debug(f"[user_franchise_ids] Error checking user active status: {e_chk}")
 
@@ -1827,6 +1834,73 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                     'name': tname,
                     'pirtek_id': ''
                 }
+
+    # ── Strategy 3: User Profile, Role, & Email Domain Match ────────────────
+    if not found:
+        if not franchises and admin_token:
+            franchises = _get_all_franchises(admin_token)
+        if franchises:
+            candidate_hints = []
+            if user_email:
+                # domain hint, e.g. awilliams@pirtekpittcounty.com -> pittcounty
+                dom = user_email.split('@')[-1].split('.')[0].replace('pirtek', '').strip()
+                if dom: candidate_hints.append(dom)
+
+            # Check cached_crm_users for profile and role names
+            if raw_crm_active:
+                try:
+                    for cu in json.loads(raw_crm_active):
+                        c_id = str(cu.get('id', '')).strip().lower()
+                        c_em = str(cu.get('email', '')).strip().lower()
+                        if (resolved_id and c_id == str(resolved_id).lower()) or (user_email and c_em == user_email.lower()):
+                            prof = cu.get('profile', {})
+                            pname = prof.get('name') if isinstance(prof, dict) else str(prof)
+                            if pname: candidate_hints.append(pname)
+                            rname = cu.get('role', {})
+                            rname = rname.get('name') if isinstance(rname, dict) else str(rname)
+                            if rname: candidate_hints.append(rname)
+                            break
+                except Exception:
+                    pass
+
+            # Check app_users table
+            try:
+                conn_u = database.get_db_connection()
+                u_row = database.exec_query(conn_u, "SELECT email, role, profile FROM app_users WHERE id = ? OR LOWER(email) = ?", (str(user_id), str(user_id).lower()), fetchone=True)
+                conn_u.close()
+                if u_row:
+                    if u_row.get('profile'): candidate_hints.append(u_row['profile'])
+                    if u_row.get('role'): candidate_hints.append(u_row['role'])
+                    if u_row.get('email') and not user_email:
+                        e_dom = u_row['email'].split('@')[-1].split('.')[0].replace('pirtek', '').strip()
+                        if e_dom: candidate_hints.append(e_dom)
+            except Exception:
+                pass
+
+            for hint in candidate_hints:
+                if not hint or hint.lower() in ('standard', 'administrator', 'admin', 'unknown'):
+                    continue
+                h_clean = hint.lower().replace('pirtek', '').replace('_', ' ').replace('-', ' ').strip()
+                if len(h_clean) < 3:
+                    continue
+                for f in franchises:
+                    f_name = (f.get('Name') or f.get('name', '')).strip()
+                    f_id = str(f.get('id', '')).strip()
+                    f_pirtek = str(f.get('Pirtek_Franchise_ID') or f.get('pirtek_id') or '').strip()
+                    fn_clean = f_name.lower().replace('pirtek', '').replace('_', ' ').replace('-', ' ').strip()
+                    if (h_clean == fn_clean or
+                        h_clean.replace(' ', '') == fn_clean.replace(' ', '') or
+                        (len(fn_clean) >= 4 and fn_clean in h_clean) or
+                        (len(h_clean) >= 4 and h_clean in fn_clean)):
+                        found[f_id] = {
+                            'id': f_id,
+                            'name': f_name,
+                            'pirtek_id': f_pirtek
+                        }
+                        debug_log.append(f"Mapped user profile/role/hint '{hint}' to Franchise '{f_name}' ({f_id})")
+                        break
+                if found:
+                    break
 
     # Save to cache
     results = {
@@ -4224,10 +4298,14 @@ def admin_users_franchise_access():
         crm_users = []
         warning_msg = None
 
+        now_ts = time.time()
+        cached_users_time = float(database.get_global_setting('cached_crm_users_time', '0') or 0)
+        cache_valid = (not force) and (now_ts - cached_users_time < 3600)
+
         raw_cached_users = database.get_global_setting('cached_crm_users', '')
 
-        # Fast path: If not forced and we have cached CRM users, load instantly (<10ms) without hitting Zoho API
-        if not force and raw_cached_users:
+        # Fast path: If within 1 hour TTL and not forced, load instantly (<10ms) without hitting Zoho API
+        if cache_valid and raw_cached_users:
             try:
                 loaded_users = json.loads(raw_cached_users)
                 crm_users = [
@@ -4240,9 +4318,9 @@ def admin_users_franchise_access():
                 crm_users = []
 
         if not crm_users and atk:
-            # 1. Fetch CRM users with pagination (up to 10 pages = 2000 users max)
+            # 1. Fetch CRM users with pagination (up to 15 pages = 3000 users max)
             page = 1
-            while page <= 10:
+            while page <= 15:
                 # Query AllUsers to include all team users across franchises & head office
                 data, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200})
                 if not err and data and 'users' in data:
@@ -4272,6 +4350,7 @@ def admin_users_franchise_access():
             if crm_users:
                 try:
                     database.set_global_setting('cached_crm_users', json.dumps(crm_users))
+                    database.set_global_setting('cached_crm_users_time', str(now_ts))
                 except Exception:
                     pass
         elif not crm_users:
@@ -4526,6 +4605,40 @@ def admin_users_franchise_access():
                         if not matched_t:
                             debug_trace.append(f"Unmatched territory: {tname}")
 
+                # Strategy 4: Profile Name, Role Name, or Email Domain match
+                if not assigned_dict:
+                    prof_name = u_profile or ''
+                    role_name = u_role or ''
+                    hints = [prof_name, role_name]
+                    if u_email:
+                        e_dom = u_email.split('@')[-1].split('.')[0].replace('pirtek', '').strip()
+                        if e_dom:
+                            hints.append(e_dom)
+                    for hint in hints:
+                        if not hint or hint.lower() in ('standard', 'administrator', 'admin', 'unknown'):
+                            continue
+                        h_clean = hint.lower().replace('pirtek', '').replace('_', ' ').replace('-', ' ').strip()
+                        if len(h_clean) < 3:
+                            continue
+                        matched_h = franchise_by_name.get(h_clean) or franchise_by_name.get(h_clean.replace(' ', ''))
+                        if not matched_h:
+                            for f in crm_franchises:
+                                fname = f.get('Name') or f.get('name', '')
+                                fid = str(f.get('id', '')).strip()
+                                if not fid or not fname: continue
+                                fn_clean = fname.lower().replace('pirtek', '').replace('_', ' ').replace('-', ' ').strip()
+                                if (h_clean == fn_clean or
+                                    h_clean.replace(' ', '') == fn_clean.replace(' ', '') or
+                                    (len(fn_clean) >= 4 and fn_clean in h_clean) or
+                                    (len(h_clean) >= 4 and h_clean in fn_clean)):
+                                    fpirtek = f.get('Pirtek_Franchise_ID', '') or ''
+                                    matched_h = {'id': fid, 'name': fname, 'pirtek_id': fpirtek}
+                                    break
+                        if matched_h:
+                            assigned_dict[matched_h['id']] = matched_h
+                            debug_trace.append(f"User profile/role/domain match: {matched_h['name']}")
+                            break
+
                 assigned_ids = [v['id'] for v in assigned_dict.values()]
                 assigned_names = [v['name'] for v in assigned_dict.values()]
                 assigned_pirteks = [v['pirtek_id'] for v in assigned_dict.values()]
@@ -4749,6 +4862,104 @@ def admin_user_franchise_override():
         import traceback
         log_debug(f"[user-franchise-override] Exception: {e}\n{traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
+
+
+# ── Admin User Impersonation Endpoints ─────────────────────────────────────
+@app.route('/admin/impersonate')
+def admin_impersonate_user():
+    """Allows an administrator to view ZohoMap as a specific user in a new tab."""
+    is_admin = session.get('is_admin', False)
+    orig_admin = session.get('impersonator_admin')
+    if not is_admin and not orig_admin:
+        return "Unauthorized. Admin privileges required.", 403
+
+    target_user_id = str(request.args.get('user_id') or '').strip()
+    target_email = str(request.args.get('email') or '').strip().lower()
+
+    if not target_user_id and not target_email:
+        return "Missing user_id or email parameter", 400
+
+    target_name = target_email or target_user_id
+    target_profile = 'Standard'
+    target_role = 'Standard'
+    resolved_crm_id = target_user_id
+    resolved_email = target_email
+
+    # 1. Search cached CRM users
+    raw_users = database.get_global_setting('cached_crm_users', '')
+    if raw_users:
+        try:
+            for u in json.loads(raw_users):
+                u_id = str(u.get('id', '')).strip()
+                u_em = str(u.get('email', '')).strip().lower()
+                if (target_user_id and u_id == target_user_id) or (target_email and u_em == target_email):
+                    resolved_crm_id = u_id
+                    resolved_email = u_em
+                    target_name = u.get('full_name') or u.get('name') or u_em or target_name
+                    prof = u.get('profile', {})
+                    target_profile = prof.get('name', 'Standard') if isinstance(prof, dict) else str(prof)
+                    role = u.get('role', {})
+                    target_role = role.get('name', 'Standard') if isinstance(role, dict) else str(role)
+                    break
+        except Exception:
+            pass
+
+    # 2. Search database app_users
+    if not resolved_email or target_name == target_user_id:
+        try:
+            conn = database.get_db_connection()
+            row = database.exec_query(
+                conn,
+                "SELECT id, email, name, role, profile FROM app_users WHERE id = ? OR LOWER(email) = ? LIMIT 1",
+                (target_user_id, target_email or target_user_id.lower()),
+                fetchone=True
+            )
+            conn.close()
+            if row:
+                if row.get('id'): resolved_crm_id = str(row['id'])
+                if row.get('email'): resolved_email = str(row['email']).lower().strip()
+                if row.get('name'): target_name = row['name']
+                if row.get('profile'): target_profile = row['profile']
+                if row.get('role'): target_role = row['role']
+        except Exception:
+            pass
+
+    # 3. Preserve original administrator identity in session
+    if not orig_admin:
+        session['impersonator_admin'] = {
+            'id': session.get('user_id'),
+            'name': session.get('user_name', 'Administrator'),
+            'email': session.get('user_email', '')
+        }
+
+    # Switch active identity
+    session['user_id'] = resolved_crm_id or resolved_email
+    session['user_email'] = resolved_email or ''
+    session['user_name'] = target_name
+    session['is_admin'] = ('administrator' in target_profile.lower() or 'admin' in target_role.lower())
+
+    # Invalidate cached franchise lookup so fresh permissions are immediately evaluated
+    if resolved_crm_id:
+        database.set_global_setting(f'franchise_ids_{resolved_crm_id}', '')
+    if resolved_email:
+        database.set_global_setting(f'franchise_ids_{resolved_email}', '')
+
+    log_debug(f"[impersonate] Admin {session['impersonator_admin']['name']} impersonating {target_name} ({session['user_id']})")
+    return redirect('/?impersonated=true')
+
+
+@app.route('/admin/stop-impersonation')
+def admin_stop_impersonation():
+    """Restores the administrator identity from impersonation mode."""
+    orig_admin = session.get('impersonator_admin')
+    if orig_admin:
+        session['user_id'] = orig_admin.get('id')
+        session['user_name'] = orig_admin.get('name', 'Administrator')
+        session['user_email'] = orig_admin.get('email', '')
+        session['is_admin'] = True
+        session.pop('impersonator_admin', None)
+        log_debug(f"[impersonate] Impersonation ended. Restored admin session for {session['user_name']}")
+    return redirect('/settings')
 
 
 @app.route('/api/webhooks/zoho-update', methods=['POST'])

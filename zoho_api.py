@@ -274,10 +274,12 @@ def fetch_user_info(access_token):
             full_name = profile.get('Display_Name') or (
                 f"{profile.get('First_Name', '')} {profile.get('Last_Name', '')}".strip()
             )
-            user_id = profile.get('ZAUID') or profile.get('Email', 'unknown')
+            user_email = (profile.get('Email') or '').lower().strip()
+            user_id = profile.get('ZAUID') or user_email or 'unknown'
             return {
                 'users': [{
                     'id': str(user_id),
+                    'email': user_email,
                     'full_name': full_name,
                     'last_name': profile.get('Last_Name', ''),
                     'profile': {'name': 'Standard', 'id': 'standard'}
