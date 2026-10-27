@@ -19,9 +19,12 @@ database.db
 __pycache__/
 *.py[cod]
 *$py.class
+*.log
+debug.log
 
 # IDEs
 .idea/
 .vscode/
 *.swp
 *.swo
+
