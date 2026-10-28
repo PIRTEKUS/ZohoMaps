@@ -1859,6 +1859,14 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                             rname = cu.get('role', {})
                             rname = rname.get('name') if isinstance(rname, dict) else str(rname)
                             if rname: candidate_hints.append(rname)
+                            dept = cu.get('department')
+                            if dept: candidate_hints.append(str(dept))
+                            city = cu.get('city')
+                            if city: candidate_hints.append(str(city))
+                            alias = cu.get('alias')
+                            if alias: candidate_hints.append(str(alias))
+                            u_fr = cu.get('Franchise') or cu.get('franchise')
+                            if u_fr: candidate_hints.append(str(u_fr))
                             break
                 except Exception:
                     pass
@@ -3893,9 +3901,8 @@ def _admin_crm_get(path, params=None, token=None):
 def _fetch_all_crm_users(admin_token=None):
     """
     Fetch all CRM users across all pages, tiers, and user types (Regular, Team User, etc.).
-    Combines:
-    1. COQL query on users with offset pagination (supports direct select on users module)
-    2. Zoho REST Users API (querying /crm/v6/users, /crm/v3/users, and /crm/v2/users across ActiveUsers and AllUsers)
+    Queries /crm/v3/users with type=AllUsers (primary) and type=ActiveUsers (fallback/supplement).
+    Zoho CRM API v3 /users returns up to 200 users per page.
     Deduplicates by numeric ID and email.
     """
     token = admin_token or _get_admin_access_token() or session.get('access_token')
@@ -3906,22 +3913,26 @@ def _fetch_all_crm_users(admin_token=None):
     seen_keys = set()
     errors = []
 
-    # 1. Try COQL on users first (fast and fetches full dataset via LIMIT / OFFSET)
-    try:
-        offset = 0
-        while offset <= 2000:
-            query = f"select id, first_name, last_name, email, role.name, profile.name, status from users limit 200 offset {offset}"
-            c_res = zoho_api.coql_query(query, token)
-            c_data = c_res.get('data', [])
-            if not c_data:
+    # Query /crm/v3/users for AllUsers first (contains all active + unconfirmed team users, ~297 users)
+    # Then ActiveUsers just in case any active user was missed
+    for utype in ('AllUsers', 'ActiveUsers'):
+        page = 1
+        while page <= 10:
+            data, err = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': page, 'per_page': 200}, token=token)
+            if err or not data or 'users' not in data:
+                if err and 'Empty response' not in str(err):
+                    errors.append(f"/crm/v3/users?type={utype}&page={page}: {err}")
                 break
-            for cu in c_data:
-                p_id = str(cu.get('id', '')).strip()
-                p_status = str(cu.get('status', 'active')).lower().strip()
-                p_email = str(cu.get('email', '')).lower().strip()
-                fname = cu.get('first_name') or ''
-                lname = cu.get('last_name') or ''
-                p_name = f"{fname} {lname}".strip() or cu.get('name') or ''
+
+            page_users = data.get('users', [])
+            if not page_users:
+                break
+
+            for pu in page_users:
+                p_id = str(pu.get('id', '')).strip()
+                p_status = str(pu.get('status', 'active')).lower().strip()
+                p_email = str(pu.get('email', '')).lower().strip()
+                p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
 
                 if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
                     continue
@@ -3930,64 +3941,15 @@ def _fetch_all_crm_users(admin_token=None):
                 if re.match(r'^\d+$', p_name):
                     continue
 
-                cu_formatted = {
-                    'id': p_id,
-                    'full_name': p_name,
-                    'name': p_name,
-                    'email': p_email,
-                    'status': p_status,
-                    'role': cu.get('role', {}),
-                    'profile': cu.get('profile', {})
-                }
                 dedup = p_id or p_email
                 if dedup not in seen_keys and p_email not in seen_keys:
                     seen_keys.add(dedup)
                     seen_keys.add(p_email)
-                    all_users.append(cu_formatted)
-            if len(c_data) < 200:
+                    all_users.append(pu)
+
+            if len(page_users) < 200:
                 break
-            offset += 200
-    except Exception as ce:
-        errors.append(f"COQL users: {ce}")
-
-    # 2. Query REST Users API across v6, v3, and v2
-    endpoints = ['/crm/v6/users', '/crm/v3/users', '/crm/v2/users']
-    for endpoint in endpoints:
-        for utype in ('ActiveUsers', 'AllUsers'):
-            page = 1
-            while page <= 15:
-                data, err = _admin_crm_get(endpoint, {'type': utype, 'page': page, 'per_page': 200}, token=token)
-                if err or not data or 'users' not in data:
-                    if err and 'Empty response' not in str(err):
-                        errors.append(f"{endpoint}?type={utype}&page={page}: {err}")
-                    break
-
-                page_users = data.get('users', [])
-                if not page_users:
-                    break
-
-                for pu in page_users:
-                    p_id = str(pu.get('id', '')).strip()
-                    p_status = str(pu.get('status', 'active')).lower().strip()
-                    p_email = str(pu.get('email', '')).lower().strip()
-                    p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
-
-                    if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
-                        continue
-                    if not p_email or '@' not in p_email or '.' not in p_email:
-                        continue
-                    if re.match(r'^\d+$', p_name):
-                        continue
-
-                    dedup = p_id or p_email
-                    if dedup not in seen_keys and p_email not in seen_keys:
-                        seen_keys.add(dedup)
-                        seen_keys.add(p_email)
-                        all_users.append(pu)
-
-                if len(page_users) < 200:
-                    break
-                page += 1
+            page += 1
 
     err_str = "; ".join(errors) if (not all_users and errors) else None
     return all_users, err_str
@@ -4014,45 +3976,48 @@ def debug_crm_users():
     diag['db_cache'] = {
         'count': len(cached_list),
         'timestamp': cached_time,
-        'msst_found': [u for u in cached_list if isinstance(u, dict) and ('msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower())]
+        'msst_found': [
+            {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('name'),
+                'email': u.get('email'),
+                'status': u.get('status'),
+                'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
+                'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile')
+            }
+            for u in cached_list
+            if isinstance(u, dict) and ('msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower())
+        ]
     }
 
-    # 2. COQL Test
-    diag['coql_users'] = {}
-    try:
-        coql_p1 = zoho_api.coql_query("select id, first_name, last_name, email, role.name, profile.name, status from users limit 200 offset 0", atk)
-        data_p1 = coql_p1.get('data', [])
-        coql_p2 = zoho_api.coql_query("select id, first_name, last_name, email, role.name, profile.name, status from users limit 200 offset 200", atk)
-        data_p2 = coql_p2.get('data', [])
-        all_coql = data_p1 + data_p2
-        diag['coql_users']['offset_0_count'] = len(data_p1)
-        diag['coql_users']['offset_200_count'] = len(data_p2)
-        diag['coql_users']['total'] = len(all_coql)
-        diag['coql_users']['msst_found'] = [u for u in all_coql if 'msst' in (str(u.get('first_name', '')) + str(u.get('last_name', ''))).lower() or 'van0' in str(u.get('email', '')).lower() or 'pirtek007' in str(u.get('email', '')).lower()]
-        diag['coql_users']['sample_users'] = [f"{u.get('first_name')} {u.get('last_name')} ({u.get('email')})" for u in all_coql[:5]]
-    except Exception as ec:
-        diag['coql_users']['error'] = str(ec)
-
-    # 3. REST Endpoints Test
-    diag['rest_endpoints'] = {}
-    for ep in ['/crm/v6/users', '/crm/v3/users', '/crm/v2/users']:
-        diag['rest_endpoints'][ep] = {}
-        for utype in ['ActiveUsers', 'AllUsers']:
-            res1, err1 = _admin_crm_get(ep, {'type': utype, 'page': 1, 'per_page': 200}, token=atk)
-            u1 = res1.get('users', []) if res1 else []
-            res2, err2 = _admin_crm_get(ep, {'type': utype, 'page': 2, 'per_page': 200}, token=atk)
-            u2 = res2.get('users', []) if res2 else []
-            combined = u1 + u2
-            msst = [u for u in combined if 'msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower()]
-            diag['rest_endpoints'][ep][utype] = {
-                'page1_count': len(u1),
-                'page1_err': err1,
-                'page2_count': len(u2),
-                'page2_err': err2,
-                'page2_keys': list(res2.keys()) if isinstance(res2, dict) else None,
-                'total_users': len(combined),
-                'msst_found': msst
+    # 2. Live v3 API Test
+    diag['v3_live'] = {}
+    for utype in ['AllUsers', 'ActiveUsers']:
+        res1, err1 = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': 1, 'per_page': 200}, token=atk)
+        u1 = res1.get('users', []) if res1 else []
+        res2, err2 = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': 2, 'per_page': 200}, token=atk)
+        u2 = res2.get('users', []) if res2 else []
+        combined = u1 + u2
+        msst = [
+            {
+                'id': u.get('id'),
+                'name': u.get('full_name') or u.get('name'),
+                'email': u.get('email'),
+                'status': u.get('status'),
+                'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
+                'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
+                'department': u.get('department')
             }
+            for u in combined
+            if 'msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower()
+        ]
+        diag['v3_live'][utype] = {
+            'page1_count': len(u1),
+            'page2_count': len(u2),
+            'total_users': len(combined),
+            'msst_count': len(msst),
+            'msst_found': msst
+        }
 
     return jsonify(diag)
 
@@ -4502,15 +4467,17 @@ def admin_users_franchise_access():
         raw_cached_users = database.get_global_setting('cached_crm_users', '')
 
         # Fast path: If within 1 hour TTL and not forced, load instantly (<10ms) without hitting Zoho API
+        # CRITICAL: If cached users count is < 250, the cache is missing Team users! Auto-bust cache!
         if cache_valid and raw_cached_users:
             try:
                 loaded_users = json.loads(raw_cached_users)
-                crm_users = [
-                    u for u in loaded_users
-                    if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive', 'inactive', 'suspended')
-                    and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
-                    and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
-                ]
+                if len(loaded_users) >= 250:
+                    crm_users = [
+                        u for u in loaded_users
+                        if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive', 'inactive', 'suspended')
+                        and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
+                        and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
+                    ]
             except Exception:
                 crm_users = []
 
@@ -4777,11 +4744,15 @@ def admin_users_franchise_access():
                         if not matched_t:
                             debug_trace.append(f"Unmatched territory: {tname}")
 
-                # Strategy 4: Profile Name, Role Name, or Email Domain match
+                # Strategy 4: Profile Name, Role Name, Department, City, Alias, or Email Domain match
                 if not assigned_dict:
                     prof_name = u_profile or ''
                     role_name = u_role or ''
-                    hints = [prof_name, role_name]
+                    dept_name = str(u.get('department') or '').strip()
+                    city_name = str(u.get('city') or '').strip()
+                    alias_name = str(u.get('alias') or '').strip()
+                    u_fr = str(u.get('Franchise') or u.get('franchise') or '').strip()
+                    hints = [prof_name, role_name, dept_name, city_name, alias_name, u_fr]
                     if u_email:
                         e_dom = u_email.split('@')[-1].split('.')[0].replace('pirtek', '').strip()
                         if e_dom:
