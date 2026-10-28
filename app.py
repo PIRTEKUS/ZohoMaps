@@ -3893,7 +3893,11 @@ def _admin_crm_get(path, params=None, token=None):
         resp = requests.get(url, headers=headers, params=params or {}, timeout=15)
         if not resp.content:
             return None, f'Empty response (HTTP {resp.status_code})'
-        return resp.json(), None
+        data = resp.json()
+        if resp.status_code >= 400:
+            err_msg = data.get('message') or data.get('code') or f'HTTP {resp.status_code}'
+            return data, str(err_msg)
+        return data, None
     except Exception as e:
         return None, str(e)
 
@@ -3901,7 +3905,7 @@ def _admin_crm_get(path, params=None, token=None):
 def _fetch_all_crm_users(admin_token=None):
     """
     Fetch all CRM users across all pages, tiers, and user types (Standard, Team User, etc.).
-    Queries /crm/v6/users (native Team User & CRM for Everyone support) and /crm/v3/users.
+    Queries /crm/v7/users, /crm/v6/users (native Team User support) and /crm/v3/users.
     Fetches both ActiveUsers (346 active) and NotConfirmedUsers (79 unconfirmed/invited), as well as AllUsers.
     Deduplicates by numeric ID and email.
     """
@@ -3913,8 +3917,8 @@ def _fetch_all_crm_users(admin_token=None):
     seen_keys = set()
     errors = []
 
-    # Endpoints to query: v6 natively supports Team User licenses, v3 is fallback
-    endpoints = ['/crm/v6/users', '/crm/v3/users']
+    # Endpoints to query: v7/v6 natively support Team User licenses, v3 is fallback
+    endpoints = ['/crm/v7/users', '/crm/v6/users', '/crm/v3/users']
     user_types = ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers']
 
     for endpoint in endpoints:
@@ -3962,7 +3966,7 @@ def _fetch_all_crm_users(admin_token=None):
                     break
                 page += 1
 
-        if len(all_users) >= 300:
+        if len(all_users) >= 340:
             break
 
     err_str = "; ".join(errors) if (not all_users and errors) else None
@@ -4007,9 +4011,9 @@ def debug_crm_users():
         ]
     }
 
-    # 2. Test both v6 and v3 across ActiveUsers, NotConfirmedUsers, and AllUsers
+    # 2. Test v7, v6, and v3 across ActiveUsers, NotConfirmedUsers, and AllUsers
     diag['endpoints_test'] = {}
-    for ep in ['/crm/v6/users', '/crm/v3/users']:
+    for ep in ['/crm/v7/users', '/crm/v6/users', '/crm/v3/users']:
         diag['endpoints_test'][ep] = {}
         for utype in ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers']:
             p_counts = []
@@ -4017,8 +4021,9 @@ def debug_crm_users():
             for p in range(1, 4):
                 res, err = _admin_crm_get(ep, {'type': utype, 'page': p, 'per_page': 200}, token=atk)
                 if err or not res or 'users' not in res:
-                    if err:
-                        p_counts.append(f"err: {err}")
+                    err_msg = err or (res.get('message') if isinstance(res, dict) else 'no users')
+                    if err_msg:
+                        p_counts.append(f"err: {err_msg}")
                     break
                 p_list = res.get('users', [])
                 p_counts.append(len(p_list))
@@ -4498,11 +4503,11 @@ def admin_users_franchise_access():
         raw_cached_users = database.get_global_setting('cached_crm_users', '')
 
         # Fast path: If within 1 hour TTL and not forced, load instantly (<10ms) without hitting Zoho API
-        # CRITICAL: If cached users count is < 400, the cache is missing Team/Unconfirmed users! Auto-bust cache!
+        # CRITICAL: If cached users count is < 340, the cache is missing Team/Unconfirmed users! Auto-bust cache!
         if cache_valid and raw_cached_users:
             try:
                 loaded_users = json.loads(raw_cached_users)
-                if len(loaded_users) >= 400:
+                if len(loaded_users) >= 340:
                     crm_users = [
                         u for u in loaded_users
                         if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive')
