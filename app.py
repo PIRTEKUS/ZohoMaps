@@ -3900,9 +3900,9 @@ def _admin_crm_get(path, params=None, token=None):
 
 def _fetch_all_crm_users(admin_token=None):
     """
-    Fetch all CRM users across all pages, tiers, and user types (Regular, Team User, etc.).
-    Queries /crm/v3/users with type=AllUsers (primary) and type=ActiveUsers (fallback/supplement).
-    Zoho CRM API v3 /users returns up to 200 users per page.
+    Fetch all CRM users across all pages, tiers, and user types (Standard, Team User, etc.).
+    Queries /crm/v6/users (native Team User & CRM for Everyone support) and /crm/v3/users.
+    Fetches both ActiveUsers (346 active) and NotConfirmedUsers (79 unconfirmed/invited), as well as AllUsers.
     Deduplicates by numeric ID and email.
     """
     token = admin_token or _get_admin_access_token() or session.get('access_token')
@@ -3913,52 +3913,57 @@ def _fetch_all_crm_users(admin_token=None):
     seen_keys = set()
     errors = []
 
-    # Query /crm/v3/users for AllUsers first (contains all active + unconfirmed team users, ~297 users)
-    # Then ActiveUsers just in case any active user was missed
-    for utype in ('AllUsers', 'ActiveUsers'):
-        page = 1
-        while page <= 10:
-            data, err = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': page, 'per_page': 200}, token=token)
-            if err or not data or 'users' not in data:
-                if err and 'Empty response' not in str(err):
-                    errors.append(f"/crm/v3/users?type={utype}&page={page}: {err}")
-                break
+    # Endpoints to query: v6 natively supports Team User licenses, v3 is fallback
+    endpoints = ['/crm/v6/users', '/crm/v3/users']
+    user_types = ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers']
 
-            page_users = data.get('users', [])
-            if not page_users:
-                break
+    for endpoint in endpoints:
+        for utype in user_types:
+            page = 1
+            while page <= 10:
+                data, err = _admin_crm_get(endpoint, {'type': utype, 'page': page, 'per_page': 200}, token=token)
+                if err or not data or 'users' not in data:
+                    if err and 'Empty response' not in str(err) and 'INVALID_DATA' not in str(err):
+                        errors.append(f"{endpoint}?type={utype}&page={page}: {err}")
+                    break
 
-            for pu in page_users:
-                p_id = str(pu.get('id', '')).strip()
-                p_status = str(pu.get('status', 'active')).lower().strip()
-                p_email = str(pu.get('email', '')).lower().strip()
-                fname = pu.get('first_name') or ''
-                lname = pu.get('last_name') or ''
-                p_name = f"{fname} {lname}".strip() or str(pu.get('full_name') or pu.get('name') or p_email or '').strip()
+                page_users = data.get('users', [])
+                if not page_users:
+                    break
 
-                # In Zoho CRM, unconfirmed Team Users have status 'inactive' or 'not_confirmed'.
-                # Only exclude accounts that are explicitly marked deleted or deactive.
-                if p_status in ('deleted', 'deactive'):
-                    continue
-                if not p_email or '@' not in p_email or '.' not in p_email:
-                    continue
-                if re.match(r'^\d+$', p_name):
-                    continue
+                for pu in page_users:
+                    p_id = str(pu.get('id', '')).strip()
+                    p_status = str(pu.get('status', 'active')).lower().strip()
+                    p_email = str(pu.get('email', '')).lower().strip()
+                    fname = pu.get('first_name') or ''
+                    lname = pu.get('last_name') or ''
+                    p_name = f"{fname} {lname}".strip() or str(pu.get('full_name') or pu.get('name') or p_email or '').strip()
 
-                if not pu.get('full_name'):
-                    pu['full_name'] = p_name
-                if not pu.get('name'):
-                    pu['name'] = p_name
+                    # Only exclude accounts that are explicitly marked deleted or deactive
+                    if p_status in ('deleted', 'deactive'):
+                        continue
+                    if not p_email or '@' not in p_email or '.' not in p_email:
+                        continue
+                    if re.match(r'^\d+$', p_name):
+                        continue
 
-                dedup = p_id or p_email
-                if dedup not in seen_keys and p_email not in seen_keys:
-                    seen_keys.add(dedup)
-                    seen_keys.add(p_email)
-                    all_users.append(pu)
+                    if not pu.get('full_name'):
+                        pu['full_name'] = p_name
+                    if not pu.get('name'):
+                        pu['name'] = p_name
 
-            if len(page_users) < 200:
-                break
-            page += 1
+                    dedup = p_id or p_email
+                    if dedup not in seen_keys and p_email not in seen_keys:
+                        seen_keys.add(dedup)
+                        seen_keys.add(p_email)
+                        all_users.append(pu)
+
+                if len(page_users) < 200:
+                    break
+                page += 1
+
+        if len(all_users) >= 300:
+            break
 
     err_str = "; ".join(errors) if (not all_users and errors) else None
     return all_users, err_str
@@ -4002,54 +4007,48 @@ def debug_crm_users():
         ]
     }
 
-    # 2. Live AllUsers check across all pages
-    all_users_pages = []
-    raw_all = []
-    for page in range(1, 6):
-        res, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200}, token=atk)
-        if not res or 'users' not in res:
-            break
-        p_users = res.get('users', [])
-        all_users_pages.append({
-            'page': page,
-            'count': len(p_users),
-            'info': res.get('info')
-        })
-        raw_all.extend(p_users)
-        if len(p_users) < 200:
-            break
-    diag['all_users_pages'] = all_users_pages
-    diag['total_raw_all_users'] = len(raw_all)
+    # 2. Test both v6 and v3 across ActiveUsers, NotConfirmedUsers, and AllUsers
+    diag['endpoints_test'] = {}
+    for ep in ['/crm/v6/users', '/crm/v3/users']:
+        diag['endpoints_test'][ep] = {}
+        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers']:
+            p_counts = []
+            total_u = []
+            for p in range(1, 4):
+                res, err = _admin_crm_get(ep, {'type': utype, 'page': p, 'per_page': 200}, token=atk)
+                if err or not res or 'users' not in res:
+                    if err:
+                        p_counts.append(f"err: {err}")
+                    break
+                p_list = res.get('users', [])
+                p_counts.append(len(p_list))
+                total_u.extend(p_list)
+                if len(p_list) < 200:
+                    break
+            diag['endpoints_test'][ep][utype] = {
+                'pages': p_counts,
+                'total': len(total_u)
+            }
 
-    # 3. Status distribution across all raw users
-    status_counts = {}
-    for u in raw_all:
-        st = str(u.get('status', 'MISSING')).lower()
-        status_counts[st] = status_counts.get(st, 0) + 1
-    diag['status_distribution'] = status_counts
-
-    # 4. Search all raw users for treasure coast & msst
-    treasure_matches = []
-    for u in raw_all:
-        searchable_text = " ".join(str(v) for v in u.values()).lower()
-        if any(term in searchable_text for term in ['treasu', 'coast', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc']):
-            fname = u.get('first_name') or ''
-            lname = u.get('last_name') or ''
-            p_name = f"{fname} {lname}".strip() or u.get('full_name') or u.get('name') or ''
-            treasure_matches.append({
+    # 3. Quick test of unified _fetch_all_crm_users()
+    test_fetched, test_err = _fetch_all_crm_users(atk)
+    diag['fetch_all_test'] = {
+        'total_fetched': len(test_fetched),
+        'error': test_err,
+        'treasure_matches': [
+            {
                 'id': u.get('id'),
-                'first_name': u.get('first_name'),
-                'last_name': u.get('last_name'),
-                'full_name': u.get('full_name'),
-                'name': u.get('name'),
-                'computed_name': p_name,
+                'name': u.get('full_name') or u.get('name'),
                 'email': u.get('email'),
                 'status': u.get('status'),
                 'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
                 'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
-                'department': u.get('department')
-            })
-    diag['treasure_and_msst_matches'] = treasure_matches
+                'type': u.get('type') or u.get('type__s')
+            }
+            for u in test_fetched
+            if any(term in f"{u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower() for term in ['treasu', 'coast', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc'])
+        ]
+    }
 
     return jsonify(diag)
 
@@ -4499,11 +4498,11 @@ def admin_users_franchise_access():
         raw_cached_users = database.get_global_setting('cached_crm_users', '')
 
         # Fast path: If within 1 hour TTL and not forced, load instantly (<10ms) without hitting Zoho API
-        # CRITICAL: If cached users count is < 250, the cache is missing Team users! Auto-bust cache!
+        # CRITICAL: If cached users count is < 400, the cache is missing Team/Unconfirmed users! Auto-bust cache!
         if cache_valid and raw_cached_users:
             try:
                 loaded_users = json.loads(raw_cached_users)
-                if len(loaded_users) >= 250:
+                if len(loaded_users) >= 400:
                     crm_users = [
                         u for u in loaded_users
                         if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive')
