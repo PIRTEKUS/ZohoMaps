@@ -4006,27 +4006,39 @@ def debug_crm_users():
             cached_list = json.loads(raw_cached)
         except Exception:
             cached_list = []
+    msst_raw = [
+        u for u in cached_list
+        if isinstance(u, dict) and any(
+            term in f"{u.get('first_name','')} {u.get('last_name','')} {u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower()
+            for term in ['msst', 'van0', 'pirtek007', 'treasu', 'eddie', 'tina']
+        )
+    ]
     diag['db_cache'] = {
         'count': len(cached_list),
         'timestamp': cached_time,
-        'msst_found': [
-            u for u in cached_list
-            if isinstance(u, dict) and any(
-                term in f"{u.get('first_name','')} {u.get('last_name','')} {u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower()
-                for term in ['msst', 'van0', 'pirtek007', 'treasu', 'eddie', 'tina']
-            )
+        'msst_found': msst_raw,
+        'msst_summary': [
+            f"{u.get('full_name') or u.get('name')} | email={u.get('email')} | role={u.get('role')} | prof={u.get('profile')} | status={u.get('status')} | conf={u.get('confirm')} | type={u.get('type') or u.get('category')} | id={u.get('id')}"
+            for u in msst_raw
         ]
     }
 
-    # 2. Comprehensive Endpoint Matrix Test
+    # 2. Zoho Official User Count Actions
+    diag['user_action_counts'] = {}
+    for ctype in ['AllUsers', 'ActiveUsers', 'ActiveConfirmedUsers', 'NotConfirmedUsers', 'DeletedUsers', 'DeactiveUsers', 'AdminUsers', None]:
+        c_param = {'type': ctype} if ctype else {}
+        c_res, c_err = _admin_crm_get('/crm/v8/users/actions/count', c_param, token=atk)
+        diag['user_action_counts'][ctype or 'default'] = c_res if (c_res and not c_err) else (c_err or c_res)
+
+    # 3. Comprehensive Endpoint Matrix Test (Pages 1 & 2)
     diag['endpoints_test'] = {}
-    sample_users = {}
+    all_users_pool = []
     for ep in ['/crm/v8/users', '/crm/v7/users', '/crm/v6/users', '/crm/v3/users']:
         diag['endpoints_test'][ep] = {}
-        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'Team User', 'TeamUsers', 'TeamUser', 'Regular User', 'AllUsers', 'no_type_param']:
+        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers', 'DeactiveUsers', 'DeletedUsers', 'no_type_param']:
             p_counts = []
             total_u = []
-            for p in range(1, 3):
+            for p in range(1, 4):
                 params = {'page': p, 'per_page': 200}
                 if utype != 'no_type_param':
                     params['type'] = utype
@@ -4039,26 +4051,40 @@ def debug_crm_users():
                 p_list = res.get('users', [])
                 p_counts.append(len(p_list))
                 total_u.extend(p_list)
-                if p_list and utype not in sample_users:
-                    sample_users[f"{ep}_{utype}"] = {
-                        'id': p_list[0].get('id'),
-                        'name': p_list[0].get('full_name') or p_list[0].get('name'),
-                        'email': p_list[0].get('email'),
-                        'status': p_list[0].get('status'),
-                        'confirm': p_list[0].get('confirm'),
-                        'type': p_list[0].get('type') or p_list[0].get('type__s') or p_list[0].get('category'),
-                        'role': p_list[0].get('role'),
-                        'profile': p_list[0].get('profile')
-                    }
+                if ep == '/crm/v8/users' and utype == 'AllUsers':
+                    all_users_pool.extend(p_list)
                 if len(p_list) < 200:
                     break
             diag['endpoints_test'][ep][utype] = {
                 'pages': p_counts,
                 'total': len(total_u)
             }
-    diag['sample_users'] = sample_users
 
-    # 3. Quick test of unified _fetch_all_crm_users()
+    # 4. Search within the 298 users of /crm/v8/users?type=AllUsers for key search terms
+    diag['target_search_in_all_users'] = [
+        {
+            'name': u.get('full_name') or u.get('name'),
+            'email': u.get('email'),
+            'status': u.get('status'),
+            'confirm': u.get('confirm'),
+            'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
+            'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
+            'type': u.get('type') or u.get('type__s') or u.get('category'),
+            'id': u.get('id')
+        }
+        for u in all_users_pool
+        if any(term in f"{u.get('first_name','')} {u.get('last_name','')} {u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower()
+               for term in ['joyner', 'conte', 'omstead', 'stclair', 'pirtektc', 'treasure', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc'])
+    ]
+
+    # Profile distribution in AllUsers
+    prof_dist = {}
+    for u in all_users_pool:
+        pname = u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else str(u.get('profile') or 'None')
+        prof_dist[pname] = prof_dist.get(pname, 0) + 1
+    diag['profiles_in_all_users'] = prof_dist
+
+    # 5. Quick test of unified _fetch_all_crm_users()
     test_fetched, test_err = _fetch_all_crm_users(atk)
     diag['fetch_all_test'] = {
         'total_fetched': len(test_fetched),
