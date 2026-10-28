@@ -1570,7 +1570,8 @@ function renderUserFranchiseAccessTable(users) {
         const name = (u.full_name || u.name || '').trim();
         const status = (u.status || 'active').trim().toLowerCase();
         if (!email || !email.includes('@') || !email.includes('.')) return false;
-        if (status === 'deleted' || status === 'deactive') return false;
+        if (status === 'deleted') return false;
+        if ((status === 'deactive' || status === 'inactive') && u.confirm === true) return false;
         if (/^\d+$/.test(name)) return false;
         return true;
     });
@@ -1635,6 +1636,9 @@ function renderUserFranchiseAccessTable(users) {
         if (isTeamUser) {
             roleBadges += `<span style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">Team User</span> `;
         }
+        if (u.status === 'unconfirmed' || u.confirm === false) {
+            roleBadges += `<span style="background:rgba(249,115,22,0.15); border:1px solid rgba(249,115,22,0.3); color:#fb923c; padding:1px 6px; border-radius:4px; font-size:0.7rem; font-weight:600;">⏳ Unconfirmed</span> `;
+        }
         if (u.profile && !String(u.profile).toLowerCase().includes('administrator') && !String(u.profile).toLowerCase().includes('team')) {
             roleBadges += `<span style="background:rgba(255,255,255,0.06); color:#cbd5e1; padding:1px 6px; border-radius:4px; font-size:0.7rem;">${u.profile}</span> `;
         } else if (u.role && !u.is_admin && !isTeamUser) {
@@ -1649,7 +1653,7 @@ function renderUserFranchiseAccessTable(users) {
 
         // Search text for filtering
         const fNames = (u.franchises || []).map(f => f.name.toLowerCase()).join(' ');
-        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${(u.role || '').toLowerCase()} ${(u.profile || '').toLowerCase()} ${(u.user_type || '').toLowerCase()} ${isHeadOffice ? 'head office corporate' : ''} ${fNames}`.replace(/"/g, '&quot;');
+        const searchAttr = `${(u.name || '').toLowerCase()} ${(u.email || '').toLowerCase()} ${(u.role || '').toLowerCase()} ${(u.profile || '').toLowerCase()} ${(u.user_type || '').toLowerCase()} ${(u.status || '').toLowerCase()} ${(u.confirm === false ? 'unconfirmed' : '')} ${isHeadOffice ? 'head office corporate' : ''} ${fNames}`.replace(/"/g, '&quot;');
 
         const uIdSafe = String(u.id).replace(/"/g, '&quot;');
         const uEmailSafe = String(u.email || '').replace(/"/g, '&quot;');
