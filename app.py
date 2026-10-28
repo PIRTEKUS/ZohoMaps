@@ -1424,8 +1424,8 @@ def _refresh_user_mappings(admin_token):
                 try:
                     for t_name, u in fut.result():
                         email = (u.get('email') or '').strip().lower()
-                        status = str(u.get('status', 'active')).strip().lower()
-                        if status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                        status = str(u.get('status', '')).strip().lower()
+                        if status != 'active':
                             continue
                         if email and '@' in email and '.' in email:
                             if email not in email_lookup:
@@ -1643,8 +1643,8 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                     x_id = str(xu.get('id', '')).strip().lower()
                     x_email = str(xu.get('email', '')).strip().lower()
                     if u_str_chk and (u_str_chk == x_id or u_str_chk == x_email):
-                        x_status = str(xu.get('status', 'active')).lower().strip()
-                        if x_status in ('deleted', 'deactive'):
+                        x_status = str(xu.get('status', '')).lower().strip()
+                        if x_status != 'active':
                             log_debug(f"[franchise_ids] User '{user_id}' has status '{x_status}' in Zoho CRM. Blocked.")
                             database.set_global_setting(cache_key, '')
                             return {
@@ -3904,10 +3904,11 @@ def _admin_crm_get(path, params=None, token=None):
 
 def _fetch_all_crm_users(admin_token=None):
     """
-    Fetch all CRM users across all pages, tiers, and user types (Standard, Team User, etc.).
-    Queries /crm/v8/users, /crm/v7/users, /crm/v6/users, /crm/v3/users.
-    Fetches ActiveUsers, NotConfirmedUsers, Team User, TeamUsers, and AllUsers.
-    Deduplicates by numeric ID and email.
+    Fetch all CRM users from Zoho CRM API v8.
+    Calls only GET /crm/v8/users?type=AllUsers, paginates until info.more_records is false,
+    and keeps users where status == "active".
+    Identifies lite users with type__s == "Team User" and standard users with type__s == "Regular User".
+    Never overwrites the status field. Tracks unconfirmed users with the existing confirm boolean.
     """
     token = admin_token or _get_admin_access_token() or session.get('access_token')
     if not token:
@@ -3916,73 +3917,67 @@ def _fetch_all_crm_users(admin_token=None):
     all_users = []
     seen_keys = set()
     errors = []
+    page = 1
 
-    # Endpoints to query: v8, v7, v6 natively support Team/Lite User licenses, v3 is fallback
-    endpoints = ['/crm/v8/users', '/crm/v7/users', '/crm/v6/users', '/crm/v3/users']
-    user_types = ['ActiveUsers', 'NotConfirmedUsers', 'LiteUsers', 'LiteUser', 'Lite Users', 'Lite', 'AllUsers']
-
-    for endpoint in endpoints:
-        for utype in user_types:
-            page = 1
-            while page <= 10:
-                params = {'page': page, 'per_page': 200}
-                if utype:
-                    params['type'] = utype
-                data, err = _admin_crm_get(endpoint, params, token=token)
-                if err or not data or 'users' not in data:
-                    if err and 'Empty response' not in str(err) and 'INVALID_DATA' not in str(err) and 'INVALID_URL_PATTERN' not in str(err):
-                        errors.append(f"{endpoint}?type={utype}&page={page}: {err}")
-                    break
-
-                page_users = data.get('users', [])
-                if not page_users:
-                    break
-
-                for pu in page_users:
-                    p_id = str(pu.get('id', '')).strip()
-                    p_status = str(pu.get('status', 'active')).lower().strip()
-                    p_email = str(pu.get('email', '')).lower().strip()
-                    p_confirm = pu.get('confirm')
-                    fname = pu.get('first_name') or ''
-                    lname = pu.get('last_name') or ''
-                    p_name = f"{fname} {lname}".strip() or str(pu.get('full_name') or pu.get('name') or p_email or '').strip()
-
-                    # Only exclude accounts that are explicitly marked deleted
-                    if p_status == 'deleted':
-                        continue
-                    # Exclude deactivated accounts ONLY if they were confirmed (i.e. truly deactivated ex-employees)
-                    if p_status in ('deactive', 'inactive') and p_confirm is True:
-                        continue
-                    if not p_email or '@' not in p_email or '.' not in p_email:
-                        continue
-                    if re.match(r'^\d+$', p_name):
-                        continue
-
-                    # If unconfirmed user (confirm == False or from NotConfirmedUsers), mark status clearly
-                    if p_confirm is False or utype == 'NotConfirmedUsers' or p_status in ('not_confirmed', 'unconfirmed'):
-                        pu['status'] = 'unconfirmed'
-                        pu['confirm'] = False
-                    elif p_status == 'active':
-                        pu['status'] = 'active'
-                        pu['confirm'] = True
-
-                    if not pu.get('full_name'):
-                        pu['full_name'] = p_name
-                    if not pu.get('name'):
-                        pu['name'] = p_name
-
-                    dedup = p_id or p_email
-                    if dedup not in seen_keys and p_email not in seen_keys:
-                        seen_keys.add(dedup)
-                        seen_keys.add(p_email)
-                        all_users.append(pu)
-
-                if len(page_users) < 200:
-                    break
-                page += 1
-
-        if len(all_users) >= 420:
+    while True:
+        params = {'type': 'AllUsers', 'page': page, 'per_page': 200}
+        data, err = _admin_crm_get('/crm/v8/users', params, token=token)
+        if err or not data or 'users' not in data:
+            if err:
+                errors.append(f"/crm/v8/users?type=AllUsers&page={page}: {err}")
             break
+
+        page_users = data.get('users', [])
+        if not page_users:
+            break
+
+        for pu in page_users:
+            p_id = str(pu.get('id', '')).strip()
+            p_status = str(pu.get('status', '')).lower().strip()
+            p_email = str(pu.get('email', '')).lower().strip()
+            fname = pu.get('first_name') or ''
+            lname = pu.get('last_name') or ''
+            p_name = f"{fname} {lname}".strip() or str(pu.get('full_name') or pu.get('name') or p_email or '').strip()
+
+            # Keep only users where status == "active"
+            if p_status != 'active':
+                continue
+            if not p_email or '@' not in p_email or '.' not in p_email:
+                continue
+            if re.match(r'^\d+$', p_name):
+                continue
+
+            # Identify lite users with type__s == "Team User" and standard users with type__s == "Regular User"
+            t_s = str(pu.get('type__s') or pu.get('type') or '').strip()
+            if t_s == 'Team User':
+                pu['type__s'] = 'Team User'
+                pu['user_type'] = 'Team User'
+                pu['is_lite_user'] = True
+            elif t_s == 'Regular User':
+                pu['type__s'] = 'Regular User'
+                pu['user_type'] = 'Regular User'
+                pu['is_lite_user'] = False
+            else:
+                pu['user_type'] = t_s
+                pu['is_lite_user'] = False
+
+            # Ensure display names are populated without modifying status
+            if not pu.get('full_name'):
+                pu['full_name'] = p_name
+            if not pu.get('name'):
+                pu['name'] = p_name
+
+            dedup = p_id or p_email
+            if dedup not in seen_keys and p_email not in seen_keys:
+                seen_keys.add(dedup)
+                seen_keys.add(p_email)
+                all_users.append(pu)
+
+        info = data.get('info', {}) or {}
+        more_records = info.get('more_records', False)
+        if not more_records or len(page_users) < 200:
+            break
+        page += 1
 
     err_str = "; ".join(errors) if (not all_users and errors) else None
     return all_users, err_str
@@ -4025,42 +4020,41 @@ def debug_crm_users():
 
     # 2. Zoho Official User Count Actions
     diag['user_action_counts'] = {}
-    for ctype in ['AllUsers', 'ActiveUsers', 'ActiveConfirmedUsers', 'LiteUsers', 'NotConfirmedUsers', 'DeletedUsers', 'DeactiveUsers', 'AdminUsers', None]:
+    for ctype in ['AllUsers', 'ActiveUsers', 'ActiveConfirmedUsers', 'NotConfirmedUsers', 'DeletedUsers', 'AdminUsers', None]:
         c_param = {'type': ctype} if ctype else {}
         c_res, c_err = _admin_crm_get('/crm/v8/users/actions/count', c_param, token=atk)
         diag['user_action_counts'][ctype or 'default'] = c_res if (c_res and not c_err) else (c_err or c_res)
 
-    # 3. Comprehensive Endpoint Matrix Test (Pages 1 & 2)
-    diag['endpoints_test'] = {}
+    # 3. /crm/v8/users Endpoint Test
+    diag['endpoints_test'] = {'/crm/v8/users': {}}
     all_users_pool = []
-    for ep in ['/crm/v8/users', '/crm/v7/users', '/crm/v6/users', '/crm/v3/users']:
-        diag['endpoints_test'][ep] = {}
-        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'LiteUsers', 'LiteUser', 'Lite Users', 'Lite', 'AllUsers', 'DeactiveUsers', 'DeletedUsers', 'no_type_param']:
-            p_counts = []
-            total_u = []
-            for p in range(1, 4):
-                params = {'page': p, 'per_page': 200}
-                if utype != 'no_type_param':
-                    params['type'] = utype
-                res, err = _admin_crm_get(ep, params, token=atk)
-                if err or not res or 'users' not in res:
-                    err_msg = err or (res.get('message') if isinstance(res, dict) else 'no users')
-                    if err_msg:
-                        p_counts.append(f"err: {err_msg}")
-                    break
-                p_list = res.get('users', [])
-                p_counts.append(len(p_list))
-                total_u.extend(p_list)
-                if ep == '/crm/v8/users' and utype == 'AllUsers':
-                    all_users_pool.extend(p_list)
-                if len(p_list) < 200:
-                    break
-            diag['endpoints_test'][ep][utype] = {
-                'pages': p_counts,
-                'total': len(total_u)
-            }
+    for utype in ['AllUsers', 'ActiveUsers', 'NotConfirmedUsers', 'AdminUsers', 'DeletedUsers', 'no_type_param']:
+        p_counts = []
+        total_u = []
+        for p in range(1, 4):
+            params = {'page': p, 'per_page': 200}
+            if utype != 'no_type_param':
+                params['type'] = utype
+            res, err = _admin_crm_get('/crm/v8/users', params, token=atk)
+            if err or not res or 'users' not in res:
+                err_msg = err or (res.get('message') if isinstance(res, dict) else 'no users')
+                if err_msg:
+                    p_counts.append(f"err: {err_msg}")
+                break
+            p_list = res.get('users', [])
+            p_counts.append(len(p_list))
+            total_u.extend(p_list)
+            if utype == 'AllUsers':
+                all_users_pool.extend(p_list)
+            info = res.get('info', {}) or {}
+            if not info.get('more_records', False) or len(p_list) < 200:
+                break
+        diag['endpoints_test']['/crm/v8/users'][utype] = {
+            'pages': p_counts,
+            'total': len(total_u)
+        }
 
-    # 4. Search within the 298 users of /crm/v8/users?type=AllUsers for key search terms
+    # 4. Search within the pool of /crm/v8/users?type=AllUsers for key search terms
     diag['target_search_in_all_users'] = [
         {
             'name': u.get('full_name') or u.get('name'),
@@ -4069,7 +4063,7 @@ def debug_crm_users():
             'confirm': u.get('confirm'),
             'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
             'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
-            'type': u.get('type') or u.get('type__s') or u.get('category'),
+            'type__s': u.get('type__s') or u.get('type') or u.get('category'),
             'id': u.get('id')
         }
         for u in all_users_pool
@@ -4077,21 +4071,27 @@ def debug_crm_users():
                for term in ['joyner', 'conte', 'omstead', 'stclair', 'pirtektc', 'treasure', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc'])
     ]
 
-    # Profile distribution in AllUsers
+    # Profile & type distribution in AllUsers
     prof_dist = {}
+    type_dist = {}
     for u in all_users_pool:
         pname = u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else str(u.get('profile') or 'None')
         prof_dist[pname] = prof_dist.get(pname, 0) + 1
+        tname = str(u.get('type__s') or u.get('type') or 'None')
+        type_dist[tname] = type_dist.get(tname, 0) + 1
     diag['profiles_in_all_users'] = prof_dist
+    diag['types_in_all_users'] = type_dist
 
-    # 5. Quick test of unified _fetch_all_crm_users()
+    # 5. Quick test of rewritten _fetch_all_crm_users()
     test_fetched, test_err = _fetch_all_crm_users(atk)
     diag['fetch_all_test'] = {
         'total_fetched': len(test_fetched),
         'error': test_err,
-        'unconfirmed_count': sum(1 for u in test_fetched if u.get('status') == 'unconfirmed' or u.get('confirm') is False),
-        'active_count': sum(1 for u in test_fetched if u.get('status') == 'active' and u.get('confirm') is not False),
-        'treasure_matches': [
+        'team_user_count': sum(1 for u in test_fetched if u.get('type__s') == 'Team User'),
+        'regular_user_count': sum(1 for u in test_fetched if u.get('type__s') == 'Regular User'),
+        'unconfirmed_count': sum(1 for u in test_fetched if u.get('confirm') is False),
+        'active_count': sum(1 for u in test_fetched if u.get('status') == 'active'),
+        'sample_users': [
             {
                 'id': u.get('id'),
                 'name': u.get('full_name') or u.get('name'),
@@ -4100,10 +4100,10 @@ def debug_crm_users():
                 'confirm': u.get('confirm'),
                 'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
                 'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
-                'type': u.get('type') or u.get('type__s') or u.get('category')
+                'type__s': u.get('type__s'),
+                'is_lite_user': u.get('is_lite_user')
             }
-            for u in test_fetched
-            if any(term in f"{u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower() for term in ['treasu', 'coast', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc'])
+            for u in test_fetched[:10]
         ]
     }
 
@@ -4558,11 +4558,10 @@ def admin_users_franchise_access():
         if cache_valid and raw_cached_users:
             try:
                 loaded_users = json.loads(raw_cached_users)
-                if len(loaded_users) >= 200:
+                if loaded_users:
                     crm_users = [
                         u for u in loaded_users
-                        if str(u.get('status', 'active')).lower().strip() != 'deleted'
-                        and not (str(u.get('status', 'active')).lower().strip() in ('deactive', 'inactive') and u.get('confirm') is True)
+                        if str(u.get('status', '')).lower().strip() == 'active'
                         and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
                         and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
                     ]
@@ -4629,8 +4628,8 @@ def admin_users_franchise_access():
         for u in crm_users:
             uid = str(u.get('id', '')).strip()
             email = (u.get('email') or '').lower().strip()
-            status = str(u.get('status', 'active')).lower().strip()
-            if status in ('deleted', 'deactive'):
+            status = str(u.get('status', '')).lower().strip()
+            if status != 'active':
                 continue
             if not email or '@' not in email or '.' not in email:
                 continue
@@ -4739,10 +4738,8 @@ def admin_users_franchise_access():
             u_name = str(u.get('full_name') or u.get('name') or u_email).strip()
             u_status = str(u.get('status', 'active')).lower().strip()
 
-            # Strictly skip deleted or confirmed-deactivated users
-            if u_status == 'deleted':
-                continue
-            if u_status in ('deactive', 'inactive') and u.get('confirm') is True:
+            # Strictly skip non-active users
+            if u_status != 'active':
                 continue
             if not u_email or '@' not in u_email or '.' not in u_email:
                 continue
