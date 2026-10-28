@@ -1564,13 +1564,13 @@ function renderUserFranchiseAccessTable(users) {
     const summary = document.getElementById('ufa-total-summary');
     if (!tbody) return;
 
-    // Filter out deleted, inactive, or phantom numeric accounts
+    // Filter out deleted or phantom numeric accounts
     const validUsers = (users || []).filter(u => {
         const email = (u.email || '').trim().toLowerCase();
-        const name = (u.name || '').trim();
+        const name = (u.full_name || u.name || '').trim();
         const status = (u.status || 'active').trim().toLowerCase();
         if (!email || !email.includes('@') || !email.includes('.')) return false;
-        if (status === 'deleted' || status === 'deactive' || status === 'inactive' || status === 'suspended') return false;
+        if (status === 'deleted' || status === 'deactive') return false;
         if (/^\d+$/.test(name)) return false;
         return true;
     });

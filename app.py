@@ -1644,7 +1644,7 @@ def _get_user_franchise_ids(user_id, admin_token, force_refresh=False):
                     x_email = str(xu.get('email', '')).strip().lower()
                     if u_str_chk and (u_str_chk == x_id or u_str_chk == x_email):
                         x_status = str(xu.get('status', 'active')).lower().strip()
-                        if x_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                        if x_status in ('deleted', 'deactive'):
                             log_debug(f"[franchise_ids] User '{user_id}' has status '{x_status}' in Zoho CRM. Blocked.")
                             database.set_global_setting(cache_key, '')
                             return {
@@ -3932,14 +3932,23 @@ def _fetch_all_crm_users(admin_token=None):
                 p_id = str(pu.get('id', '')).strip()
                 p_status = str(pu.get('status', 'active')).lower().strip()
                 p_email = str(pu.get('email', '')).lower().strip()
-                p_name = str(pu.get('full_name') or pu.get('name') or '').strip()
+                fname = pu.get('first_name') or ''
+                lname = pu.get('last_name') or ''
+                p_name = f"{fname} {lname}".strip() or str(pu.get('full_name') or pu.get('name') or p_email or '').strip()
 
-                if p_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+                # In Zoho CRM, unconfirmed Team Users have status 'inactive' or 'not_confirmed'.
+                # Only exclude accounts that are explicitly marked deleted or deactive.
+                if p_status in ('deleted', 'deactive'):
                     continue
                 if not p_email or '@' not in p_email or '.' not in p_email:
                     continue
                 if re.match(r'^\d+$', p_name):
                     continue
+
+                if not pu.get('full_name'):
+                    pu['full_name'] = p_name
+                if not pu.get('name'):
+                    pu['name'] = p_name
 
                 dedup = p_id or p_email
                 if dedup not in seen_keys and p_email not in seen_keys:
@@ -3986,38 +3995,61 @@ def debug_crm_users():
                 'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile')
             }
             for u in cached_list
-            if isinstance(u, dict) and ('msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower())
+            if isinstance(u, dict) and any(
+                term in f"{u.get('first_name','')} {u.get('last_name','')} {u.get('full_name','')} {u.get('name','')} {u.get('email','')}".lower()
+                for term in ['msst', 'van0', 'pirtek007', 'treasu', 'eddie', 'tina']
+            )
         ]
     }
 
-    # 2. Live v3 API Test
-    diag['v3_live'] = {}
-    for utype in ['AllUsers', 'ActiveUsers']:
-        res1, err1 = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': 1, 'per_page': 200}, token=atk)
-        u1 = res1.get('users', []) if res1 else []
-        res2, err2 = _admin_crm_get('/crm/v3/users', {'type': utype, 'page': 2, 'per_page': 200}, token=atk)
-        u2 = res2.get('users', []) if res2 else []
-        combined = u1 + u2
-        msst = [
-            {
+    # 2. Live AllUsers check across all pages
+    all_users_pages = []
+    raw_all = []
+    for page in range(1, 6):
+        res, err = _admin_crm_get('/crm/v3/users', {'type': 'AllUsers', 'page': page, 'per_page': 200}, token=atk)
+        if not res or 'users' not in res:
+            break
+        p_users = res.get('users', [])
+        all_users_pages.append({
+            'page': page,
+            'count': len(p_users),
+            'info': res.get('info')
+        })
+        raw_all.extend(p_users)
+        if len(p_users) < 200:
+            break
+    diag['all_users_pages'] = all_users_pages
+    diag['total_raw_all_users'] = len(raw_all)
+
+    # 3. Status distribution across all raw users
+    status_counts = {}
+    for u in raw_all:
+        st = str(u.get('status', 'MISSING')).lower()
+        status_counts[st] = status_counts.get(st, 0) + 1
+    diag['status_distribution'] = status_counts
+
+    # 4. Search all raw users for treasure coast & msst
+    treasure_matches = []
+    for u in raw_all:
+        searchable_text = " ".join(str(v) for v in u.values()).lower()
+        if any(term in searchable_text for term in ['treasu', 'coast', 'msst', 'van0', 'pirtek007', 'operations@pirtektc', 'sales@pirtektc']):
+            fname = u.get('first_name') or ''
+            lname = u.get('last_name') or ''
+            p_name = f"{fname} {lname}".strip() or u.get('full_name') or u.get('name') or ''
+            treasure_matches.append({
                 'id': u.get('id'),
-                'name': u.get('full_name') or u.get('name'),
+                'first_name': u.get('first_name'),
+                'last_name': u.get('last_name'),
+                'full_name': u.get('full_name'),
+                'name': u.get('name'),
+                'computed_name': p_name,
                 'email': u.get('email'),
                 'status': u.get('status'),
                 'role': u.get('role', {}).get('name') if isinstance(u.get('role'), dict) else u.get('role'),
                 'profile': u.get('profile', {}).get('name') if isinstance(u.get('profile'), dict) else u.get('profile'),
                 'department': u.get('department')
-            }
-            for u in combined
-            if 'msst' in (u.get('full_name') or u.get('name') or '').lower() or 'van0' in (u.get('email') or '').lower() or 'pirtek007' in (u.get('email') or '').lower()
-        ]
-        diag['v3_live'][utype] = {
-            'page1_count': len(u1),
-            'page2_count': len(u2),
-            'total_users': len(combined),
-            'msst_count': len(msst),
-            'msst_found': msst
-        }
+            })
+    diag['treasure_and_msst_matches'] = treasure_matches
 
     return jsonify(diag)
 
@@ -4474,7 +4506,7 @@ def admin_users_franchise_access():
                 if len(loaded_users) >= 250:
                     crm_users = [
                         u for u in loaded_users
-                        if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive', 'inactive', 'suspended')
+                        if str(u.get('status', 'active')).lower().strip() not in ('deleted', 'deactive')
                         and (u.get('email') and '@' in str(u.get('email', '')) and '.' in str(u.get('email', '')))
                         and not (re.match(r'^\d+$', str(u.get('full_name') or u.get('name') or '').strip()))
                     ]
@@ -4542,7 +4574,7 @@ def admin_users_franchise_access():
             uid = str(u.get('id', '')).strip()
             email = (u.get('email') or '').lower().strip()
             status = str(u.get('status', 'active')).lower().strip()
-            if status in ('deleted', 'deactive', 'inactive', 'suspended'):
+            if status in ('deleted', 'deactive'):
                 continue
             if not email or '@' not in email or '.' not in email:
                 continue
@@ -4651,8 +4683,8 @@ def admin_users_franchise_access():
             u_name = str(u.get('full_name') or u.get('name') or u_email).strip()
             u_status = str(u.get('status', 'active')).lower().strip()
 
-            # Strictly skip deleted, deactivated, or invalid users
-            if u_status in ('deleted', 'deactive', 'inactive', 'suspended'):
+            # Strictly skip deleted or deactivated users
+            if u_status in ('deleted', 'deactive'):
                 continue
             if not u_email or '@' not in u_email or '.' not in u_email:
                 continue
