@@ -3917,9 +3917,9 @@ def _fetch_all_crm_users(admin_token=None):
     seen_keys = set()
     errors = []
 
-    # Endpoints to query: v8, v7, v6 natively support Team User licenses, v3 is fallback
+    # Endpoints to query: v8, v7, v6 natively support Team/Lite User licenses, v3 is fallback
     endpoints = ['/crm/v8/users', '/crm/v7/users', '/crm/v6/users', '/crm/v3/users']
-    user_types = ['ActiveUsers', 'NotConfirmedUsers', 'Team User', 'TeamUsers', 'AllUsers']
+    user_types = ['ActiveUsers', 'NotConfirmedUsers', 'LiteUsers', 'LiteUser', 'Lite Users', 'Lite', 'AllUsers']
 
     for endpoint in endpoints:
         for utype in user_types:
@@ -4025,7 +4025,7 @@ def debug_crm_users():
 
     # 2. Zoho Official User Count Actions
     diag['user_action_counts'] = {}
-    for ctype in ['AllUsers', 'ActiveUsers', 'ActiveConfirmedUsers', 'NotConfirmedUsers', 'DeletedUsers', 'DeactiveUsers', 'AdminUsers', None]:
+    for ctype in ['AllUsers', 'ActiveUsers', 'ActiveConfirmedUsers', 'LiteUsers', 'NotConfirmedUsers', 'DeletedUsers', 'DeactiveUsers', 'AdminUsers', None]:
         c_param = {'type': ctype} if ctype else {}
         c_res, c_err = _admin_crm_get('/crm/v8/users/actions/count', c_param, token=atk)
         diag['user_action_counts'][ctype or 'default'] = c_res if (c_res and not c_err) else (c_err or c_res)
@@ -4035,7 +4035,7 @@ def debug_crm_users():
     all_users_pool = []
     for ep in ['/crm/v8/users', '/crm/v7/users', '/crm/v6/users', '/crm/v3/users']:
         diag['endpoints_test'][ep] = {}
-        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'AllUsers', 'DeactiveUsers', 'DeletedUsers', 'no_type_param']:
+        for utype in ['ActiveUsers', 'NotConfirmedUsers', 'LiteUsers', 'LiteUser', 'Lite Users', 'Lite', 'AllUsers', 'DeactiveUsers', 'DeletedUsers', 'no_type_param']:
             p_counts = []
             total_u = []
             for p in range(1, 4):
