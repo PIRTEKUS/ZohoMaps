@@ -316,7 +316,7 @@ main.container { padding: 0 !important; overflow: hidden; }
     <div id="sync-toast"></div>
 
     <!-- ── Admin console FAB ── -->
-    {% if is_admin %}
+    {% if is_admin and show_console %}
     <button id="console-toggle-fab" onclick="toggleConsoleVisibility()" title="Toggle Server Log"
             style="position:absolute; bottom:20px; left:16px; z-index:20;
                    width:36px; height:36px; border-radius:50%; border:none; cursor:pointer;
@@ -345,7 +345,7 @@ main.container { padding: 0 !important; overflow: hidden; }
 
 </div><!-- end .map-full -->
 
-{% if is_admin %}
+{% if is_admin and show_console %}
 <div class="debug-console" id="debug-console" style="display:none;">
     <div class="console-header">
         <div style="display:flex; align-items:center; gap:8px;">

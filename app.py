@@ -106,6 +106,32 @@ except Exception as _e_init:
     print(f"WARNING: database.init_db() deferred during worker boot: {_e_init}")
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'debug.log')
+MAX_LOG_BYTES = 5 * 1024 * 1024        # 5 MB hard cap on debug.log
+KEEP_LOG_BYTES = 2560 * 1024           # Keep newest ~2.5 MB when trimming
+
+
+def _trim_log_file_if_needed():
+    """Ensure debug.log never grows past MAX_LOG_BYTES (5 MB)."""
+    try:
+        if not os.path.exists(LOG_FILE):
+            return
+        size = os.path.getsize(LOG_FILE)
+        if size <= MAX_LOG_BYTES:
+            return
+        with open(LOG_FILE, 'rb') as rf:
+            rf.seek(max(0, size - KEEP_LOG_BYTES))
+            tail = rf.read()
+        nl_idx = tail.find(b'\n')
+        if nl_idx != -1:
+            tail = tail[nl_idx + 1:]
+        with open(LOG_FILE, 'wb') as wf:
+            wf.write(tail)
+    except Exception:
+        pass
+
+
+# Trim immediately on worker boot in case an existing debug.log is already > 5 MB
+_trim_log_file_if_needed()
 
 # Derive CRM base URL from API URL for record links
 # Derive Zoho base TLD from API URL for record links
@@ -125,6 +151,7 @@ def log_debug(msg):
         except Exception:
             pass
     try:
+        _trim_log_file_if_needed()
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{ts}] {msg}\n")
@@ -200,11 +227,19 @@ def get_logs():
     if not session.get('is_admin', False):
         return jsonify({'error': 'Forbidden'}), 403
     try:
-        with open(LOG_FILE, 'r') as f:
-            lines = f.readlines()
-            if not lines:
-                return jsonify({'logs': ['Waiting for server activity...']})
-            return jsonify({'logs': [line.strip() for line in lines[-50:]]})
+        size = os.path.getsize(LOG_FILE)
+        if size == 0:
+            return jsonify({'logs': ['Waiting for server activity...']})
+        with open(LOG_FILE, 'rb') as f:
+            read_bytes = min(size, 16384)
+            f.seek(size - read_bytes)
+            chunk = f.read().decode('utf-8', errors='replace')
+        lines = [line.strip() for line in chunk.splitlines() if line.strip()]
+        if size > read_bytes and len(lines) > 1:
+            lines = lines[1:]  # Drop potentially partial first line
+        if not lines:
+            return jsonify({'logs': ['Waiting for server activity...']})
+        return jsonify({'logs': lines[-50:]})
     except FileNotFoundError:
         return jsonify({'logs': ['Waiting for server activity...']})
 
@@ -645,6 +680,7 @@ def index():
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
         is_admin=is_admin,
+        show_console=show_console,
         target_module=resolved_module,
         target_record_id=target_record_id,
         target_lat=target_lat,
@@ -695,6 +731,7 @@ def index_with_record(module_name, record_id):
         google_maps_api_key=GOOGLE_MAPS_API_KEY,
         configs=effective_configs,
         is_admin=is_admin,
+        show_console=show_console,
         target_module=resolved_module,
         target_record_id=record_id,
         target_lat=target_lat,
@@ -841,7 +878,7 @@ def settings():
         return redirect(url_for('index'))
     configs = database.get_all_module_configs(session.get('user_id'))
     shared_configs = database.get_shared_configs()
-    show_console = database.get_global_setting('show_console', 'false') == 'true'
+    show_console = bool(session.get('show_console', False) and (session.get('is_admin', False) or session.get('impersonator_admin')))
     crm_domain = database.get_global_setting('crmplus_domain', '')
     crm_org_id = database.get_global_setting('crmplus_orgid', '')
     webhook_token = database.get_global_setting('ZohoMap_Webhook_Token', '')
@@ -1088,6 +1125,7 @@ def save_global_setting():
         if key == 'show_console':
             session['show_console'] = (value == 'true')
             session.modified = True  # Force Flask to commit the session cookie
+            database.set_global_setting('show_console', 'false')  # Clear any legacy global DB value
             return jsonify({'success': True})
 
         # All other keys (crmplus_domain, crmplus_orgid, etc.) are admin-only globals

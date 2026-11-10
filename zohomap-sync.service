@@ -9,5 +9,3 @@ Group=www-data
 WorkingDirectory=/var/www/zohomap
 EnvironmentFile=/etc/zohomap/app.env
 ExecStart=/var/www/zohomap/venv/bin/python3 /var/www/zohomap/run_nightly_sync.py
-StandardOutput=append:/var/www/zohomap/debug.log
-StandardError=append:/var/www/zohomap/debug.log
