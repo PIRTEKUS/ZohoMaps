@@ -1497,7 +1497,8 @@ window.applyBoundaryStyles = function(hideOverride) {
             fillColor: color,
             fillOpacity: isHighlighted ? Math.max(0.15, config.fillOpacity + 0.05) : config.fillOpacity,
             visible: visible,
-            clickable: true
+            clickable: true,
+            cursor: 'grab'
         };
     });
 
@@ -1628,6 +1629,7 @@ function renderFranchiseBoundaries() {
             const lbl = new google.maps.Marker({
                 position: centroid,
                 map: window.map,
+                clickable: false,
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
                     scale: 0 // Invisible symbol icon
@@ -1653,9 +1655,9 @@ function renderFranchiseBoundaries() {
     window.map.data.addGeoJson(featureCollection);
     window.applyBoundaryStyles();
     
-    // Info Window tooltip on territory click
+    // Info Window tooltip on territory right-click (left-click closes it if open)
     const boundaryInfoWindow = new google.maps.InfoWindow();
-    window.map.data.addListener('click', event => {
+    window.map.data.addListener('rightclick', event => {
         const name = event.feature.getProperty('name');
         boundaryInfoWindow.setContent(`
             <div style="padding: 0.5rem; color: #1e293b; font-family: inherit; font-size: 0.85rem; font-weight: 500;">
@@ -1664,6 +1666,12 @@ function renderFranchiseBoundaries() {
         `);
         boundaryInfoWindow.setPosition(event.latLng);
         boundaryInfoWindow.open(window.map);
+    });
+    window.map.data.addListener('click', () => {
+        boundaryInfoWindow.close();
+    });
+    window.map.addListener('click', () => {
+        boundaryInfoWindow.close();
     });
 }
 
