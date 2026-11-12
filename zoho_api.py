@@ -130,10 +130,10 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
             params['page_token'] = page_token
         else:
             params['page'] = page
-            if sort_by:
-                params['sort_by'] = sort_by
-            if sort_order:
-                params['sort_order'] = sort_order
+        if sort_by:
+            params['sort_by'] = sort_by
+        if sort_order:
+            params['sort_order'] = sort_order
 
     if fields:
         params['fields'] = ','.join(fields)

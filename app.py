@@ -3280,143 +3280,140 @@ def _nightly_sync_module(admin_token, module_name, config, force_full=False):
                 )
                 return final_count
 
-        # ── MODE B: Weekly Full COQL Keyset Reconciliation Sweep ─────────────────
-        # Uses keyset cursor pagination `WHERE (id > last_id) ORDER BY id ASC LIMIT 0, 2000`
-        # to scan 100% of records in Zoho CRM with NO 100,000-record ceiling.
-        prev_sweep_cutoff = (
-            (last_full_sweep_dt - datetime.timedelta(hours=INCREMENTAL_OVERLAP_HOURS))
-            if last_full_sweep_dt else None
-        )
+        # ── MODE B: Weekly Full Window-Stepped Reconciliation Sweep ───────────────
+        # Steps across 500-page (100,000-record) windows using `sort_by=Modified_Time&sort_order=asc`
+        # + `If-Modified-Since` cursor advancement so modules of ANY size (150k, 500k+) are swept
+        # 100% end-to-end using only the existing ZohoCRM.modules.all OAuth scope.
         log_debug(
-            f"[nightly] {module_name}: running FULL COQL KEYSET SWEEP "
+            f"[nightly] {module_name}: running FULL WINDOW-STEPPED SWEEP "
             f"(existing_cached={len(cache_by_id)}, last_full_sweep={last_full_sweep_dt.isoformat() if last_full_sweep_dt else 'never'})."
         )
 
         initial_cached_count = len(cache_by_id)
         active_ids = set()
-        last_id = 0
-        coql_batch_num = 0
         completed_all_pages = True
         upserted_count = 0
         cache_hits = 0
-        skipped_known_unmappable = 0
         unmappable_stale_ids = []
 
-        def _hydrate_and_save_ids(id_list):
-            nonlocal admin_token, upserted_count
-            for idx in range(0, len(id_list), 100):
-                chunk_ids = id_list[idx:idx + 100]
-                resp = zoho_api.fetch_module_records(
-                    module_name, admin_token, fields=sync_fields_list, ids=chunk_ids
+        window_num = 0
+        window_since_dt = None
+        window_since_iso = None
+        need_more_windows = True
+
+        while need_more_windows:
+            window_num += 1
+            if window_num > 50:
+                log_debug(f"[nightly] {module_name}: reached 50-window (5,000,000-record) safety cap — skipping stale deletion.")
+                completed_all_pages = False
+                break
+
+            log_debug(
+                f"[nightly] {module_name}: starting sweep window {window_num} "
+                f"(If-Modified-Since={window_since_iso or 'beginning'})."
+            )
+
+            page = 1
+            page_token = None
+            more_records = True
+            need_more_windows = False
+            last_window_mod_dt = None
+
+            while more_records:
+                log_debug(f"[nightly] {module_name} [window {window_num}]: fetching page {page}...", level='DEBUG')
+                data = zoho_api.fetch_module_records(
+                    module_name, admin_token, fields=sync_fields_list,
+                    page=page, page_token=page_token,
+                    modified_since=window_since_iso,
+                    sort_by='Modified_Time', sort_order='asc'
                 )
-                if 'code' in resp and resp.get('status') == 'error' and resp.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+
+                if 'code' in data and data.get('status') == 'error' and data.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+                    log_debug(f"[nightly] Access token expired on {module_name} window {window_num} page {page} — refreshing admin token and retrying...")
                     refreshed_token = _get_admin_access_token(force_refresh=True)
                     if refreshed_token:
                         admin_token = refreshed_token
-                        resp = zoho_api.fetch_module_records(
-                            module_name, admin_token, fields=sync_fields_list, ids=chunk_ids
+                        data = zoho_api.fetch_module_records(
+                            module_name, admin_token, fields=sync_fields_list,
+                            page=page, page_token=page_token,
+                            modified_since=window_since_iso,
+                            sort_by='Modified_Time', sort_order='asc'
                         )
-                if 'code' in resp and resp.get('status') == 'error':
-                    log_debug(f"[nightly] {module_name}: API error hydrating {len(chunk_ids)} IDs: {resp.get('code')} – {resp.get('message')}")
-                    return False
 
-                batch_to_save = []
-                for rec in (resp.get('data') or []):
-                    rid = rec.get('id')
+                if 'code' in data and data.get('status') == 'error':
+                    log_debug(
+                        f"[nightly] API error {module_name} window {window_num} page {page}: "
+                        f"{data.get('code')} – {data.get('message')} (aborting sweep without deleting existing cached records)"
+                    )
+                    completed_all_pages = False
+                    break
+
+                rows = data.get('data') or []
+                if not rows:
+                    if more_records and page > 1:
+                        completed_all_pages = False
+                    break
+
+                page_records = []
+                page_hits = 0
+                page_misses = 0
+                for record in rows:
+                    rid = record.get('id')
                     if not rid:
                         continue
                     rid_str = str(rid)
-                    built = _build_global_cache_tuple(rec)
+                    active_ids.add(rid_str)
+
+                    rec_mod = record.get('Modified_Time')
+                    parsed_mod = _parse_iso_utc(rec_mod)
+                    if parsed_mod is not None:
+                        last_window_mod_dt = parsed_mod
+
+                    if _same_modified_time(cache_by_id.get(rid_str), rec_mod):
+                        cache_hits += 1
+                        page_hits += 1
+                        continue
+
+                    page_misses += 1
+                    built = _build_global_cache_tuple(record)
                     if built is not None:
-                        batch_to_save.append(built)
-                        cache_by_id[rid_str] = rec.get('Modified_Time')
+                        page_records.append(built)
+                        cache_by_id[rid_str] = rec_mod
                         upserted_count += 1
                     elif rid_str in cache_by_id:
                         unmappable_stale_ids.append(rid_str)
                         cache_by_id.pop(rid_str, None)
 
-                if batch_to_save:
-                    database.save_global_records_batch(batch_to_save)
-            return True
+                if page_records:
+                    database.save_global_records_batch(page_records)
 
-        while True:
-            coql_batch_num += 1
-            coql = f"select id, Modified_Time from {module_name} where (id > {int(last_id)}) order by id asc limit 0, 2000"
-            coql_resp = zoho_api.coql_query_strict(coql, admin_token)
-
-            if 'code' in coql_resp and coql_resp.get('status') == 'error' and coql_resp.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
-                log_debug(f"[nightly] Access token expired on {module_name} COQL batch {coql_batch_num} — refreshing admin token and retrying...")
-                refreshed_token = _get_admin_access_token(force_refresh=True)
-                if refreshed_token:
-                    admin_token = refreshed_token
-                    coql_resp = zoho_api.coql_query_strict(coql, admin_token)
-
-            if 'code' in coql_resp and coql_resp.get('status') == 'error':
                 log_debug(
-                    f"[nightly] COQL error on {module_name} batch {coql_batch_num}: "
-                    f"{coql_resp.get('code')} – {coql_resp.get('message')} (aborting sweep without deleting existing cached records)"
-                )
-                completed_all_pages = False
-                break
-
-            rows = coql_resp.get('data') or []
-            if not rows:
-                break
-
-            miss_ids = []
-            max_id_in_batch = last_id
-            for row in rows:
-                rid = row.get('id')
-                if not rid:
-                    continue
-                rid_str = str(rid)
-                try:
-                    rid_int = int(rid_str)
-                    if rid_int > max_id_in_batch:
-                        max_id_in_batch = rid_int
-                except ValueError:
-                    pass
-
-                active_ids.add(rid_str)
-                zoho_mod = row.get('Modified_Time')
-
-                if rid_str in cache_by_id:
-                    if _same_modified_time(cache_by_id.get(rid_str), zoho_mod):
-                        cache_hits += 1
-                        continue
-                    miss_ids.append(rid_str)
-                else:
-                    # Record is not in global cache. If we completed a prior full sweep and this record's
-                    # Modified_Time predates that sweep, we already verified it had no mappable address.
-                    if prev_sweep_cutoff is not None:
-                        rec_mod_dt = _parse_iso_utc(zoho_mod)
-                        if rec_mod_dt is not None and rec_mod_dt < prev_sweep_cutoff:
-                            skipped_known_unmappable += 1
-                            continue
-                    miss_ids.append(rid_str)
-
-            if miss_ids:
-                if not _hydrate_and_save_ids(miss_ids):
-                    completed_all_pages = False
-                    break
-
-            if coql_batch_num == 1 or coql_batch_num % 10 == 0:
-                log_debug(
-                    f"[nightly] {module_name} COQL sweep batch {coql_batch_num}: "
-                    f"scanned={len(active_ids)}, hits={cache_hits}, hydrated={len(miss_ids)}, upserted_total={upserted_count}."
+                    f"[nightly] {module_name} [window {window_num}] page {page} summary: "
+                    f"{page_hits} hits, {page_misses} misses, saved={len(page_records)}, scanned_unique={len(active_ids)}.",
+                    level=('INFO' if (page == 1 or page % 50 == 0) else 'DEBUG')
                 )
 
-            if max_id_in_batch <= last_id:
-                break
-            last_id = max_id_in_batch
+                info = data.get('info', {})
+                more_records = info.get('more_records', False)
+                page_token = info.get('next_page_token')
 
-            more_coql = coql_resp.get('info', {}).get('more_records', len(rows) >= 2000)
-            if not more_coql and len(rows) < 2000:
-                break
+                if more_records:
+                    if page >= 500:
+                        # Step cleanly to next 100k window BEFORE Zoho's page 501 PAGINATION_LIMIT_EXCEEDED!
+                        if last_window_mod_dt is None:
+                            log_debug(f"[nightly] {module_name}: missing Modified_Time cursor at page 500 — aborting window step.")
+                            completed_all_pages = False
+                            break
+                        next_since_dt = last_window_mod_dt - datetime.timedelta(seconds=1)
+                        if window_since_dt is not None and next_since_dt <= window_since_dt:
+                            next_since_dt = window_since_dt + datetime.timedelta(seconds=1)
+                        window_since_dt = next_since_dt
+                        window_since_iso = window_since_dt.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+                        need_more_windows = True
+                        break
+                    page += 1
 
-            if coql_batch_num >= 2000:
-                log_debug(f"[nightly] {module_name}: reached 4,000,000-record COQL safety cap — skipping stale deletion.")
-                completed_all_pages = False
+            if not completed_all_pages:
                 break
 
         if unmappable_stale_ids:
@@ -3434,7 +3431,7 @@ def _nightly_sync_module(admin_token, module_name, config, force_full=False):
             database.set_global_setting(f'last_full_sweep_{module_name}', sync_start_utc.isoformat())
             database.set_global_setting(f'last_module_sync_{module_name}', sync_start_utc.isoformat())
         elif not completed_all_pages:
-            log_debug(f"[nightly] {module_name}: COQL sweep ended early; preserving existing cached records in DB.")
+            log_debug(f"[nightly] {module_name}: full sweep ended early; preserving existing cached records in DB.")
 
         final_count = max(0, len(cache_by_id) - stale_deleted)
         try:
@@ -3443,9 +3440,9 @@ def _nightly_sync_module(admin_token, module_name, config, force_full=False):
             pass
 
         log_debug(
-            f"[nightly] {module_name}: FULL COQL SWEEP complete — "
+            f"[nightly] {module_name}: FULL SWEEP complete ({window_num} window(s)) — "
             f"crm_scanned={len(active_ids)}, hits={cache_hits}, upserted={upserted_count}, "
-            f"unmappable_skipped={skipped_known_unmappable}, stale_deleted={stale_deleted}, total_cached={final_count}."
+            f"stale_deleted={stale_deleted}, total_cached={final_count}."
         )
         return final_count
     finally:
