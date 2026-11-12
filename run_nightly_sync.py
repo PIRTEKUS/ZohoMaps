@@ -58,10 +58,12 @@ from app import app, do_nightly_sync
 # ── Run sync inside Flask application context ─────────────────────────────────
 module_filter = sys.argv[1] if len(sys.argv) > 1 else None
 
-with app.app_context():
-    # If a specific module is requested, treat as manual/override run
-    is_manual = bool(module_filter)
-    result = do_nightly_sync(is_manual=is_manual, module_filter=module_filter)
-    print(json.dumps(result, indent=2))
-    if 'error' in result:
-        sys.exit(1)
+if __name__ == '__main__':
+    with app.app_context():
+        # If a specific module is requested, treat as manual/override run
+        is_manual = bool(module_filter)
+        result = do_nightly_sync(is_manual=is_manual, module_filter=module_filter)
+        print(json.dumps(result, indent=2))
+        if 'error' in result:
+            sys.exit(1)
+        sys.exit(0)

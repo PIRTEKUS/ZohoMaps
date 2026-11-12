@@ -587,6 +587,72 @@ def get_global_records_by_module(module_name):
         results.append(r)
     return results
 
+def get_global_records_sync_meta(module_name):
+    """Lightweight metadata lookup for nightly sync: returns {str(id): modified_time_str}
+    for global records that already have valid coordinates, avoiding loading full JSON blobs into RAM."""
+    conn = get_db_connection()
+    try:
+        if IS_POSTGRES:
+            query = """
+                SELECT id, COALESCE((record_data::jsonb)->>'_modified_time', (record_data::jsonb)->>'Modified_Time') AS mod_time
+                FROM module_records
+                WHERE user_id = ? AND module_name = ? AND lat IS NOT NULL AND lng IS NOT NULL
+            """
+        else:
+            query = """
+                SELECT id, COALESCE(json_extract(record_data, '$._modified_time'), json_extract(record_data, '$.Modified_Time')) AS mod_time
+                FROM module_records
+                WHERE user_id = ? AND module_name = ? AND lat IS NOT NULL AND lng IS NOT NULL
+            """
+        rows = exec_query(conn, query, (GLOBAL_USER, module_name), fetchall=True)
+        return {str(row['id']): row['mod_time'] for row in (rows or [])}
+    finally:
+        conn.close()
+
+def update_global_module_color(module_name, color):
+    """Ensure all cached global records for a module reflect the current configured marker color."""
+    if not color:
+        return
+    conn = get_db_connection()
+    try:
+        exec_query(conn, "UPDATE module_records SET color = ? WHERE user_id = ? AND module_name = ? AND color != ?", (color, GLOBAL_USER, module_name, color))
+        if not IS_POSTGRES:
+            conn.commit()
+    finally:
+        conn.close()
+
+def try_acquire_sync_lock(lock_id=897316137):
+    """Acquire a PostgreSQL session-level advisory lock so only 1 server runs nightly sync.
+    Returns (acquired_bool, lock_conn)."""
+    if not IS_POSTGRES:
+        return True, None
+    conn = get_db_connection()
+    try:
+        row = exec_query(conn, "SELECT pg_try_advisory_lock(?) AS locked", (lock_id,), fetchone=True)
+        if row and row.get('locked'):
+            return True, conn
+        conn.close()
+        return False, None
+    except Exception:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return True, None
+
+def release_sync_lock(lock_conn, lock_id=897316137):
+    """Release the PostgreSQL session advisory lock and close the dedicated connection."""
+    if not lock_conn:
+        return
+    try:
+        exec_query(lock_conn, "SELECT pg_advisory_unlock(?)", (lock_id,))
+    except Exception:
+        pass
+    try:
+        lock_conn.close()
+    except Exception:
+        pass
+
 def save_global_records_batch(records):
 
     """Batch-save records into the global cache (user_id='__global__').

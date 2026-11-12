@@ -2989,9 +2989,9 @@ def _nightly_sync_module(admin_token, module_name, config):
 
     sync_fields_list = build_fields_list(module_name, config, field_metadata)
 
-    # Load existing global cache to optimize geocoding/sync costs
-    cached_records = database.get_global_records_by_module(module_name)
-    cache_by_id = {str(r['id']): r for r in cached_records}
+    # Load lightweight sync metadata ({id: modified_time}) instead of full JSON records (~95% less RAM)
+    cache_by_id = database.get_global_records_sync_meta(module_name)
+    database.update_global_module_color(module_name, config.get('marker_color'))
     active_ids = set()
 
     count = 0
@@ -3032,20 +3032,9 @@ def _nightly_sync_module(admin_token, module_name, config):
                 continue
 
             zoho_modified = record.get('Modified_Time')
-            cached_item = cache_by_id.get(str(record_id))
+            cached_modified = cache_by_id.get(str(record_id))
 
-            use_cache = False
-            if cached_item:
-                cached_modified = cached_item['record_data'].get('_modified_time')
-                if cached_modified and zoho_modified and cached_modified == zoho_modified:
-                    if cached_item['lat'] is not None and cached_item['lng'] is not None:
-                        use_cache = True
-
-            if use_cache:
-                page_records.append((
-                    record_id, module_name, cached_item['name'], cached_item['lat'], cached_item['lng'],
-                    config['marker_color'], cached_item['record_data'], cached_item['franchise_id']
-                ))
+            if cached_modified and zoho_modified and cached_modified == str(zoho_modified):
                 active_ids.add(str(record_id))
                 count += 1
                 cache_hits += 1
@@ -3139,11 +3128,18 @@ def _nightly_sync_module(admin_token, module_name, config):
     # Soft deletion cleanup of stale records (not returned by Zoho)
     database.delete_stale_global_records(module_name, active_ids)
 
-    # Close persistent database connection
+    # Close persistent database connection and free memory between modules
     db_conn.close()
+    cache_by_id.clear()
+    active_ids.clear()
+    import gc
+    gc.collect()
 
     log_debug(f"[nightly] {module_name}: {count} records saved to global cache.")
     return count
+
+
+MAX_NIGHTLY_SYNC_RETRIES = 3
 
 
 def do_nightly_sync(is_manual=False, module_filter=None):
@@ -3181,7 +3177,9 @@ def do_nightly_sync(is_manual=False, module_filter=None):
         yesterday_est = now_est - datetime.timedelta(days=1)
         latest_scheduled_run = yesterday_est.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
         
-    # 2. If running automatically, enforce activation switch and scheduling window
+    window_key = latest_scheduled_run.isoformat()
+
+    # 2. If running automatically, enforce activation switch, schedule window, and retry limit
     if not is_manual:
         # Check if enabled globally
         if nightly_sync_enabled != 'true':
@@ -3193,87 +3191,125 @@ def do_nightly_sync(is_manual=False, module_filter=None):
         if last_sync_str:
             try:
                 last_sync_dt = datetime.datetime.fromisoformat(last_sync_str)
-                # Convert both datetimes to UTC or compare them with timezone-awareness
-                if last_sync_dt.tzinfo is None:
-                    last_sync_utc = last_sync_dt.astimezone(datetime.timezone.utc)
-                else:
-                    last_sync_utc = last_sync_dt.astimezone(datetime.timezone.utc)
-                
+                last_sync_utc = last_sync_dt.astimezone(datetime.timezone.utc)
                 latest_scheduled_run_utc = latest_scheduled_run.astimezone(datetime.timezone.utc)
                 
                 if last_sync_utc >= latest_scheduled_run_utc:
-                    log_debug(f"[nightly] Auto-sync already executed for the latest schedule window ({latest_scheduled_run.isoformat()}). Exiting.")
+                    log_debug(f"[nightly] Auto-sync already executed for the latest schedule window ({window_key}). Exiting.")
                     return {'status': 'already_run', 'message': 'Auto-sync already executed for the latest schedule window.'}
             except Exception as parse_err:
                 log_debug(f"[nightly] Error parsing last_nightly_sync timestamp '{last_sync_str}': {parse_err}. Proceeding anyway.")
-    
-    # 3. Retrieve auth token
-    admin_token = _get_admin_access_token()
-    if not admin_token:
-        log_debug("[nightly] FAILED: No admin token. Admin must log in to ZohoMap first.")
-        database.set_global_setting('last_nightly_sync_results',
-                                    json.dumps({'error': 'No admin token available'}))
-        return {'error': 'No admin token available'}
 
-    configs = database.get_shared_configs()
-    if module_filter:
-        configs = [c for c in configs if c['module_name'].lower() == module_filter.lower()]
-    if not configs:
-        log_debug(f"[nightly] No shared module configs found for filter '{module_filter}' — nothing to sync.")
-        return {'error': 'No shared configs'}
-
-    results = {}
-    total = 0
-    start = datetime.datetime.now(datetime.timezone.utc)
-    
-    # Determine the day of the week to use for scheduling (e.g. 'Mon', 'Tue')
-    run_day = latest_scheduled_run.strftime('%a')
-    log_debug(f"[nightly] Running scheduler check for day of week: {run_day}")
-
-    for config in configs:
-        module_name = config['module_name']
-        
-        # Check scheduling for this module if it's an automatic run
-        if not is_manual:
-            module_schedule = schedule.get(module_name, [])
-            if run_day not in module_schedule:
-                log_debug(f"[nightly] {module_name}: Skipped (not scheduled for {run_day})")
-                results[module_name] = f'Skipped (not scheduled for {run_day})'
-                continue
-                
+        # Check retry limit for this schedule window
+        retry_window = database.get_global_setting('nightly_sync_retry_window', '')
         try:
-            log_debug(f"[nightly] Syncing module: {module_name}")
-            count = _nightly_sync_module(admin_token, module_name, config)
-            results[module_name] = count
-            total += count
+            retry_count = int(database.get_global_setting('nightly_sync_retry_count', '0') or '0')
+        except ValueError:
+            retry_count = 0
+        if retry_window != window_key:
+            retry_count = 0
+        if retry_count >= MAX_NIGHTLY_SYNC_RETRIES:
+            log_debug(f"[nightly] Max retry limit ({MAX_NIGHTLY_SYNC_RETRIES}) reached for schedule window {window_key}. Skipping until next scheduled run.")
+            return {'status': 'max_retries', 'message': f'Max retry limit ({MAX_NIGHTLY_SYNC_RETRIES}) reached for window {window_key}.'}
+
+    # 2b. Acquire single-server PostgreSQL advisory lock so only 1 EC2 instance runs sync
+    acquired, lock_conn = database.try_acquire_sync_lock()
+    if not acquired:
+        log_debug("[nightly] Another server/process is currently running the nightly sync (DB advisory lock held). Exiting.")
+        return {'status': 'locked', 'message': 'Another server is currently running the sync.'}
+
+    try:
+        if not is_manual:
+            # Re-verify retry count under lock and record this attempt BEFORE starting heavy work
+            retry_window = database.get_global_setting('nightly_sync_retry_window', '')
+            try:
+                retry_count = int(database.get_global_setting('nightly_sync_retry_count', '0') or '0')
+            except ValueError:
+                retry_count = 0
+            if retry_window != window_key:
+                retry_count = 0
+            if retry_count >= MAX_NIGHTLY_SYNC_RETRIES:
+                log_debug(f"[nightly] Max retry limit ({MAX_NIGHTLY_SYNC_RETRIES}) reached for schedule window {window_key}. Exiting.")
+                return {'status': 'max_retries', 'message': f'Max retry limit ({MAX_NIGHTLY_SYNC_RETRIES}) reached for window {window_key}.'}
+            database.set_global_setting('nightly_sync_retry_window', window_key)
+            database.set_global_setting('nightly_sync_retry_count', str(retry_count + 1))
+            log_debug(f"[nightly] Starting scheduled sync attempt {retry_count + 1}/{MAX_NIGHTLY_SYNC_RETRIES} for window {window_key}")
+
+        # 3. Retrieve auth token
+        admin_token = _get_admin_access_token()
+        if not admin_token:
+            log_debug("[nightly] FAILED: No admin token. Admin must log in to ZohoMap first.")
+            database.set_global_setting('last_nightly_sync_results',
+                                        json.dumps({'error': 'No admin token available'}))
+            return {'error': 'No admin token available'}
+
+        configs = database.get_shared_configs()
+        if module_filter:
+            configs = [c for c in configs if c['module_name'].lower() == module_filter.lower()]
+        if not configs:
+            log_debug(f"[nightly] No shared module configs found for filter '{module_filter}' — nothing to sync.")
+            return {'error': 'No shared configs'}
+
+        database.set_global_setting('nightly_sync_running', 'true')
+        results = {}
+        total = 0
+        start = datetime.datetime.now(datetime.timezone.utc)
+        
+        # Determine the day of the week to use for scheduling (e.g. 'Mon', 'Tue')
+        run_day = latest_scheduled_run.strftime('%a')
+        log_debug(f"[nightly] Running scheduler check for day of week: {run_day}")
+
+        for config in configs:
+            module_name = config['module_name']
+            
+            # Check scheduling for this module if it's an automatic run
+            if not is_manual:
+                module_schedule = schedule.get(module_name, [])
+                if run_day not in module_schedule:
+                    log_debug(f"[nightly] {module_name}: Skipped (not scheduled for {run_day})")
+                    results[module_name] = f'Skipped (not scheduled for {run_day})'
+                    continue
+                    
+            try:
+                log_debug(f"[nightly] Syncing module: {module_name}")
+                count = _nightly_sync_module(admin_token, module_name, config)
+                results[module_name] = count
+                total += count
+            except Exception as e:
+                log_debug(f"[nightly] {module_name}: ERROR – {e}")
+                results[module_name] = f'error: {e}'
+
+        # Rebuild user territory mappings cache nightly
+        try:
+            _refresh_user_mappings(admin_token)
         except Exception as e:
-            log_debug(f"[nightly] {module_name}: ERROR – {e}")
-            results[module_name] = f'error: {e}'
+            log_debug(f"[nightly] Error rebuilding user mappings: {e}")
 
-    # Rebuild user territory mappings cache nightly
-    try:
-        _refresh_user_mappings(admin_token)
-    except Exception as e:
-        log_debug(f"[nightly] Error rebuilding user mappings: {e}")
+        # Refresh module URL map cache nightly (keeps non-admin links working)
+        try:
+            _cache_module_url_map(admin_token)
+        except Exception as e:
+            log_debug(f"[nightly] Error refreshing module URL map: {e}")
 
-    # Refresh module URL map cache nightly (keeps non-admin links working)
-    try:
-        _cache_module_url_map(admin_token)
-    except Exception as e:
-        log_debug(f"[nightly] Error refreshing module URL map: {e}")
+        # Refresh CRM Franchises cache nightly
+        try:
+            _get_all_franchises(admin_token, force_refresh=True)
+        except Exception as e:
+            log_debug(f"[nightly] Error refreshing franchises cache: {e}")
 
-    # Refresh CRM Franchises cache nightly
-    try:
-        _get_all_franchises(admin_token, force_refresh=True)
-    except Exception as e:
-        log_debug(f"[nightly] Error refreshing franchises cache: {e}")
-
-    elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
-    database.set_global_setting('last_nightly_sync',
-                                datetime.datetime.now(datetime.timezone.utc).isoformat())
-    database.set_global_setting('last_nightly_sync_results', json.dumps(results))
-    log_debug(f"[nightly] Complete in {elapsed}s. Total: {total} records. {results}")
-    return {'total': total, 'elapsed_seconds': elapsed, 'results': results}
+        elapsed = round((datetime.datetime.now(datetime.timezone.utc) - start).total_seconds())
+        database.set_global_setting('last_nightly_sync',
+                                    datetime.datetime.now(datetime.timezone.utc).isoformat())
+        database.set_global_setting('last_nightly_sync_results', json.dumps(results))
+        database.set_global_setting('nightly_sync_retry_count', '0')
+        log_debug(f"[nightly] Complete in {elapsed}s. Total: {total} records. {results}")
+        return {'total': total, 'elapsed_seconds': elapsed, 'results': results}
+    finally:
+        try:
+            database.set_global_setting('nightly_sync_running', 'false')
+        except Exception:
+            pass
+        database.release_sync_lock(lock_conn)
 
 
 # Flask CLI command — called by the systemd timer via run_nightly_sync.py

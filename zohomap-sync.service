@@ -4,6 +4,7 @@ After=network.target zohomap.service
 
 [Service]
 Type=oneshot
+TimeoutStartSec=3600
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/zohomap
