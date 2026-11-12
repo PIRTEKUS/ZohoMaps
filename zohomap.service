@@ -12,8 +12,9 @@ WorkingDirectory=/var/www/zohomap
 # The leading '-' makes EnvironmentFile optional — the service starts even if
 # the file is missing (standalone servers using setup_secrets.sh write this file;
 # AWS instances get it from load_aws_secrets.sh via zohomap-secrets.service).
+Environment="LOG_LEVEL=INFO"
 EnvironmentFile=-/etc/zohomap/app.env
-ExecStart=/var/www/zohomap/venv/bin/gunicorn --workers 3 --worker-class gthread --threads 4 --timeout 600 --graceful-timeout 3 --bind unix:zohomap.sock -m 007 app:app
+ExecStart=/var/www/zohomap/venv/bin/gunicorn --workers 3 --worker-class gthread --threads 4 --log-level info --timeout 600 --graceful-timeout 3 --bind unix:zohomap.sock -m 007 app:app
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=5

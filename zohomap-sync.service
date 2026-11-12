@@ -8,5 +8,6 @@ TimeoutStartSec=3600
 User=www-data
 Group=www-data
 WorkingDirectory=/var/www/zohomap
+Environment="LOG_LEVEL=INFO"
 EnvironmentFile=/etc/zohomap/app.env
 ExecStart=/var/www/zohomap/venv/bin/python3 /var/www/zohomap/run_nightly_sync.py

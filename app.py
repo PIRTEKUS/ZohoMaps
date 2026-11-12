@@ -142,20 +142,52 @@ elif "zohoapis.in" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.in"
 elif "zohoapis.jp" in zoho_api.ZOHO_API_URL: ZOHO_TLD = "zoho.jp"
 
 
-def log_debug(msg):
+import logging
+LOG_LEVEL = (
+    os.environ.get('LOG_LEVEL')
+    or _app_cfg.get('log_level')
+    or ('DEBUG' if os.environ.get('FLASK_ENV') == 'development' else 'INFO')
+).upper()
+IS_DEBUG_LOGGING = (LOG_LEVEL == 'DEBUG')
+logging.basicConfig(level=logging.DEBUG if IS_DEBUG_LOGGING else logging.INFO)
+app.logger.setLevel(logging.DEBUG if IS_DEBUG_LOGGING else logging.INFO)
+
+_DEBUG_ONLY_PREFIXES = (
+    'DEBUG',
+    '[display_filter]',
+    '--- Raw Zoho API Data',
+    'RAW ',
+    '--- Extracted Record Data',
+    'Querying local cache for area:',
+    'Found ',
+    'Debounced background area-sync',
+    'Triggering async background area-sync',
+    '[/api/modules] Request received',
+    '[/api/modules] Token source',
+    '[/api/modules] Response keys',
+    '[field-options] Searching',
+    '[field-options] Found',
+)
+
+def log_debug(msg, level=None):
+    """Application logger: respects LOG_LEVEL (INFO in production, DEBUG in development)."""
+    msg_str = str(msg)
+    if not IS_DEBUG_LOGGING:
+        if level == 'DEBUG' or msg_str.startswith(_DEBUG_ONLY_PREFIXES):
+            return
     try:
-        print(msg)
+        print(msg_str)
     except Exception:
         try:
-            print(str(msg).encode('ascii', errors='replace').decode('ascii'))
+            print(msg_str.encode('ascii', errors='replace').decode('ascii'))
         except Exception:
             pass
     try:
         _trim_log_file_if_needed()
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{ts}] {msg}\n")
-    except Exception as e:
+            f.write(f"[{ts}] {msg_str}\n")
+    except Exception:
         pass
 
 def extract_val(val):
@@ -3019,7 +3051,7 @@ def _nightly_sync_module(admin_token, module_name, config):
 
     db_conn = database.get_db_connection()
     while more_records:
-        log_debug(f"[nightly] {module_name}: fetching page {page}...")
+        log_debug(f"[nightly] {module_name}: fetching page {page}...", level='DEBUG')
         data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
                                              page=page, page_token=page_token)
 
@@ -3043,7 +3075,7 @@ def _nightly_sync_module(admin_token, module_name, config):
             break
 
         records_fetched = len(data['data'])
-        log_debug(f"[nightly] {module_name}: fetched {records_fetched} records for page {page}.")
+        log_debug(f"[nightly] {module_name}: fetched {records_fetched} records for page {page}.", level='DEBUG')
 
         page_records = []
         should_fetch_details = (module_name != 'Ship_To_Addresses')
@@ -3136,7 +3168,7 @@ def _nightly_sync_module(admin_token, module_name, config):
                 active_ids.add(str(record.get('id')))
                 count += 1
 
-        log_debug(f"[nightly] {module_name} page {page} summary: {cache_hits} cache hits, {cache_misses} cache misses. Saving batch of {len(page_records)} records...")
+        log_debug(f"[nightly] {module_name} page {page} summary: {cache_hits} cache hits, {cache_misses} cache misses. Saving batch of {len(page_records)} records...", level=('INFO' if (page == 1 or page % 50 == 0) else 'DEBUG'))
         if page_records:
             database.save_global_records_batch(page_records)
 
@@ -3173,7 +3205,7 @@ MAX_NIGHTLY_SYNC_RETRIES = 3
 def do_nightly_sync(is_manual=False, module_filter=None):
     """Orchestrates the nightly full sync of all shared modules into the global cache.
     Called by the systemd timer (via run_nightly_sync.py) and the admin manual trigger."""
-    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}, filter={module_filter}) ==========")
+    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}, filter={module_filter}) ==========", level=('INFO' if is_manual else 'DEBUG'))
     
     # 1. Load configuration settings
     nightly_sync_enabled = database.get_global_setting('nightly_sync_enabled', 'true')
@@ -3223,7 +3255,7 @@ def do_nightly_sync(is_manual=False, module_filter=None):
                 latest_scheduled_run_utc = latest_scheduled_run.astimezone(datetime.timezone.utc)
                 
                 if last_sync_utc >= latest_scheduled_run_utc:
-                    log_debug(f"[nightly] Auto-sync already executed for the latest schedule window ({window_key}). Exiting.")
+                    log_debug(f"[nightly] Auto-sync already executed for the latest schedule window ({window_key}). Exiting.", level='DEBUG')
                     return {'status': 'already_run', 'message': 'Auto-sync already executed for the latest schedule window.'}
             except Exception as parse_err:
                 log_debug(f"[nightly] Error parsing last_nightly_sync timestamp '{last_sync_str}': {parse_err}. Proceeding anyway.")
@@ -3513,7 +3545,8 @@ def build_display_record_data(raw_record, config, field_label_map):
     # If the record is already in the display format (e.g. from an old cache), return it as is.
     # Display format records do not have the Zoho 'id' field in their dictionary payload.
     if 'id' not in raw_record:
-        log_debug(f"[display_filter] BYPASS: 'id' not in raw_record. keys: {list(raw_record.keys())}")
+        if IS_DEBUG_LOGGING:
+            log_debug(f"[display_filter] BYPASS: 'id' not in raw_record. keys: {list(raw_record.keys())}", level='DEBUG')
         return raw_record
 
     display_data = {}
@@ -3559,7 +3592,8 @@ def build_display_record_data(raw_record, config, field_label_map):
     if 'Modified_Time' in raw_record and '_modified_time' not in display_data:
         display_data['_modified_time'] = str(raw_record['Modified_Time'])
 
-    log_debug(f"[display_filter] Filtered record. Raw keys: {list(raw_record.keys())[:10]}... | config: {fields} | result keys: {list(display_data.keys())}")
+    if IS_DEBUG_LOGGING:
+        log_debug(f"[display_filter] Filtered record. Raw keys: {list(raw_record.keys())[:10]}... | config: {fields} | result keys: {list(display_data.keys())}", level='DEBUG')
 
     return display_data
 

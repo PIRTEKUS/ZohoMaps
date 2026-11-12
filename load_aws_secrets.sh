@@ -78,6 +78,7 @@ lines = [
     '',
     'PATH=/var/www/zohomap/venv/bin',
     'FLASK_ENV=production',
+    f"LOG_LEVEL={secret.get('LOG_LEVEL', 'INFO').strip() or 'INFO'}",
 ]
 
 missing = []
