@@ -230,6 +230,10 @@ def geocode_address(address, conn=None):
             database.set_cached_geocode(address, loc['lat'], loc['lng'], conn=conn)
             log_debug(f"Success! Cached coordinates for {address}.")
             return loc['lat'], loc['lng']
+        elif resp.get('status') == 'ZERO_RESULTS':
+            # Cache permanent ZERO_RESULTS as NULL so future syncs never re-bill Google Geocoding for the same unmappable address
+            database.set_cached_geocode(address, None, None, conn=conn)
+            log_debug(f"Geocode returned ZERO_RESULTS for {address} (cached negative result).")
         else:
             log_debug(f"Geocode failed for {address}: {resp.get('status')}")
     except Exception as e:
@@ -888,16 +892,29 @@ def callback():
 
 @app.route('/logout')
 def logout():
-    # Revoke the token at Zoho's server BEFORE clearing the session.
-    # This forces a fresh consent screen on next login so all current scopes are re-granted.
-    # Without this, Zoho continues issuing tokens with OLD limited scopes even after re-login.
+    # Revoke standard user tokens at Zoho BEFORE clearing the session, EXCEPT when
+    # the token belongs to an Admin (or an Admin currently impersonating another user)
+    # or matches the shared server-wide admin_refresh_token / ZOHO_REFRESH_TOKEN.
+    # Revoking the shared admin token would break background syncs and team-user territory lookups.
     refresh_token = session.get('refresh_token')
     if refresh_token:
-        try:
-            zoho_api.revoke_token(refresh_token)
-            log_debug(f"OAuth token revoked for user: {session.get('user_name', 'unknown')}")
-        except Exception as e:
-            log_debug(f"Token revocation failed (non-fatal): {e}")
+        env_rt = os.environ.get('ZOHO_REFRESH_TOKEN', '').strip()
+        db_enc = database.get_global_setting('admin_refresh_token', '')
+        db_rt = decrypt_token(db_enc) if db_enc else ''
+        is_shared_service_token = (
+            (env_rt and refresh_token == env_rt)
+            or (db_rt and refresh_token == db_rt)
+            or bool(session.get('is_admin'))
+            or bool(session.get('impersonator_admin'))
+        )
+        if is_shared_service_token:
+            log_debug(f"Session cleared without revoking shared admin token for user: {session.get('user_name', 'unknown')}")
+        else:
+            try:
+                zoho_api.revoke_token(refresh_token)
+                log_debug(f"OAuth token revoked for user: {session.get('user_name', 'unknown')}")
+            except Exception as e:
+                log_debug(f"Token revocation failed (non-fatal): {e}")
     session.clear()
     return redirect(url_for('login'))
 
@@ -2963,10 +2980,19 @@ _NIGHTLY_FRANCHISE_FIELD_MAP = {
 _nightly_sync_running = False   # simple guard (per-worker); timer uses its own process
 
 
-def _nightly_sync_module(admin_token, module_name, config):
-    """Fetch ALL records for one module and store in the global cache (__global__ user).
-    Returns the number of records saved."""
-    log_debug(f"[nightly] Starting module: {module_name}")
+FULL_SWEEP_INTERVAL_DAYS = 7
+INCREMENTAL_OVERLAP_HOURS = 24
+
+
+def _nightly_sync_module(admin_token, module_name, config, force_full=False):
+    """Sync one module into the global cache (__global__ user).
+    - Daily runs use fast Incremental Sync (If-Modified-Since + /deleted) with zero 100k ceiling.
+    - Weekly runs (every FULL_SWEEP_INTERVAL_DAYS, on cold cache, or when force_full=True) execute a
+      COQL keyset reconciliation sweep (WHERE id > last_id ORDER BY id ASC LIMIT 0, 2000) to cover
+      100% of records past Zoho's 100,000 REST pagination cap and prune any missed CRM deletions.
+    Returns the total global record count cached for this module."""
+    sync_start_utc = datetime.datetime.now(datetime.timezone.utc)
+    log_debug(f"[nightly] Starting module: {module_name} (force_full={force_full})")
     fields = config['field_mappings']
 
     # Build field list (same logic as do_sync_module)
@@ -3005,8 +3031,6 @@ def _nightly_sync_module(admin_token, module_name, config):
     if franchise_field:
         fetch_fields.add(franchise_field)
 
-    fetch_fields_list = list(fetch_fields)
-
     # Field label map for record_data display labels
     field_metadata = zoho_api.fetch_module_fields(module_name, admin_token)
     field_label_map = {}
@@ -3024,7 +3048,6 @@ def _nightly_sync_module(admin_token, module_name, config):
     # Load lightweight sync metadata ({id: modified_time}) instead of full JSON records (~95% less RAM)
     cache_by_id = database.get_global_records_sync_meta(module_name)
     database.update_global_module_color(module_name, config.get('marker_color'))
-    active_ids = set()
 
     def _same_modified_time(t1, t2):
         if not t1 or not t2:
@@ -3037,175 +3060,408 @@ def _nightly_sync_module(admin_token, module_name, config):
         except Exception:
             return False
 
-    count = 0
-    page = 1
-    page_token = None
-    more_records = True
-    completed_all_pages = True
-
-    # Nightly sync: always fetch ALL records with no API-level filter.
-    # Zoho's v3 search API does not support 'is_not_null' — it silently returns
-    # 0 records instead of an error.  Records with no mappable location are
-    # discarded locally when geocoding fails (see address_parts logic below).
-    log_debug(f"[nightly] {module_name}: fetching all records (full global cache).")
+    def _parse_iso_utc(ts_str):
+        if not ts_str:
+            return None
+        try:
+            dt = datetime.datetime.fromisoformat(str(ts_str))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            return dt.astimezone(datetime.timezone.utc)
+        except Exception:
+            return None
 
     db_conn = database.get_db_connection()
-    while more_records:
-        log_debug(f"[nightly] {module_name}: fetching page {page}...", level='DEBUG')
-        data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
-                                             page=page, page_token=page_token)
 
-        if 'code' in data and data.get('status') == 'error' and data.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
-            log_debug(f"[nightly] Access token expired on {module_name} page {page} — refreshing admin token and retrying...")
-            refreshed_token = _get_admin_access_token(force_refresh=True)
-            if refreshed_token:
-                admin_token = refreshed_token
-                data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
-                                                     page=page, page_token=page_token)
+    def _build_global_cache_tuple(record):
+        """Convert a raw Zoho record dict into a mappable global cache tuple, or None if unmappable."""
+        lat, lng = None, None
+        name_raw = record.get(name_field, record.get('Name',
+                              record.get('Full_Name', f"{module_name} {record.get('id')}")))
+        name = str(extract_val(name_raw))
 
-        if 'code' in data and data.get('status') == 'error':
-            log_debug(f"[nightly] API error {module_name} on page {page}: {data.get('code')} – {data.get('message')} (aborting module sync without deleting existing cached records)")
-            completed_all_pages = False
-            break
+        # Coordinates first
+        lat_field = fields.get('latitude')
+        lng_field = fields.get('longitude')
+        if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
+            try:
+                lat = float(record[lat_field])
+                lng = float(record[lng_field])
+            except (ValueError, TypeError):
+                pass
 
-        if 'data' not in data or not data['data']:
-            log_debug(f"[nightly] {module_name}: no data returned for page {page}.")
-            if more_records and page > 1:
-                completed_all_pages = False
-            break
+        # Fallback to address geocoding
+        if lat is None or lng is None:
+            address_parts = []
+            for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
+                val = extract_val(record.get(fields.get(k)))
+                if val and not _is_null_string(val):
+                    address_parts.append(str(val))
+            full_address = ', '.join(address_parts)
+            if full_address:
+                lat, lng = geocode_address(full_address, conn=db_conn)
 
-        records_fetched = len(data['data'])
-        log_debug(f"[nightly] {module_name}: fetched {records_fetched} records for page {page}.", level='DEBUG')
+        if lat is None or lng is None:
+            return None
 
-        page_records = []
-        should_fetch_details = (module_name != 'Ship_To_Addresses')
-        cache_hits = 0
-        cache_misses = 0
-        for record in data['data']:
-            record_id = record.get('id')
-            if not record_id:
+        # Extract franchise ID — handles regular lookup (dict),
+        # multiuserlookup fields (list of dicts, e.g. Select_Your_Franchise1), and name fallbacks
+        franchise_id = None
+        for ff in ([franchise_field] if franchise_field else []) + ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
+            if not ff:
                 continue
+            fval = record.get(ff)
+            if isinstance(fval, list):
+                for item in fval:
+                    if isinstance(item, dict) and item.get('id'):
+                        franchise_id = str(item['id'])
+                        break
+                    elif item and not _is_null_string(item):
+                        franchise_id = str(item)
+                        break
+            elif isinstance(fval, dict) and fval.get('id'):
+                franchise_id = str(fval['id'])
+            elif fval and not _is_null_string(fval):
+                franchise_id = str(fval)
+            if franchise_id:
+                break
 
-            zoho_modified = record.get('Modified_Time')
-            cached_modified = cache_by_id.get(str(record_id))
+        record_data = record.copy()
+        if record.get('Modified_Time') and '_modified_time' not in record_data:
+            record_data['_modified_time'] = str(record.get('Modified_Time'))
 
-            if _same_modified_time(cached_modified, zoho_modified):
-                active_ids.add(str(record_id))
-                count += 1
-                cache_hits += 1
-                continue
+        if df.get('enabled') and df.get('parent_link_field'):
+            raw_parent = record.get(df['parent_link_field'])
+            if isinstance(raw_parent, dict) and 'id' in raw_parent:
+                record_data['_dup_parent_id'] = raw_parent['id']
+            elif raw_parent:
+                record_data['_dup_parent_id'] = str(raw_parent)
 
-            cache_misses += 1
-            # Cache miss: geocode (record already has all fields fetched by fetch_module_records)
+        return (
+            record.get('id'), module_name, name, lat, lng,
+            config['marker_color'], record_data, franchise_id
+        )
 
-            lat, lng = None, None
-            name_raw = record.get(name_field, record.get('Name',
-                                  record.get('Full_Name', f"{module_name} {record.get('id')}")))
-            name = str(extract_val(name_raw))
+    # Determine sync mode: Incremental (daily) vs. Full COQL Sweep (weekly or cold start)
+    last_mod_sync_dt = _parse_iso_utc(database.get_global_setting(f'last_module_sync_{module_name}', ''))
+    last_full_sweep_dt = _parse_iso_utc(database.get_global_setting(f'last_full_sweep_{module_name}', ''))
 
-            # Coordinates first
-            lat_field = fields.get('latitude')
-            lng_field = fields.get('longitude')
-            if lat_field and lng_field and record.get(lat_field) and record.get(lng_field):
-                try:
-                    lat = float(record[lat_field])
-                    lng = float(record[lng_field])
-                except (ValueError, TypeError):
-                    pass
+    needs_full_sweep = (
+        force_full
+        or len(cache_by_id) == 0
+        or last_full_sweep_dt is None
+        or (sync_start_utc - last_full_sweep_dt) >= datetime.timedelta(days=FULL_SWEEP_INTERVAL_DAYS)
+    )
+    if not needs_full_sweep and last_mod_sync_dt is None:
+        last_mod_sync_dt = last_full_sweep_dt
 
-            # Fallback to address geocoding
-            if lat is None or lng is None:
-                address_parts = []
-                for k in ['address1', 'address2', 'city', 'state', 'zip', 'country']:
-                    val = extract_val(record.get(fields.get(k)))
-                    if val and not _is_null_string(val):
-                        address_parts.append(str(val))
-                full_address = ', '.join(address_parts)
-                if full_address:
-                    lat, lng = geocode_address(full_address, conn=db_conn)
+    try:
+        # ── MODE A: Daily Incremental Sync (If-Modified-Since + /deleted) ─────────
+        if not needs_full_sweep and last_mod_sync_dt is not None:
+            since_dt = last_mod_sync_dt - datetime.timedelta(hours=INCREMENTAL_OVERLAP_HOURS)
+            since_iso = since_dt.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+            log_debug(f"[nightly] {module_name}: running INCREMENTAL sync (If-Modified-Since {since_iso}, cached={len(cache_by_id)}).")
 
-            if lat is not None and lng is not None:
-                # Extract franchise ID — handles regular lookup (dict),
-                # multiuserlookup fields (list of dicts, e.g. Select_Your_Franchise1), and name fallbacks
-                franchise_id = None
-                for ff in ([franchise_field] if franchise_field else []) + ['Franchise', 'Select_Your_Franchise1', 'Franchise_Name', 'Franchises', 'Assigned_Franchise', 'Franchise_Lookup']:
-                    if not ff:
+            page = 1
+            page_token = None
+            more_records = True
+            incremental_ok = True
+            upserted_count = 0
+            skipped_unchanged = 0
+            unmappable_stale_ids = []
+
+            while more_records:
+                log_debug(f"[nightly] {module_name} [incremental]: fetching page {page}...", level='DEBUG')
+                data = zoho_api.fetch_module_records(
+                    module_name, admin_token, fields=sync_fields_list,
+                    page=page, page_token=page_token, modified_since=since_iso
+                )
+                if 'code' in data and data.get('status') == 'error' and data.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+                    log_debug(f"[nightly] Access token expired on {module_name} incremental page {page} — refreshing admin token and retrying...")
+                    refreshed_token = _get_admin_access_token(force_refresh=True)
+                    if refreshed_token:
+                        admin_token = refreshed_token
+                        data = zoho_api.fetch_module_records(
+                            module_name, admin_token, fields=sync_fields_list,
+                            page=page, page_token=page_token, modified_since=since_iso
+                        )
+
+                if 'code' in data and data.get('status') == 'error':
+                    if data.get('code') == 'PAGINATION_LIMIT_EXCEEDED':
+                        log_debug(f"[nightly] {module_name}: >100,000 records modified since {since_iso} — escalating to Full COQL Sweep.")
+                        needs_full_sweep = True
+                    else:
+                        log_debug(f"[nightly] API error {module_name} incremental page {page}: {data.get('code')} – {data.get('message')}")
+                    incremental_ok = False
+                    break
+
+                rows = data.get('data') or []
+                if not rows:
+                    break
+
+                page_records = []
+                for record in rows:
+                    rid = record.get('id')
+                    if not rid:
                         continue
-                    fval = record.get(ff)
-                    if isinstance(fval, list):
-                        for item in fval:
-                            if isinstance(item, dict) and item.get('id'):
-                                franchise_id = str(item['id'])
-                                break
-                            elif item and not _is_null_string(item):
-                                franchise_id = str(item)
-                                break
-                    elif isinstance(fval, dict) and fval.get('id'):
-                        franchise_id = str(fval['id'])
-                    elif fval and not _is_null_string(fval):
-                        franchise_id = str(fval)
-                    if franchise_id:
+                    rid_str = str(rid)
+                    if _same_modified_time(cache_by_id.get(rid_str), record.get('Modified_Time')):
+                        skipped_unchanged += 1
+                        continue
+
+                    built = _build_global_cache_tuple(record)
+                    if built is not None:
+                        page_records.append(built)
+                        cache_by_id[rid_str] = record.get('Modified_Time')
+                        upserted_count += 1
+                    elif rid_str in cache_by_id:
+                        # Address was cleared/invalidated on a previously mapped record
+                        unmappable_stale_ids.append(rid_str)
+                        cache_by_id.pop(rid_str, None)
+
+                if page_records:
+                    database.save_global_records_batch(page_records)
+
+                info = data.get('info', {})
+                more_records = info.get('more_records', False)
+                page_token = info.get('next_page_token')
+                if more_records:
+                    page += 1
+
+            if unmappable_stale_ids:
+                database.delete_records_by_ids(module_name, unmappable_stale_ids)
+
+            # Fetch and prune records deleted in Zoho CRM since since_iso
+            deleted_count = 0
+            if incremental_ok and not needs_full_sweep:
+                del_page = 1
+                del_more = True
+                deleted_ids = []
+                while del_more:
+                    del_resp = zoho_api.fetch_deleted_records(
+                        module_name, admin_token, modified_since=since_iso, page=del_page
+                    )
+                    if 'code' in del_resp and del_resp.get('status') == 'error' and del_resp.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+                        refreshed_token = _get_admin_access_token(force_refresh=True)
+                        if refreshed_token:
+                            admin_token = refreshed_token
+                            del_resp = zoho_api.fetch_deleted_records(
+                                module_name, admin_token, modified_since=since_iso, page=del_page
+                            )
+                    if 'code' in del_resp and del_resp.get('status') == 'error':
+                        log_debug(f"[nightly] {module_name}: warning fetching deleted records page {del_page}: {del_resp.get('code')} – {del_resp.get('message')}")
+                        incremental_ok = False
                         break
 
-                # Store raw payload
-                record_data = record.copy()
-                if record.get('Modified_Time') and '_modified_time' not in record_data:
-                    record_data['_modified_time'] = str(record.get('Modified_Time'))
+                    del_rows = del_resp.get('data') or []
+                    for drec in del_rows:
+                        did = drec.get('id')
+                        if did:
+                            deleted_ids.append(str(did))
+                            cache_by_id.pop(str(did), None)
 
-                # Store parent link ID for client-side deduplication
-                df = fields.get('duplicate_filter', {})
-                if df.get('enabled') and df.get('parent_link_field'):
-                    raw_parent = record.get(df['parent_link_field'])
-                    if isinstance(raw_parent, dict) and 'id' in raw_parent:
-                        record_data['_dup_parent_id'] = raw_parent['id']
-                    elif raw_parent:
-                        record_data['_dup_parent_id'] = str(raw_parent)
+                    del_info = del_resp.get('info', {})
+                    del_more = del_info.get('more_records', False)
+                    if del_more:
+                        del_page += 1
+                    if del_page > 500:
+                        break
 
-                page_records.append((
-                    record.get('id'), module_name, name, lat, lng,
-                    config['marker_color'], record_data, franchise_id
-                ))
-                active_ids.add(str(record.get('id')))
-                count += 1
+                if deleted_ids:
+                    deleted_count = database.delete_records_by_ids(module_name, deleted_ids)
 
-        log_debug(f"[nightly] {module_name} page {page} summary: {cache_hits} cache hits, {cache_misses} cache misses. Saving batch of {len(page_records)} records...", level=('INFO' if (page == 1 or page % 50 == 0) else 'DEBUG'))
-        if page_records:
-            database.save_global_records_batch(page_records)
+                if incremental_ok:
+                    database.set_global_setting(f'last_module_sync_{module_name}', sync_start_utc.isoformat())
 
-        info = data.get('info', {})
-        more_records = info.get('more_records', False)
-        page_token = info.get('next_page_token')
-        if more_records:
-            page += 1
-        if page > 5000:
-            log_debug(f"[nightly] {module_name}: reached 5000-page safety cap — skipping stale record deletion.")
-            completed_all_pages = False
-            break
+                final_count = len(cache_by_id)
+                log_debug(
+                    f"[nightly] {module_name}: INCREMENTAL sync complete — "
+                    f"upserted={upserted_count}, unchanged={skipped_unchanged}, deleted={deleted_count}, total_cached={final_count}."
+                )
+                return final_count
 
-    # Soft deletion cleanup of stale records (ONLY if all pages completed without error!)
-    if completed_all_pages and len(active_ids) > 0:
-        database.delete_stale_global_records(module_name, active_ids)
-    elif not completed_all_pages:
-        log_debug(f"[nightly] {module_name}: pagination ended early; preserving existing cached records in DB.")
+        # ── MODE B: Weekly Full COQL Keyset Reconciliation Sweep ─────────────────
+        # Uses keyset cursor pagination `WHERE (id > last_id) ORDER BY id ASC LIMIT 0, 2000`
+        # to scan 100% of records in Zoho CRM with NO 100,000-record ceiling.
+        prev_sweep_cutoff = (
+            (last_full_sweep_dt - datetime.timedelta(hours=INCREMENTAL_OVERLAP_HOURS))
+            if last_full_sweep_dt else None
+        )
+        log_debug(
+            f"[nightly] {module_name}: running FULL COQL KEYSET SWEEP "
+            f"(existing_cached={len(cache_by_id)}, last_full_sweep={last_full_sweep_dt.isoformat() if last_full_sweep_dt else 'never'})."
+        )
 
-    # Close persistent database connection and free memory between modules
-    db_conn.close()
-    cache_by_id.clear()
-    active_ids.clear()
-    import gc
-    gc.collect()
+        initial_cached_count = len(cache_by_id)
+        active_ids = set()
+        last_id = 0
+        coql_batch_num = 0
+        completed_all_pages = True
+        upserted_count = 0
+        cache_hits = 0
+        skipped_known_unmappable = 0
+        unmappable_stale_ids = []
 
-    log_debug(f"[nightly] {module_name}: {count} records saved to global cache.")
-    return count
+        def _hydrate_and_save_ids(id_list):
+            nonlocal admin_token, upserted_count
+            for idx in range(0, len(id_list), 100):
+                chunk_ids = id_list[idx:idx + 100]
+                resp = zoho_api.fetch_module_records(
+                    module_name, admin_token, fields=sync_fields_list, ids=chunk_ids
+                )
+                if 'code' in resp and resp.get('status') == 'error' and resp.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+                    refreshed_token = _get_admin_access_token(force_refresh=True)
+                    if refreshed_token:
+                        admin_token = refreshed_token
+                        resp = zoho_api.fetch_module_records(
+                            module_name, admin_token, fields=sync_fields_list, ids=chunk_ids
+                        )
+                if 'code' in resp and resp.get('status') == 'error':
+                    log_debug(f"[nightly] {module_name}: API error hydrating {len(chunk_ids)} IDs: {resp.get('code')} – {resp.get('message')}")
+                    return False
+
+                batch_to_save = []
+                for rec in (resp.get('data') or []):
+                    rid = rec.get('id')
+                    if not rid:
+                        continue
+                    rid_str = str(rid)
+                    built = _build_global_cache_tuple(rec)
+                    if built is not None:
+                        batch_to_save.append(built)
+                        cache_by_id[rid_str] = rec.get('Modified_Time')
+                        upserted_count += 1
+                    elif rid_str in cache_by_id:
+                        unmappable_stale_ids.append(rid_str)
+                        cache_by_id.pop(rid_str, None)
+
+                if batch_to_save:
+                    database.save_global_records_batch(batch_to_save)
+            return True
+
+        while True:
+            coql_batch_num += 1
+            coql = f"select id, Modified_Time from {module_name} where (id > {int(last_id)}) order by id asc limit 0, 2000"
+            coql_resp = zoho_api.coql_query_strict(coql, admin_token)
+
+            if 'code' in coql_resp and coql_resp.get('status') == 'error' and coql_resp.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+                log_debug(f"[nightly] Access token expired on {module_name} COQL batch {coql_batch_num} — refreshing admin token and retrying...")
+                refreshed_token = _get_admin_access_token(force_refresh=True)
+                if refreshed_token:
+                    admin_token = refreshed_token
+                    coql_resp = zoho_api.coql_query_strict(coql, admin_token)
+
+            if 'code' in coql_resp and coql_resp.get('status') == 'error':
+                log_debug(
+                    f"[nightly] COQL error on {module_name} batch {coql_batch_num}: "
+                    f"{coql_resp.get('code')} – {coql_resp.get('message')} (aborting sweep without deleting existing cached records)"
+                )
+                completed_all_pages = False
+                break
+
+            rows = coql_resp.get('data') or []
+            if not rows:
+                break
+
+            miss_ids = []
+            max_id_in_batch = last_id
+            for row in rows:
+                rid = row.get('id')
+                if not rid:
+                    continue
+                rid_str = str(rid)
+                try:
+                    rid_int = int(rid_str)
+                    if rid_int > max_id_in_batch:
+                        max_id_in_batch = rid_int
+                except ValueError:
+                    pass
+
+                active_ids.add(rid_str)
+                zoho_mod = row.get('Modified_Time')
+
+                if rid_str in cache_by_id:
+                    if _same_modified_time(cache_by_id.get(rid_str), zoho_mod):
+                        cache_hits += 1
+                        continue
+                    miss_ids.append(rid_str)
+                else:
+                    # Record is not in global cache. If we completed a prior full sweep and this record's
+                    # Modified_Time predates that sweep, we already verified it had no mappable address.
+                    if prev_sweep_cutoff is not None:
+                        rec_mod_dt = _parse_iso_utc(zoho_mod)
+                        if rec_mod_dt is not None and rec_mod_dt < prev_sweep_cutoff:
+                            skipped_known_unmappable += 1
+                            continue
+                    miss_ids.append(rid_str)
+
+            if miss_ids:
+                if not _hydrate_and_save_ids(miss_ids):
+                    completed_all_pages = False
+                    break
+
+            if coql_batch_num == 1 or coql_batch_num % 10 == 0:
+                log_debug(
+                    f"[nightly] {module_name} COQL sweep batch {coql_batch_num}: "
+                    f"scanned={len(active_ids)}, hits={cache_hits}, hydrated={len(miss_ids)}, upserted_total={upserted_count}."
+                )
+
+            if max_id_in_batch <= last_id:
+                break
+            last_id = max_id_in_batch
+
+            more_coql = coql_resp.get('info', {}).get('more_records', len(rows) >= 2000)
+            if not more_coql and len(rows) < 2000:
+                break
+
+            if coql_batch_num >= 2000:
+                log_debug(f"[nightly] {module_name}: reached 4,000,000-record COQL safety cap — skipping stale deletion.")
+                completed_all_pages = False
+                break
+
+        if unmappable_stale_ids:
+            database.delete_records_by_ids(module_name, unmappable_stale_ids)
+
+        stale_deleted = 0
+        if completed_all_pages and len(active_ids) > 0:
+            if initial_cached_count > 1000 and len(active_ids) < (initial_cached_count * 0.5):
+                log_debug(
+                    f"[nightly] SAFETY GUARD: {module_name} returned only {len(active_ids)} active IDs vs "
+                    f"{initial_cached_count} cached — skipping mass stale deletion."
+                )
+            else:
+                stale_deleted = database.delete_stale_global_records(module_name, active_ids)
+            database.set_global_setting(f'last_full_sweep_{module_name}', sync_start_utc.isoformat())
+            database.set_global_setting(f'last_module_sync_{module_name}', sync_start_utc.isoformat())
+        elif not completed_all_pages:
+            log_debug(f"[nightly] {module_name}: COQL sweep ended early; preserving existing cached records in DB.")
+
+        final_count = max(0, len(cache_by_id) - stale_deleted)
+        try:
+            final_count = database.get_global_record_counts().get(module_name, final_count)
+        except Exception:
+            pass
+
+        log_debug(
+            f"[nightly] {module_name}: FULL COQL SWEEP complete — "
+            f"crm_scanned={len(active_ids)}, hits={cache_hits}, upserted={upserted_count}, "
+            f"unmappable_skipped={skipped_known_unmappable}, stale_deleted={stale_deleted}, total_cached={final_count}."
+        )
+        return final_count
+    finally:
+        db_conn.close()
+        cache_by_id.clear()
+        import gc
+        gc.collect()
 
 
 MAX_NIGHTLY_SYNC_RETRIES = 3
 
 
-def do_nightly_sync(is_manual=False, module_filter=None):
-    """Orchestrates the nightly full sync of all shared modules into the global cache.
+def do_nightly_sync(is_manual=False, module_filter=None, force_full=False):
+    """Orchestrates nightly sync of shared modules into the global cache (incremental daily + weekly COQL full sweep).
     Called by the systemd timer (via run_nightly_sync.py) and the admin manual trigger."""
-    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}, filter={module_filter}) ==========", level=('INFO' if is_manual else 'DEBUG'))
+    log_debug(f"[nightly] ========== Auto-Sync Check (is_manual={is_manual}, filter={module_filter}, force_full={force_full}) ==========", level=('INFO' if is_manual else 'DEBUG'))
     
     # 1. Load configuration settings
     nightly_sync_enabled = database.get_global_setting('nightly_sync_enabled', 'true')
@@ -3333,7 +3589,7 @@ def do_nightly_sync(is_manual=False, module_filter=None):
             try:
                 admin_token = _get_admin_access_token() or admin_token
                 log_debug(f"[nightly] Syncing module: {module_name}")
-                count = _nightly_sync_module(admin_token, module_name, config)
+                count = _nightly_sync_module(admin_token, module_name, config, force_full=force_full)
                 results[module_name] = count
                 total += count
             except Exception as e:
@@ -3394,12 +3650,16 @@ def trigger_nightly_sync():
     if _nightly_sync_running:
         return jsonify({'error': 'Sync already in progress — check debug.log for status'}), 409
 
+    req_body = request.get_json(silent=True) or {}
+    force_full = bool(req_body.get('force_full', False))
+    module_filter = req_body.get('module')
+
     def _run():
         global _nightly_sync_running
         _nightly_sync_running = True
         database.set_global_setting('nightly_sync_running', 'true')
         try:
-            do_nightly_sync(is_manual=True)
+            do_nightly_sync(is_manual=True, module_filter=module_filter, force_full=force_full)
         finally:
             _nightly_sync_running = False
             database.set_global_setting('nightly_sync_running', 'false')

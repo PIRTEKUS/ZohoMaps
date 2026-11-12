@@ -113,27 +113,40 @@ def revoke_token(token):
     response = requests.post(f"{ZOHO_ACCOUNTS_URL}/oauth/v2/token/revoke", data=data, timeout=10)
     return response.status_code == 200
 
-def fetch_module_records(module_name, access_token, fields=None, page=1, page_token=None):
+def fetch_module_records(module_name, access_token, fields=None, page=1, page_token=None,
+                         modified_since=None, ids=None, sort_by=None, sort_order=None):
     headers = {
         'Authorization': f'Zoho-oauthtoken {access_token}'
     }
-    params = {
-        'per_page': 200 # Max per page
-    }
-    if page_token:
-        params['page_token'] = page_token
+    if modified_since:
+        headers['If-Modified-Since'] = str(modified_since)
+
+    params = {}
+    if ids:
+        params['ids'] = ','.join(str(i) for i in ids)
     else:
-        params['page'] = page
-        
+        params['per_page'] = 200  # Max per page
+        if page_token:
+            params['page_token'] = page_token
+        else:
+            params['page'] = page
+            if sort_by:
+                params['sort_by'] = sort_by
+            if sort_order:
+                params['sort_order'] = sort_order
+
     if fields:
         params['fields'] = ','.join(fields)
-        
+
     url = f"{ZOHO_API_URL}/crm/v3/{module_name}"
     for attempt in range(3):
         try:
-            response = requests.get(url, headers=headers, params=params, timeout=20)
-            if response.status_code == 204:
-                return {'data': []} # No content
+            response = requests.get(url, headers=headers, params=params, timeout=25)
+            if response.status_code in (204, 304) or not response.content:
+                if response.status_code in (200, 204, 304):
+                    return {'data': [], 'info': {'more_records': False}}
+                return {'status': 'error', 'code': f'HTTP_{response.status_code}',
+                        'message': f'Empty HTTP {response.status_code} response for {module_name}'}
             if response.status_code != 200:
                 print(f"[ZOHO API ERROR] fetch_module_records for {module_name} failed. Code: {response.status_code}. Response: {response.text}")
             return response.json()
@@ -142,6 +155,41 @@ def fetch_module_records(module_name, access_token, fields=None, page=1, page_to
                 time.sleep(2 * (attempt + 1))
                 continue
             print(f"[ZOHO API NETWORK ERROR] fetch_module_records attempt {attempt+1} failed for {module_name}: {e}")
+            raise e
+
+
+def fetch_deleted_records(module_name, access_token, modified_since=None, page=1, per_page=200):
+    """Fetch deleted CRM record IDs (both recycle bin and permanently deleted).
+    Uses existing ZohoCRM.modules.all scope — no additional OAuth scopes required.
+    """
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}'
+    }
+    if modified_since:
+        headers['If-Modified-Since'] = str(modified_since)
+
+    params = {
+        'type': 'all',
+        'page': page,
+        'per_page': per_page,
+    }
+    url = f"{ZOHO_API_URL}/crm/v3/{module_name}/deleted"
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=20)
+            if response.status_code in (204, 304) or not response.content:
+                if response.status_code in (200, 204, 304):
+                    return {'data': [], 'info': {'more_records': False}}
+                return {'status': 'error', 'code': f'HTTP_{response.status_code}',
+                        'message': f'Empty HTTP {response.status_code} response for {module_name}/deleted'}
+            if response.status_code != 200:
+                print(f"[ZOHO API ERROR] fetch_deleted_records for {module_name} failed. Code: {response.status_code}. Response: {response.text[:300]}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[ZOHO API NETWORK ERROR] fetch_deleted_records attempt {attempt+1} failed for {module_name}: {e}")
             raise e
 
 def fetch_single_record(module_name, record_id, access_token, fields=None):
@@ -242,6 +290,44 @@ def coql_query(select_query, access_token):
     except Exception as e:
         print(f"[ZOHO COQL EXCEPTION] {e}")
     return {'data': []}
+
+
+def coql_query_strict(select_query, access_token):
+    """Execute a COQL query for sync/reconciliation sweeps where API errors must NOT
+    be mistaken for an empty page (204 No Content).
+    Returns {'data': [...], 'info': {...}} on 200/204, or {'status': 'error', 'code': ...} on error.
+    """
+    headers = {
+        'Authorization': f'Zoho-oauthtoken {access_token}',
+        'Content-Type': 'application/json'
+    }
+    url = f"{ZOHO_API_URL}/crm/v5/coql"
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers=headers,
+                                     json={'select_query': select_query}, timeout=30)
+            if response.status_code == 204:
+                return {'data': [], 'info': {'more_records': False}}
+            if response.status_code == 200 and response.content:
+                return response.json()
+            print(f"[ZOHO COQL ERROR] Status {response.status_code}: {response.text[:300]}")
+            if response.content:
+                try:
+                    err_json = response.json()
+                    if isinstance(err_json, dict):
+                        err_json.setdefault('status', 'error')
+                        err_json.setdefault('code', f'HTTP_{response.status_code}')
+                        return err_json
+                except Exception:
+                    pass
+            return {'status': 'error', 'code': f'HTTP_{response.status_code}',
+                    'message': response.text[:200] if response.content else f'HTTP {response.status_code}'}
+        except requests.exceptions.RequestException as e:
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            print(f"[ZOHO COQL NETWORK ERROR] attempt {attempt+1} failed: {e}")
+            return {'status': 'error', 'code': 'NETWORK_ERROR', 'message': str(e)}
 
 def fetch_user_info(access_token):
     """

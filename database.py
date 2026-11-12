@@ -541,9 +541,11 @@ def clear_global_module_records(module_name):
     conn.close()
 
 def delete_stale_global_records(module_name, active_ids):
-    """Delete all global cache records for a module that are NOT in the active_ids list."""
+    """Delete all global cache records for a module that are NOT in the active_ids list.
+    Returns the number of stale IDs deleted."""
     conn = get_db_connection()
     active_ids_set = {str(aid) for aid in active_ids}
+    deleted_count = 0
     try:
         if not active_ids_set:
             exec_query(conn, "DELETE FROM module_records WHERE user_id = ? AND module_name = ?", (GLOBAL_USER, module_name))
@@ -552,18 +554,57 @@ def delete_stale_global_records(module_name, active_ids):
             rows = exec_query(conn, "SELECT id FROM module_records WHERE user_id = ? AND module_name = ?", (GLOBAL_USER, module_name), fetchall=True)
             db_ids = {str(row['id']) for row in rows}
             stale_ids = db_ids - active_ids_set
-            
+
             if stale_ids:
                 stale_ids_list = list(stale_ids)
+                deleted_count = len(stale_ids_list)
                 chunk_size = 500
                 if not IS_POSTGRES:
                     exec_query(conn, 'BEGIN TRANSACTION')
                 for i in range(0, len(stale_ids_list), chunk_size):
                     chunk = stale_ids_list[i:i+chunk_size]
                     placeholders = ', '.join(['?' for _ in chunk])
-                    exec_query(conn, f"DELETE FROM module_records WHERE user_id = ? AND module_name = ? AND id IN ({placeholders})", (GLOBAL_USER, module_name) + tuple(chunk))
+                    exec_query(
+                        conn,
+                        f"DELETE FROM module_records WHERE module_name = ? AND id IN ({placeholders}) AND (user_id = ? OR (lat IS NOT NULL AND lng IS NOT NULL))",
+                        (module_name,) + tuple(chunk) + (GLOBAL_USER,)
+                    )
                 if not IS_POSTGRES:
                     conn.commit()
+        return deleted_count
+    except Exception as e:
+        if not IS_POSTGRES:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise e
+    finally:
+        conn.close()
+
+
+def delete_records_by_ids(module_name, record_ids):
+    """Delete specific CRM record IDs across global and per-user caches for a module.
+    Returns the number of unique IDs processed."""
+    unique_ids = list({str(rid) for rid in (record_ids or []) if rid})
+    if not unique_ids:
+        return 0
+    conn = get_db_connection()
+    try:
+        chunk_size = 500
+        if not IS_POSTGRES:
+            exec_query(conn, 'BEGIN TRANSACTION')
+        for i in range(0, len(unique_ids), chunk_size):
+            chunk = unique_ids[i:i+chunk_size]
+            placeholders = ', '.join(['?' for _ in chunk])
+            exec_query(
+                conn,
+                f"DELETE FROM module_records WHERE module_name = ? AND id IN ({placeholders})",
+                (module_name,) + tuple(chunk)
+            )
+        if not IS_POSTGRES:
+            conn.commit()
+        return len(unique_ids)
     except Exception as e:
         if not IS_POSTGRES:
             try:
