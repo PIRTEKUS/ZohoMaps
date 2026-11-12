@@ -99,14 +99,19 @@ sudo cp /var/www/zohomap/zohomap.nginx.conf /etc/nginx/sites-available/zohomap
 sudo ln -sf /etc/nginx/sites-available/zohomap /etc/nginx/sites-enabled/zohomap
 sudo nginx -t && sudo systemctl reload nginx
 
-# 4.5 Install / refresh nightly sync timer
-echo "[4.5/4] Installing nightly sync timer (11pm EST daily)..."
+# 4.5 Install / refresh nightly sync timer (enabled on AWS Prod only; kept off on Dev to avoid burning Geocoding API)
+echo "[4.5/4] Installing nightly sync service files..."
 sudo cp /var/www/zohomap/zohomap-sync.service /etc/systemd/system/
 sudo cp /var/www/zohomap/zohomap-sync.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable zohomap-sync.timer --now
-echo "  ✅ Nightly sync timer active. Next run:"
-systemctl list-timers zohomap-sync.timer --no-pager 2>/dev/null | tail -2 || true
+if $IS_AWS; then
+    sudo systemctl enable zohomap-sync.timer --now
+    echo "  ✅ Nightly sync timer active (AWS Production). Next run:"
+    systemctl list-timers zohomap-sync.timer --no-pager 2>/dev/null | tail -2 || true
+else
+    sudo systemctl disable zohomap-sync.timer --now 2>/dev/null || true
+    echo "  ⏸️  Nightly sync timer kept disabled on Dev/Standalone (prevents duplicate Geocoding/Zoho API usage)."
+fi
 
 
 echo "=========================================="
