@@ -1259,7 +1259,7 @@ def preview_record(module_name):
 
 
 
-def _get_admin_access_token():
+def _get_admin_access_token(force_refresh=False):
     """Get a fresh admin access token using the best available refresh token.
     Uses database-backed caching to prevent concurrent requests from rotating
     and invalidating the refresh token, and to avoid Zoho API rate limits.
@@ -1274,8 +1274,8 @@ def _get_admin_access_token():
     if db_refresh:
         tokens_to_try.append((db_refresh, 'db-token'))
 
-    # First loop: Try to load from cache without making any Zoho network calls
-    for refresh_token, source in tokens_to_try:
+    # First loop: Try to load from cache without making any Zoho network calls (unless force_refresh=True)
+    for refresh_token, source in ([] if force_refresh else tokens_to_try):
         ref_hash = hashlib.sha256(refresh_token.encode()).hexdigest()
         try:
             cached_atk_enc = database.get_global_setting('cached_admin_access_token', '')
@@ -2994,10 +2994,22 @@ def _nightly_sync_module(admin_token, module_name, config):
     database.update_global_module_color(module_name, config.get('marker_color'))
     active_ids = set()
 
+    def _same_modified_time(t1, t2):
+        if not t1 or not t2:
+            return False
+        s1, s2 = str(t1), str(t2)
+        if s1 == s2:
+            return True
+        try:
+            return datetime.datetime.fromisoformat(s1) == datetime.datetime.fromisoformat(s2)
+        except Exception:
+            return False
+
     count = 0
     page = 1
     page_token = None
     more_records = True
+    completed_all_pages = True
 
     # Nightly sync: always fetch ALL records with no API-level filter.
     # Zoho's v3 search API does not support 'is_not_null' — it silently returns
@@ -3011,12 +3023,23 @@ def _nightly_sync_module(admin_token, module_name, config):
         data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
                                              page=page, page_token=page_token)
 
+        if 'code' in data and data.get('status') == 'error' and data.get('code') in ('INVALID_TOKEN', 'AUTHENTICATION_FAILURE'):
+            log_debug(f"[nightly] Access token expired on {module_name} page {page} — refreshing admin token and retrying...")
+            refreshed_token = _get_admin_access_token(force_refresh=True)
+            if refreshed_token:
+                admin_token = refreshed_token
+                data = zoho_api.fetch_module_records(module_name, admin_token, fields=sync_fields_list,
+                                                     page=page, page_token=page_token)
+
         if 'code' in data and data.get('status') == 'error':
-            log_debug(f"[nightly] API error {module_name}: {data.get('code')} – {data.get('message')}")
+            log_debug(f"[nightly] API error {module_name} on page {page}: {data.get('code')} – {data.get('message')} (aborting module sync without deleting existing cached records)")
+            completed_all_pages = False
             break
 
         if 'data' not in data or not data['data']:
             log_debug(f"[nightly] {module_name}: no data returned for page {page}.")
+            if more_records and page > 1:
+                completed_all_pages = False
             break
 
         records_fetched = len(data['data'])
@@ -3034,7 +3057,7 @@ def _nightly_sync_module(admin_token, module_name, config):
             zoho_modified = record.get('Modified_Time')
             cached_modified = cache_by_id.get(str(record_id))
 
-            if cached_modified and zoho_modified and cached_modified == str(zoho_modified):
+            if _same_modified_time(cached_modified, zoho_modified):
                 active_ids.add(str(record_id))
                 count += 1
                 cache_hits += 1
@@ -3122,11 +3145,16 @@ def _nightly_sync_module(admin_token, module_name, config):
         page_token = info.get('next_page_token')
         if more_records:
             page += 1
-        if page > 500:
+        if page > 5000:
+            log_debug(f"[nightly] {module_name}: reached 5000-page safety cap — skipping stale record deletion.")
+            completed_all_pages = False
             break
 
-    # Soft deletion cleanup of stale records (not returned by Zoho)
-    database.delete_stale_global_records(module_name, active_ids)
+    # Soft deletion cleanup of stale records (ONLY if all pages completed without error!)
+    if completed_all_pages and len(active_ids) > 0:
+        database.delete_stale_global_records(module_name, active_ids)
+    elif not completed_all_pages:
+        log_debug(f"[nightly] {module_name}: pagination ended early; preserving existing cached records in DB.")
 
     # Close persistent database connection and free memory between modules
     db_conn.close()
@@ -3235,8 +3263,8 @@ def do_nightly_sync(is_manual=False, module_filter=None):
             database.set_global_setting('nightly_sync_retry_count', str(retry_count + 1))
             log_debug(f"[nightly] Starting scheduled sync attempt {retry_count + 1}/{MAX_NIGHTLY_SYNC_RETRIES} for window {window_key}")
 
-        # 3. Retrieve auth token
-        admin_token = _get_admin_access_token()
+        # 3. Retrieve a fresh 60-minute auth token at the start of sync
+        admin_token = _get_admin_access_token(force_refresh=True) or _get_admin_access_token()
         if not admin_token:
             log_debug("[nightly] FAILED: No admin token. Admin must log in to ZohoMap first.")
             database.set_global_setting('last_nightly_sync_results',
@@ -3271,6 +3299,7 @@ def do_nightly_sync(is_manual=False, module_filter=None):
                     continue
                     
             try:
+                admin_token = _get_admin_access_token() or admin_token
                 log_debug(f"[nightly] Syncing module: {module_name}")
                 count = _nightly_sync_module(admin_token, module_name, config)
                 results[module_name] = count
@@ -3278,6 +3307,9 @@ def do_nightly_sync(is_manual=False, module_filter=None):
             except Exception as e:
                 log_debug(f"[nightly] {module_name}: ERROR – {e}")
                 results[module_name] = f'error: {e}'
+
+        # Refresh token if needed before post-sync metadata refresh steps
+        admin_token = _get_admin_access_token() or admin_token
 
         # Rebuild user territory mappings cache nightly
         try:

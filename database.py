@@ -654,19 +654,27 @@ def release_sync_lock(lock_conn, lock_id=897316137):
         pass
 
 def save_global_records_batch(records):
-
     """Batch-save records into the global cache (user_id='__global__').
     Each record is a tuple: (id, module_name, name, lat, lng, color, record_data_dict, franchise_id)
     """
+    if not records:
+        return
+    # Deduplicate by (id, module_name) keeping the last entry so multi-row ON CONFLICT never sees duplicate keys
+    deduped = {}
+    for rec in records:
+        rid, module_name, name, lat, lng, color, record_data, franchise_id = rec
+        deduped[(str(rid), module_name)] = (GLOBAL_USER, str(rid), module_name, name, lat, lng, color, json.dumps(record_data), franchise_id)
+    rows_to_save = list(deduped.values())
+
     conn = get_db_connection()
     try:
-        exec_query(conn, 'BEGIN TRANSACTION')
-        for rec in records:
-            rid, module_name, name, lat, lng, color, record_data, franchise_id = rec
-            exec_query(conn, '''
+        if IS_POSTGRES:
+            placeholders = ", ".join(["(?, ?, ?, ?, ?, ?, ?, ?, ?)"] * len(rows_to_save))
+            flat_params = [val for row in rows_to_save for val in row]
+            exec_query(conn, f"""
                 INSERT INTO module_records
                     (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES {placeholders}
                 ON CONFLICT(id, module_name, user_id) DO UPDATE SET
                     name=EXCLUDED.name,
                     lat=EXCLUDED.lat,
@@ -674,11 +682,26 @@ def save_global_records_batch(records):
                     color=EXCLUDED.color,
                     record_data=EXCLUDED.record_data,
                     franchise_id=EXCLUDED.franchise_id
-            ''', (GLOBAL_USER, str(rid), module_name, name, lat, lng, color,
-                  json.dumps(record_data), franchise_id))
-        conn.commit()
+            """, tuple(flat_params))
+        else:
+            exec_query(conn, 'BEGIN TRANSACTION')
+            for row in rows_to_save:
+                exec_query(conn, '''
+                    INSERT INTO module_records
+                        (user_id, id, module_name, name, lat, lng, color, record_data, franchise_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id, module_name, user_id) DO UPDATE SET
+                        name=EXCLUDED.name,
+                        lat=EXCLUDED.lat,
+                        lng=EXCLUDED.lng,
+                        color=EXCLUDED.color,
+                        record_data=EXCLUDED.record_data,
+                        franchise_id=EXCLUDED.franchise_id
+                ''', row)
+            conn.commit()
     except Exception as e:
-        conn.rollback()
+        if not IS_POSTGRES:
+            conn.rollback()
         raise e
     finally:
         conn.close()
